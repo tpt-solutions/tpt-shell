@@ -9,7 +9,12 @@
 //!
 //! Unknown envelope versions are rejected. Unknown envelope fields are rejected.
 
-use serde_json::{json, Map, Value};
+use serde_json::{json, Map};
+
+pub use router::{encode, CommandError, Router};
+pub use serde_json::Value;
+
+pub mod router;
 
 /// The only envelope version this crate understands.
 pub const VERSION: u64 = 1;

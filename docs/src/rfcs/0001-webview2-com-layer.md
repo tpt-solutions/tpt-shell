@@ -1,6 +1,6 @@
 # RFC 0001: WebView2 COM layer (Windows backend)
 
-Status: **Proposed.** Awaiting review. No COM code has been written yet.
+Status: **Accepted with recommended defaults** (you asked to follow recommendations). Implemented for environment, controller and webview. Refcount and leak tests remain.
 Spec: §6.1 (Windows backend), §9 (unsafe confined), R3 (COM leaks and crashes), O1 (loader, decided as OfficialLoader).
 Author: TPT Solutions. Date: 2026-10-20.
 
@@ -28,7 +28,7 @@ Interface IIDs come from the same header, for example `IID_ICoreWebView2CreateCo
 
 - Each interface we use is a `#[repr(C)]` struct holding a pointer to a `#[repr(C)]` vtable. The vtable begins with `IUnknown` (QueryInterface, AddRef, Release) and then lists methods in the exact order of the header.
 - Only methods we call are declared, but the slots before them must still be declared as placeholders. Unused slots are typed as `unused_slot: usize`.
-- Each vtable is checked by a test that reads `WebView2.h` from the package and asserts that method names appear in the same order as in our declaration. This catches reordering, which would otherwise cause a crash at runtime. The test runs in CI only when the header is available, and is skipped with a message otherwise.
+- Each slot we call is checked by a test that reads `WebView2.h` from the package and asserts the method at that header index has the name we expect (implemented as `used_slots_match_webview2_header`). Unused slots are placeholders sized from the header, so each called slot sits at its header index. This catches reordering, which would otherwise cause a crash at runtime. The test runs in CI only when the header is available, and is skipped with a message otherwise.
 
 ### Callback handlers
 
@@ -68,3 +68,33 @@ Interface IIDs come from the same header, for example `IID_ICoreWebView2CreateCo
 ## Decision needed
 
 Approve the design (alternative 3) and the defaults above, or change them. Implementation starts after approval.
+
+## Implementation status (2026-10-20)
+
+- Implemented: `loader.rs` (typed environment entry point), `com.rs` (GUID, IUnknown, owning `ComPtr`), `handler.rs` (completion handler), `webview2.rs` (environment, controller, webview wrappers), `window.rs` (hidden window and message pump).
+- Verified on this machine with runtime 155.0.4283.62: environment, controller and webview creation, navigate to string, and reading the document title back.
+- Header check: passes against the NuGet 1.0.4312-prerelease `WebView2.h`.
+- Not yet: refcount and leak tests, `app://` serving, `ExecuteScript`, and event subscriptions.
+- Deviation: the window handle is passed as an `isize` value so the public API has no raw pointer parameters.
+
+## Status update: messaging and app content (2026-10-20)
+
+- Implemented: `event_handler.rs` (two-object event handler), `WebView::on_web_message`, `WebView::post_web_message`, `WebView::on_web_resource_requested`, `WebView::add_web_resource_requested_filter`, `WebResourceRequest::respond`.
+- Verified against runtime 155.0.4283.62: the page posts `ping`, Rust replies `pong`, and the page sets its title to `got-pong`. The test `serves_virtual_host_and_round_trips_a_message` passes.
+- **Deviation from spec §5.4 (needs your decision):** `app://` is not routed to `WebResourceRequested`. With the same filter and handler, `https://tpt-app.localhost` works and `app://` produces no requests. The code uses `APP_ORIGIN = "https://tpt-app.localhost"`.
+  - Recommended (implemented): the virtual https origin. It is simple and verified. Spec §9's "only app:// loads" becomes "only APP_ORIGIN and allowlisted origins load", enforced by navigation policy (not yet built).
+  - Alternative: register `app` as a custom scheme through environment options (`ICoreWebView2CustomSchemeRegistration`). It keeps the name but needs an options COM object, which I have not built.
+- Not yet: `embed_dir!` (assets are inline bytes in the test), the JS shim (`window.tpt.invoke`), NavigationStarting policy, refcount and leak tests.
+
+## Status update: navigation policy (2026-10-20)
+
+- Implemented: `WebView::set_navigation_policy`. It uses `NavigationStarting` (slot 4) and `put_Cancel` (slot 5). Top-level navigations are allowed only for `APP_ORIGIN` and `about:blank`. Anything else is cancelled. A URI that cannot be read is cancelled.
+- Verified against runtime 155.0.4283.62: `https://example.com/` and `file:///C:/Windows/win.ini` are both cancelled, and the app page keeps its title. Test: `blocks_navigation_outside_the_app_origin`.
+- Not yet: `FrameNavigationStarting` (iframes), and redirects are only seen through the top-level event.
+
+## Status update: page runtime and command routing (2026-10-20)
+
+- Implemented: `js/runtime/tpt-shell.js` (`window.tpt.invoke`), injected at document start with `AddScriptToExecuteOnDocumentCreated` (slot 24). `tpt-shell-ipc::Router` parses each page message, dispatches it to a registered handler, and returns the response text.
+- Verified: a page calls `window.tpt.invoke('echo', ...)` and gets its arguments back; then `invoke('nope')` and gets `IPC_UNKNOWN_COMMAND`. Test: `shim_invokes_a_rust_command_and_receives_a_typed_error`.
+- Size: the runtime is 1245 bytes raw and 661 bytes gzipped (budget in spec §7.2: under 4 KB gzipped).
+- Not yet: `tpt.on` for events, capabilities checks in the router, and argument validation against a contract.

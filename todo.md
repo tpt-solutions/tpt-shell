@@ -132,31 +132,31 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Window class registration, `CreateWindowExW`, message loop
 - [ ] Per-monitor-v2 DPI and `WM_DPICHANGED`
 - [ ] RFC 0001 (WebView2 COM layer) approved: proposed, awaiting your review (docs/src/rfcs/0001-webview2-com-layer.md)
-- [ ] Hand-written COM vtables and ref-counted handler macro
-- [ ] COM init on STA thread (not yet; the loader spike does not use COM apartments)
-- [ ] WebView2 Environment + Controller creation
-- [ ] Navigate, navigate to string, execute script
-- [ ] Post web message / WebMessageReceived
-- [ ] Add script on document created
-- [ ] NavigationStarting policy
-- [ ] WebResourceRequested + filters for `app://`
+- [x] Hand-written COM vtables (5 interfaces' used slots, header-checked) and ref-counted completion handlers (a function, not yet a general macro)
+- [ ] COM init on STA thread: done in the runtime test; the app's own UI-thread init comes with the event loop
+- [x] WebView2 Environment + Controller creation (verified against the installed runtime)
+- [x] Navigate and navigate to string (execute script still to do)
+- [x] Post web message / WebMessageReceived (page to Rust and Rust to page, verified)
+- [x] Add script on document created (`add_document_start_script`, verified by the shim test)
+- [x] NavigationStarting policy: top-level navigations outside the app origin are cancelled, fail closed (verified). Frame navigations still to do
+- [x] WebResourceRequested + filters: works for a virtual https origin. DEVIATION: `app://` is not routed to WebResourceRequested on WebView2 (verified); pages use `https://tpt-app.localhost` on Windows. Needs your decision (see RFC 0001 status)
 - [ ] `trait RuntimeLoader`
 - [ ] `RegistryLoader` (own runtime discovery): deferred. Registry key and install folder are confirmed, but the runtime lacks the environment entry point (see O1)
 - [x] `OfficialLoader` (WebView2Loader.dll): loads the DLL, checks all three exports, reads the installed runtime version (verified 155.0.4283.62). Environment and controller creation still to do
 - [x] Decide (O1): OfficialLoader. Licence is BSD-3-Clause (verified from the NuGet LICENSE.txt). RegistryLoader cannot work alone: the runtime lacks the environment entry point. Reversible if you prefer otherwise.
-- [ ] Callbacks marshalled onto UI thread
-- [ ] Unit tests for the COM macro (refcount, QueryInterface, leaks)
+- [x] Callbacks marshalled onto UI thread (completion callbacks run from the UI thread's message pump)
+- [ ] Unit tests for the COM handlers (refcount, QueryInterface, leaks): not yet; the runtime test covers the happy path only
 
 ### Assets and protocol
 - [ ] `embed_dir!` prototype (zstd compression, ETag)
-- [ ] `app://localhost/` serving embedded assets
+- [x] Serving app pages from the virtual origin (inline bytes in the test; `embed_dir!` still to do). DEVIATION from spec ยง5.4 `app://`
 - [ ] Never use `file://`
-- [ ] JS runtime stub (`window.tpt.invoke`) injected at document start
+- [x] JS runtime stub (`window.tpt.invoke`) injected at document start (`js/runtime/tpt-shell.js`, 661 bytes gzipped, verified end to end through the IPC router)
 
 ### Early baselines
 - [ ] First benchmark: binary size, cold start, IPC round trip
 - [ ] R1/R3 mitigations: strict trait boundary documented; leak test harness for COM objects
-- [ ] Done: a Windows hello-world serves embedded assets and round-trips a message
+- [ ] Done: a Windows hello-world serves embedded assets and round-trips a message. Round-trip and serving verified; `embed_dir!` and the JS shim are the remaining gaps
 
 ---
 

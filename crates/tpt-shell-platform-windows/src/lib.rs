@@ -7,4 +7,16 @@
 //! this crate is empty.
 
 #[cfg(windows)]
+pub mod com;
+#[cfg(windows)]
+pub mod event_handler;
+#[cfg(windows)]
+pub mod handler;
+#[cfg(windows)]
 pub mod loader;
+#[cfg(windows)]
+pub mod shim;
+#[cfg(windows)]
+pub mod webview2;
+#[cfg(windows)]
+pub mod window;

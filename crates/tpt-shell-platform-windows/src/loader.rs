@@ -20,6 +20,10 @@ pub const ENTRY_POINTS: [&str; 3] = [
     "GetAvailableCoreWebView2BrowserVersionString",
 ];
 
+/// `HRESULT CreateCoreWebView2EnvironmentWithOptions(browserFolder, userDataFolder, options, handler)`.
+pub type CreateEnvironmentFn =
+    unsafe extern "system" fn(*const u16, *const u16, *mut c_void, *mut c_void) -> i32;
+
 type GetVersionFn =
     unsafe extern "system" fn(browser_folder: *const u16, version: *mut *mut u16) -> i32;
 
@@ -84,6 +88,20 @@ impl OfficialLoader {
         let cname: Vec<u8> = name.bytes().chain(std::iter::once(0)).collect();
         // SAFETY: `module` is a live handle from LoadLibraryW; `cname` is NUL-terminated.
         unsafe { GetProcAddress(self.module, cname.as_ptr()) }
+    }
+
+    /// The environment entry point, typed. Valid while this loader is alive.
+    pub fn create_environment_fn(&self) -> Result<CreateEnvironmentFn, LoadError> {
+        let proc = self
+            .raw_export("CreateCoreWebView2EnvironmentWithOptions")
+            .ok_or(LoadError::MissingExport(
+                "CreateCoreWebView2EnvironmentWithOptions",
+            ))?;
+        // SAFETY: the export has the documented signature (see `CreateEnvironmentFn`), and both
+        // are plain function pointers of the same size. The DLL stays loaded while `self` lives.
+        Ok(unsafe {
+            std::mem::transmute::<unsafe extern "system" fn() -> isize, CreateEnvironmentFn>(proc)
+        })
     }
 
     /// Version of the installed WebView2 Evergreen runtime, for example "155.0.4283.62".
