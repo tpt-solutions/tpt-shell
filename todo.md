@@ -145,7 +145,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] `OfficialLoader` (WebView2Loader.dll): loads the DLL, checks all three exports, reads the installed runtime version (verified 155.0.4283.62). Environment and controller creation still to do
 - [x] Decide (O1): OfficialLoader. Licence is BSD-3-Clause (verified from the NuGet LICENSE.txt). RegistryLoader cannot work alone: the runtime lacks the environment entry point. Reversible if you prefer otherwise.
 - [x] Callbacks marshalled onto UI thread (completion callbacks run from the UI thread's message pump)
-- [ ] Unit tests for the COM handlers (refcount, QueryInterface, leaks): not yet; the runtime test covers the happy path only
+- [x] Unit tests for the COM handlers (refcount, drop once, QueryInterface, owning pointer): done. Leak test: live callback objects return to baseline over 15 controller cycles; process handles stable (254 -> 255)
+- [ ] OPEN: controller creation stalled on the 23rd controller in one environment during a 60-cycle run (30 s timeout; cycles ~9 s). Cause not known. Investigate before the 72 h soak (spec 10.1)
 
 ### Assets and protocol
 - [x] `embed_dir!` prototype: `tpt-shell-macros`, plain bytes, sorted, content types. zstd compression and ETag still to do

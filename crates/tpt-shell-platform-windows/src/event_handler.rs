@@ -43,6 +43,7 @@ pub fn new_event_handler(
     iid: Guid,
     callback: impl FnMut(*mut c_void, *mut c_void) + 'static,
 ) -> *mut c_void {
+    crate::handler::track(1);
     let boxed = Box::new(EventHandler {
         vtbl: &VTBL,
         refs: AtomicU32::new(1),
@@ -85,6 +86,7 @@ unsafe extern "system" fn release_impl(this: *mut c_void) -> u32 {
         .fetch_sub(1, Ordering::AcqRel)
         - 1;
     if remaining == 0 {
+        crate::handler::track(-1);
         drop(Box::from_raw(this as *mut EventHandler));
     }
     remaining
@@ -98,4 +100,54 @@ unsafe extern "system" fn invoke(
     let h = this as *const EventHandler;
     (*(*h).callback.borrow_mut())(sender, args);
     S_OK
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use super::*;
+
+    const IID_TEST: Guid = Guid {
+        data1: 0x7a5c_2e10,
+        data2: 0x1111,
+        data3: 0x2222,
+        data4: [1, 2, 3, 4, 5, 6, 7, 8],
+    };
+
+    struct DropCounter(Rc<Cell<u32>>);
+
+    impl Drop for DropCounter {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    #[test]
+    fn event_callback_runs_each_time_and_is_dropped_on_free() {
+        let before = crate::handler::live();
+        let calls = Rc::new(Cell::new(0));
+        let drops = Rc::new(Cell::new(0));
+        let (c, d) = (calls.clone(), DropCounter(drops.clone()));
+        let h = new_event_handler(IID_TEST, move |_, _| {
+            let _keep = &d;
+            c.set(c.get() + 1);
+        });
+        // SAFETY: `h` is live; the vtable is the one this module built for it.
+        unsafe {
+            let vt = *(h as *const *const EventVtbl);
+            ((*vt).invoke)(h, std::ptr::null_mut(), std::ptr::null_mut());
+            ((*vt).invoke)(h, std::ptr::null_mut(), std::ptr::null_mut());
+            assert_eq!(calls.get(), 2, "an event callback runs every time it fires");
+            assert_eq!(
+                drops.get(),
+                0,
+                "the callback lives until the object is freed"
+            );
+            ((*vt).base.release)(h);
+        }
+        assert_eq!(drops.get(), 1, "callback dropped once, on free");
+        assert_eq!(crate::handler::live(), before, "object freed");
+    }
 }

@@ -12,6 +12,28 @@ use crate::com::{Guid, IUnknownVtbl, E_NOINTERFACE, E_POINTER, HRESULT, IID_IUNK
 
 type Callback = Box<dyn FnOnce(HRESULT, *mut c_void)>;
 
+// Live callback objects on this thread (allocated and not yet freed). Used by leak tests.
+#[cfg(test)]
+thread_local! {
+    static LIVE: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+}
+
+/// Records one callback object allocated (+1) or freed (-1).
+#[cfg(test)]
+pub(crate) fn track(delta: isize) {
+    LIVE.with(|c| c.set(c.get() + delta));
+}
+
+/// Non-test builds do not count.
+#[cfg(not(test))]
+pub(crate) fn track(_delta: isize) {}
+
+/// Callback objects alive on this thread.
+#[cfg(test)]
+pub(crate) fn live() -> isize {
+    LIVE.with(|c| c.get())
+}
+
 #[repr(C)]
 struct HandlerVtbl {
     base: IUnknownVtbl,
@@ -42,6 +64,7 @@ pub fn new_completed_handler(
     iid: Guid,
     callback: impl FnOnce(HRESULT, *mut c_void) + 'static,
 ) -> *mut c_void {
+    track(1);
     let boxed = Box::new(CompletedHandler {
         vtbl: &VTBL,
         refs: AtomicU32::new(1),
@@ -94,6 +117,7 @@ unsafe extern "system" fn release_impl(this: *mut c_void) -> u32 {
         .fetch_sub(1, Ordering::AcqRel)
         - 1;
     if remaining == 0 {
+        track(-1);
         drop(Box::from_raw(this as *mut CompletedHandler));
     }
     remaining
@@ -105,4 +129,151 @@ unsafe extern "system" fn invoke(this: *mut c_void, hr: HRESULT, obj: *mut c_voi
         cb(hr, obj);
     }
     S_OK
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::com::ComPtr;
+
+    const IID_TEST: Guid = Guid {
+        data1: 0x7a5c_1e10,
+        data2: 0x1111,
+        data3: 0x2222,
+        data4: [1, 2, 3, 4, 5, 6, 7, 8],
+    };
+    const IID_OTHER: Guid = Guid {
+        data1: 0x7a5c_1e11,
+        data2: 0x1111,
+        data3: 0x2222,
+        data4: [1, 2, 3, 4, 5, 6, 7, 8],
+    };
+
+    /// Counts how many times the value holding it is dropped.
+    struct DropCounter(Rc<Cell<u32>>);
+
+    impl Drop for DropCounter {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    unsafe fn add_ref(p: *mut c_void) -> u32 {
+        let vt = *(p as *const *const HandlerVtbl);
+        ((*vt).base.add_ref)(p)
+    }
+
+    unsafe fn release_ref(p: *mut c_void) -> u32 {
+        let vt = *(p as *const *const HandlerVtbl);
+        ((*vt).base.release)(p)
+    }
+
+    unsafe fn query(p: *mut c_void, iid: &Guid) -> (HRESULT, *mut c_void) {
+        let vt = *(p as *const *const HandlerVtbl);
+        let mut out = std::ptr::null_mut();
+        let hr = ((*vt).base.query_interface)(p, iid, &mut out);
+        (hr, out)
+    }
+
+    #[test]
+    fn reference_counts_and_frees_once() {
+        let before = live();
+        let calls = Rc::new(Cell::new(0));
+        let drops = Rc::new(Cell::new(0));
+        let (c, d) = (calls.clone(), DropCounter(drops.clone()));
+        let h = new_completed_handler(IID_TEST, move |_, _| {
+            let _keep = &d;
+            c.set(c.get() + 1);
+        });
+        assert_eq!(live(), before + 1);
+        // SAFETY: `h` is a live handler; each call matches the vtable layout.
+        unsafe {
+            assert_eq!(add_ref(h), 2);
+            assert_eq!(release_ref(h), 1);
+            assert_eq!(release_ref(h), 0, "the last release frees the object");
+        }
+        assert_eq!(live(), before, "object freed");
+        assert_eq!(drops.get(), 1, "callback dropped exactly once");
+        assert_eq!(calls.get(), 0, "callback never ran");
+    }
+
+    #[test]
+    fn invoke_runs_the_callback_once_then_drops_it() {
+        let before = live();
+        let calls = Rc::new(Cell::new(0));
+        let drops = Rc::new(Cell::new(0));
+        let (c, d) = (calls.clone(), DropCounter(drops.clone()));
+        let h = new_completed_handler(IID_TEST, move |_, _| {
+            let _keep = &d;
+            c.set(c.get() + 1);
+        });
+        // SAFETY: `h` is live; invoke takes the same arguments the runtime would pass.
+        unsafe {
+            let vt = *(h as *const *const HandlerVtbl);
+            ((*vt).invoke)(h, S_OK, std::ptr::null_mut());
+            ((*vt).invoke)(h, S_OK, std::ptr::null_mut());
+            release_ref(h);
+        }
+        assert_eq!(calls.get(), 1, "a completion callback runs once");
+        assert_eq!(drops.get(), 1, "the callback is dropped after its run");
+        assert_eq!(live(), before, "object freed");
+    }
+
+    #[test]
+    fn query_interface_accepts_iunknown_and_its_own_iid_only() {
+        let before = live();
+        let h = new_completed_handler(IID_TEST, |_, _| {});
+        // SAFETY: `h` is live; every successful QueryInterface adds a reference we release.
+        unsafe {
+            let (hr, out) = query(h, &IID_IUNKNOWN);
+            assert_eq!(hr, S_OK);
+            assert_eq!(out, h);
+            release_ref(out);
+
+            let (hr, out) = query(h, &IID_TEST);
+            assert_eq!(hr, S_OK);
+            release_ref(out);
+
+            let (hr, out) = query(h, &IID_OTHER);
+            assert_eq!(hr, E_NOINTERFACE);
+            assert!(out.is_null());
+
+            let vt = *(h as *const *const HandlerVtbl);
+            let mut out: *mut c_void = std::ptr::null_mut();
+            let hr = ((*vt).base.query_interface)(h, std::ptr::null(), &mut out);
+            assert_eq!(hr, E_POINTER);
+
+            release_ref(h);
+        }
+        assert_eq!(live(), before, "object freed");
+    }
+
+    #[test]
+    fn com_ptr_holds_one_reference_and_releases_it() {
+        let before = live();
+        let drops = Rc::new(Cell::new(0));
+        let d = DropCounter(drops.clone());
+        let h = new_completed_handler(IID_TEST, move |_, _| {
+            let _keep = &d;
+        });
+        // SAFETY: `h` is live. The owning pointer takes one reference and must release exactly that.
+        unsafe {
+            let owned = ComPtr::from_borrowed(h).expect("non-null");
+            assert_eq!(add_ref(h), 3, "owned pointer added one reference");
+            release_ref(h);
+            drop(owned);
+            assert_eq!(
+                add_ref(h),
+                2,
+                "dropping the owned pointer released its reference"
+            );
+            release_ref(h);
+            release_ref(h);
+        }
+        assert_eq!(live(), before, "object freed");
+        assert_eq!(drops.get(), 1, "callback dropped exactly once");
+    }
 }

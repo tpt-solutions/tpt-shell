@@ -1040,6 +1040,99 @@ mod runtime_tests {
         assert!(got, "page title was {title:?}, expected embedded-ok");
     }
 
+    /// Process handle count, for leak checks.
+    fn process_handles() -> u32 {
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount};
+        let mut n = 0u32;
+        // SAFETY: GetCurrentProcess returns a pseudo-handle; `n` is a valid out-pointer.
+        unsafe { GetProcessHandleCount(GetCurrentProcess(), &mut n) };
+        n
+    }
+
+    /// Creates and closes controllers repeatedly. Live callback objects and process handles must
+    /// return to their starting counts. This checks that the COM references balance (spec R3).
+    #[test]
+    fn controller_cycles_do_not_leak() {
+        let Some(loader_path) = std::env::var_os("TPT_WEBVIEW2_LOADER") else {
+            eprintln!("skipped: set TPT_WEBVIEW2_LOADER to run this test");
+            return;
+        };
+        // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
+        let co = unsafe { windows_sys::Win32::System::Com::CoInitializeEx(std::ptr::null(), 2) };
+        assert!(co >= 0, "CoInitializeEx failed: 0x{co:08X}");
+
+        let loader = OfficialLoader::load(Path::new(&loader_path)).expect("loader should load");
+        let create = loader
+            .create_environment_fn()
+            .expect("environment entry point");
+        let window = HiddenWindow::new().expect("hidden window");
+        let data_dir = std::env::temp_dir().join(format!("tpt-shell-leak-{}", std::process::id()));
+
+        let env_slot: Rc<RefCell<Option<Result<Environment, HRESULT>>>> =
+            Rc::new(RefCell::new(None));
+        let slot = env_slot.clone();
+        create_environment(create, &data_dir, move |r| *slot.borrow_mut() = Some(r))
+            .expect("start environment");
+        assert!(
+            pump_until(Duration::from_secs(30), || env_slot.borrow().is_some()),
+            "environment timed out"
+        );
+        let env = env_slot
+            .borrow_mut()
+            .take()
+            .unwrap()
+            .expect("environment creation failed");
+
+        let cycle = |env: &Environment| {
+            let slot: Rc<RefCell<Option<Result<Controller, HRESULT>>>> =
+                Rc::new(RefCell::new(None));
+            let s = slot.clone();
+            env.create_controller(window.hwnd() as isize, move |r| *s.borrow_mut() = Some(r))
+                .expect("start controller");
+            assert!(
+                pump_until(Duration::from_secs(30), || slot.borrow().is_some()),
+                "controller timed out"
+            );
+            let ctrl = slot
+                .borrow_mut()
+                .take()
+                .unwrap()
+                .expect("controller creation failed");
+            ctrl.close().expect("close controller");
+        };
+        let settle = || {
+            pump_until(Duration::from_millis(500), || false);
+        };
+
+        cycle(&env); // warm-up: first use allocates caches the runtime keeps
+        settle();
+        let handles_before = process_handles();
+        let live_before = crate::handler::live();
+
+        for _ in 0..15 {
+            cycle(&env);
+            settle();
+        }
+        settle();
+        let handles_after = process_handles();
+        let live_after = crate::handler::live();
+
+        drop(env);
+        // SAFETY: balances the successful CoInitializeEx above.
+        unsafe { windows_sys::Win32::System::Com::CoUninitialize() };
+        let _ = std::fs::remove_dir_all(&data_dir);
+
+        eprintln!("process handles {handles_before} -> {handles_after}; live callbacks {live_before} -> {live_after}");
+        assert_eq!(
+            live_after, live_before,
+            "callback objects leaked across controller cycles"
+        );
+        assert!(
+            handles_after <= handles_before + 10,
+            "process handles grew from {handles_before} to {handles_after} over 20 cycles"
+        );
+    }
+
     /// Renders HTML in a hidden window and reads the document title back. Needs a loader
     /// (`TPT_WEBVIEW2_LOADER`) and an installed WebView2 runtime. Skipped otherwise.
     #[test]

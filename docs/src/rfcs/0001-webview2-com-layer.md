@@ -105,3 +105,9 @@ Approve the design (alternative 3) and the defaults above, or change them. Imple
 - Verified: the page's `app.js`, served from the embedded set, sets the title. Test: `serves_embedded_assets_from_the_app_origin`.
 - Not yet: zstd compression and ETag (spec §5.4), and the rebuild limitation for added files (documented in the macro).
 - Policy: `Unicode-3.0` added to `deny.toml` with a justification, because `unicode-ident` comes in through `syn`.
+
+## Status update: leak checks (2026-10-21)
+
+- Handler refcount, drop-once, QueryInterface and owning-pointer tests pass (unit tests in handler.rs and event_handler.rs).
+- Controller cycles: live callback objects return to baseline; process handles stable over 15 cycles after warm-up (254 -> 255). Test: controller_cycles_do_not_leak.
+- Open: in a 60-cycle run on one environment, creating the 23rd controller did not complete within 30 s (cycles about 9 s each). Cause unknown; investigate before the soak test. Possible workaround under test: a fresh environment per N controllers (not yet tried).
