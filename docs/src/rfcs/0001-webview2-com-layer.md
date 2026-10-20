@@ -98,3 +98,10 @@ Approve the design (alternative 3) and the defaults above, or change them. Imple
 - Verified: a page calls `window.tpt.invoke('echo', ...)` and gets its arguments back; then `invoke('nope')` and gets `IPC_UNKNOWN_COMMAND`. Test: `shim_invokes_a_rust_command_and_receives_a_typed_error`.
 - Size: the runtime is 1245 bytes raw and 661 bytes gzipped (budget in spec §7.2: under 4 KB gzipped).
 - Not yet: `tpt.on` for events, capabilities checks in the router, and argument validation against a contract.
+
+## Status update: embedded assets (2026-10-20)
+
+- Implemented: `tpt-shell-macros::embed_dir!`. It expands to `&[(path, content_type, bytes)]`, with paths sorted and `/`-separated. The Windows tests embed `fixtures/app` and serve it from the app origin.
+- Verified: the page's `app.js`, served from the embedded set, sets the title. Test: `serves_embedded_assets_from_the_app_origin`.
+- Not yet: zstd compression and ETag (spec §5.4), and the rebuild limitation for added files (documented in the macro).
+- Policy: `Unicode-3.0` added to `deny.toml` with a justification, because `unicode-ident` comes in through `syn`.

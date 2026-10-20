@@ -937,6 +937,109 @@ mod runtime_tests {
         );
     }
 
+    /// Assets compiled into the test binary from `fixtures/app`.
+    static EMBEDDED: &[(&str, &str, &[u8])] = tpt_shell_macros::embed_dir!("../../fixtures/app");
+
+    /// Content type and bytes for an embedded path such as "index.html".
+    fn embedded(path: &str) -> Option<(&'static str, &'static [u8])> {
+        EMBEDDED
+            .iter()
+            .find(|(p, _, _)| *p == path)
+            .map(|(_, content_type, body)| (*content_type, *body))
+    }
+
+    /// Serves embedded files from the app origin, including subresources. The page's script,
+    /// `app.js`, sets the title, so the title proves the embedded file was fetched and run.
+    #[test]
+    fn serves_embedded_assets_from_the_app_origin() {
+        let Some(loader_path) = std::env::var_os("TPT_WEBVIEW2_LOADER") else {
+            eprintln!("skipped: set TPT_WEBVIEW2_LOADER to run this test");
+            return;
+        };
+        assert!(
+            embedded("index.html").is_some(),
+            "embed_dir! found no index.html"
+        );
+
+        // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
+        let co = unsafe { windows_sys::Win32::System::Com::CoInitializeEx(std::ptr::null(), 2) };
+        assert!(co >= 0, "CoInitializeEx failed: 0x{co:08X}");
+
+        let loader = OfficialLoader::load(Path::new(&loader_path)).expect("loader should load");
+        let create = loader
+            .create_environment_fn()
+            .expect("environment entry point");
+        let window = HiddenWindow::new().expect("hidden window");
+        let data_dir = std::env::temp_dir().join(format!("tpt-shell-embed-{}", std::process::id()));
+
+        let env_slot: Rc<RefCell<Option<Result<Environment, HRESULT>>>> =
+            Rc::new(RefCell::new(None));
+        let slot = env_slot.clone();
+        create_environment(create, &data_dir, move |r| *slot.borrow_mut() = Some(r))
+            .expect("start environment");
+        assert!(
+            pump_until(Duration::from_secs(30), || env_slot.borrow().is_some()),
+            "environment timed out"
+        );
+        let env = env_slot
+            .borrow_mut()
+            .take()
+            .unwrap()
+            .expect("environment creation failed");
+
+        let ctrl_slot: Rc<RefCell<Option<Result<Controller, HRESULT>>>> =
+            Rc::new(RefCell::new(None));
+        let slot = ctrl_slot.clone();
+        env.create_controller(window.hwnd() as isize, move |r| {
+            *slot.borrow_mut() = Some(r)
+        })
+        .expect("start controller");
+        assert!(
+            pump_until(Duration::from_secs(30), || ctrl_slot.borrow().is_some()),
+            "controller timed out"
+        );
+        let ctrl = ctrl_slot
+            .borrow_mut()
+            .take()
+            .unwrap()
+            .expect("controller creation failed");
+
+        let web = ctrl.webview().expect("webview");
+        web.add_web_resource_requested_filter(&format!("{APP_ORIGIN}/*"))
+            .expect("filter");
+        web.on_web_resource_requested(move |req| {
+            let uri = req.uri().unwrap_or_default();
+            let path = uri
+                .strip_prefix(APP_ORIGIN)
+                .unwrap_or("")
+                .trim_start_matches('/');
+            let path = if path.is_empty() { "index.html" } else { path };
+            match embedded(path) {
+                Some((content_type, body)) => {
+                    let _ = req.respond(&env, 200, content_type, body);
+                }
+                None => {
+                    let _ = req.respond(&env, 404, "text/plain", b"not found");
+                }
+            }
+        })
+        .expect("resource handler");
+        web.navigate(&format!("{APP_ORIGIN}/index.html"))
+            .expect("navigate");
+
+        let mut title = String::new();
+        let got = pump_until(Duration::from_secs(30), || {
+            title = web.document_title().unwrap_or_default();
+            title == "embedded-ok"
+        });
+        ctrl.close().expect("close controller");
+        drop(web);
+        drop(ctrl);
+        // SAFETY: balances the successful CoInitializeEx above.
+        unsafe { windows_sys::Win32::System::Com::CoUninitialize() };
+        assert!(got, "page title was {title:?}, expected embedded-ok");
+    }
+
     /// Renders HTML in a hidden window and reads the document title back. Needs a loader
     /// (`TPT_WEBVIEW2_LOADER`) and an installed WebView2 runtime. Skipped otherwise.
     #[test]

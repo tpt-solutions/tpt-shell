@@ -17,6 +17,10 @@ version = 2
 # Any further permissive licence needs a justification line here before it is added.
 allow = [
     "MIT",
+    # Permissive extra (spec §4). Justification: unicode-ident, a transitive dependency of the
+    # syn/quote proc-macro toolchain used by tpt-shell-macros, is licensed Unicode-3.0 in an AND
+    # expression with MIT OR Apache-2.0. Its MIT branch is used.
+    "Unicode-3.0",
 ]
 confidence-threshold = 0.93
 

@@ -148,15 +148,15 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec �
 - [ ] Unit tests for the COM handlers (refcount, QueryInterface, leaks): not yet; the runtime test covers the happy path only
 
 ### Assets and protocol
-- [ ] `embed_dir!` prototype (zstd compression, ETag)
-- [x] Serving app pages from the virtual origin (inline bytes in the test; `embed_dir!` still to do). DEVIATION from spec §5.4 `app://`
+- [x] `embed_dir!` prototype: `tpt-shell-macros`, plain bytes, sorted, content types. zstd compression and ETag still to do
+- [x] Serving app pages from the virtual origin, from `embed_dir!` (verified with a subresource). DEVIATION from spec §5.4 `app://`
 - [ ] Never use `file://`
 - [x] JS runtime stub (`window.tpt.invoke`) injected at document start (`js/runtime/tpt-shell.js`, 661 bytes gzipped, verified end to end through the IPC router)
 
 ### Early baselines
 - [ ] First benchmark: binary size, cold start, IPC round trip
 - [ ] R1/R3 mitigations: strict trait boundary documented; leak test harness for COM objects
-- [ ] Done: a Windows hello-world serves embedded assets and round-trips a message. Round-trip and serving verified; `embed_dir!` and the JS shim are the remaining gaps
+- [ ] Done: a Windows hello-world serves embedded assets and round-trips a message. Criterion met on Windows (embedded serving, shim round trip). Other M1 bullets are still open, so the phase stays open until you confirm
 
 ---
 
