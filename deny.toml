@@ -1,0 +1,32 @@
+# Licence and advisory policy for tpt-shell. Enforced in CI and by the build gate (spec §4, §10.8).
+#
+# Policy in one line: a dependency is accepted if it is MIT, or dual-licensed with MIT.
+# Apache-2.0-only crates are rejected because the allow-list below does not contain Apache-2.0.
+# An "A AND B" expression requires both A and B to be allowed.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Only MIT is allowed by default. "MIT OR Apache-2.0" passes through the MIT branch.
+# Any further permissive licence needs a justification line here before it is added.
+allow = [
+    "MIT",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

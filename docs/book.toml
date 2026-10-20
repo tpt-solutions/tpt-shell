@@ -1,0 +1,8 @@
+[book]
+title = "tpt-shell"
+authors = ["TPT Solutions"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = ""

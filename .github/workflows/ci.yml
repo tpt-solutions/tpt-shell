@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# M0 CI skeleton (spec §15). Jobs not yet in scope are listed at the bottom as comments;
+# they are added in the milestone named beside them (see todo.md).
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  spdx-headers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every Rust, TOML and YAML source has an SPDX header
+        run: |
+          missing=0
+          while IFS= read -r f; do
+            if ! head -n 5 "$f" | grep -q "SPDX-License-Identifier: MIT OR Apache-2.0"; then
+              echo "missing SPDX header: $f"
+              missing=1
+            fi
+          done < <(find crates -name '*.rs' -o -name 'Cargo.toml' | sort)
+          exit $missing
+
+# Pending (added in their milestone):
+#   conformance  - M4 (macOS), M5 (Linux)
+#   fuzz-smoke   - M2 onward
+#   docs-build   - M11
+#   template-build - M11
+#   visual-artifacts - M8
+#   benchmarks   - M12
+#   aarch64 runners - M4/M5
+#   Linux Xvfb/Wayland headless setup - M5

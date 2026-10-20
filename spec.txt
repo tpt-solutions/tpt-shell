@@ -1,0 +1,639 @@
+tpt-shell — Complete Design Specification
+Repo name: tpt-shell
+Binary: tpt-shell (developer CLI), tpt-shell-supervisor (kiosk watchdog)
+Tagline: A webview app shell for Rust that is licence-clean, secure by default,
+         and built for kiosks, regulated work and AI agents.
+Owner: TPT Solutions
+Licence: MIT OR Apache-2.0 (dual, at the user's option)
+
+0. Summary
+tpt-shell lets a Rust program open native windows that host web UIs (HTML/CSS/JS,
+or an AppFront DOM bundle) in the operating system's own webview, and talk to the
+Rust backend over a typed, validated, permissioned, audited channel.
+
+It is written from scratch. It does not use wry, tao, winit, Tauri, or any other
+windowing or webview crate. It talks to the platform directly:
+  Windows : Win32 + WebView2 (COM)
+  macOS   : AppKit + WKWebView (Objective-C runtime)
+  Linux   : GTK + WebKitGTK (dlopen)
+
+Why from scratch: every mainstream Rust windowing stack depends on crates that are
+Apache-2.0 only (winit, tao) or on licence combinations that fail TPT's dependency
+policy (§4). Owning the platform layer removes that blocker, and also lets the shell
+offer features that need control of the webview lifecycle (§10).
+
+The shell ships eight headline features that no mainstream Rust webview shell is
+known to offer together (§10). "Known to offer" is deliberately hedged: M0 includes
+a competitive scan (§16) and no README claim may say "first" or "only" without
+evidence recorded in docs/competitive-scan.md.
+
+1. Scope
+In (v1.0 — nothing below is deferred past 1.0):
+  - Windows, macOS and Linux backends, written from scratch
+  - Typed IPC contract with code generation (Rust -> JSON Schema -> TypeScript)
+  - Capability-based permission engine, default deny
+  - The eight differentiators:
+      1. Appliance / kiosk mode with supervisor and watchdog
+      2. Uniform, permissioned peripheral bridge (serial, HID, USB, network, printers, scanners, scales)
+      3. Tamper-evident audit trail
+      4. Agent-operable apps (semantic UI tree, audited action API, MCP server)
+      5. Record / replay and time-travel debugging
+      6. First-party cross-OS test driver, cross-engine visual diff, accessibility audit
+      7. Isolated profiles and ephemeral sessions
+      8. Procurement-ready builds (SBOM, licence report, attestation, pinned runtime, air-gapped use)
+  - Baseline desktop features (§11): windows, menus, tray, dialogs, clipboard, notifications,
+    deep links, single-instance, DPI, native theming, jobs API
+  - Developer tooling (§12): CLI, dev server with hot reload, devtools overlay, contract
+    explorer, mock mode, templates, VS Code extension, docs site, migration shims, CI actions
+Out (v1.0):
+  - Mobile (iOS / Android)
+  - Bundling a browser engine (Chromium, Gecko). The OS webview is always used.
+  - A Node.js or npm requirement. Node is optional, for front-end tooling only.
+  - Our own renderer or widget toolkit
+  - Auto-update and a plugin marketplace
+  - Payment-card handling (PCI scope). Card readers are out; the device bridge is generic.
+Design principles:
+  - Secure by default. Nothing privileged works until the manifest grants it.
+  - One contract. Commands are defined once in Rust; types, validation and docs derive from it.
+  - Adoption in minutes. Three commands from nothing to a running window (§12).
+  - Honest platform support. Every feature has a per-OS support table; "best effort" is labelled.
+  - No network by default. The shell itself never opens a socket unless a feature is enabled.
+  - Small unsafe surface. All FFI lives in isolated platform modules with their own tests.
+  - Boring dependencies. Few crates, all passing the licence policy.
+
+2. Naming and layout conventions
+All crates use the tpt-shell- prefix. The facade crate is tpt-shell.
+
+tpt-shell/
+├── Cargo.toml                       # [workspace]
+├── crates/
+│   ├── tpt-shell/                   # facade: re-exports the public API
+│   ├── tpt-shell-core/              # app model, event loop traits, windows, jobs, theme, clock/rng traits
+│   ├── tpt-shell-ipc/               # envelope, validator, schema model, blob/stream channels
+│   ├── tpt-shell-macros/            # #[command], commands![], embed_dir!, include_manifest!
+│   ├── tpt-shell-manifest/          # tpt-shell.toml parser, schema, capability model
+│   ├── tpt-shell-capabilities/      # permission engine, scopes, consent prompts
+│   ├── tpt-shell-audit/             # hash-chained log, checkpoints, verify
+│   ├── tpt-shell-platform-windows/  # Win32 + WebView2 backend (own COM bindings)
+│   ├── tpt-shell-platform-macos/    # AppKit + WKWebView backend
+│   ├── tpt-shell-platform-linux/    # GTK + WebKitGTK backend (dlopen)
+│   ├── tpt-shell-kiosk/             # appliance runtime (in-app side)
+│   ├── tpt-shell-supervisor/        # binary: watchdog / restarter
+│   ├── tpt-shell-devices/           # device traits, transports, printers, virtual devices
+│   ├── tpt-shell-profiles/          # isolated and ephemeral profiles
+│   ├── tpt-shell-agent/             # semantic tree, action API, MCP server
+│   ├── tpt-shell-replay/            # recorder, player, bug-report bundles
+│   ├── tpt-shell-test/              # test driver, a11y audit, visual diff
+│   ├── tpt-shell-compliance/        # SBOM, licence report, attestation, policy gate
+│   ├── tpt-shell-devtools/          # in-app overlay, contract explorer, time-travel UI
+│   └── tpt-shell-cli/               # binary: tpt-shell
+├── js/
+│   └── runtime/                     # tiny front-end runtime (plain JS, <4 KB gzipped) + generated TS types
+├── templates/                       # project templates (tested in CI)
+├── examples/                        # kiosk, pos, audit-viewer, agent-demo, devices-sim, rustvac port
+├── editors/vscode/                  # VS Code extension
+├── docs/                            # mdBook site source
+├── fixtures/                        # conformance pages, fake devices, replay samples
+├── conformance/                     # backend conformance suite (same pages run on every OS)
+├── deny.toml                        # licence and advisory policy
+└── README.md
+
+3. Platform support matrix (v1.0 targets)
+  Windows : Windows 10 1809+ and Windows 11. WebView2 Evergreen runtime, or a bundled
+            Fixed Version runtime. x86_64 and aarch64.
+  macOS   : macOS 12+. WKWebView (system). x86_64 and aarch64.
+            Profile isolation by data-store identifier needs macOS 14+; on 12–13 profiles
+            are limited to "default" and "ephemeral" (documented, detected by `tpt.caps`).
+  Linux   : GTK 3.24 with WebKit2GTK 4.1, or GTK 4 with WebKitGTK 6.0 (2.40+).
+            X11 and Wayland through GTK. Loaded with dlopen so a missing library gives a
+            clear error instead of a link failure.
+Every public API item carries a support tag: Full, Partial (with a stated gap), or
+Unsupported (returns Error::Unsupported). The docs site renders these tags.
+
+4. Licence and dependency policy
+  - The project is MIT OR Apache-2.0.
+  - Dependencies must be MIT, or dual-licensed with MIT. Apache-2.0-only crates are rejected.
+    Also rejected by default: GPL, LGPL, MPL, AGPL. Permissive additions (BSD-3-Clause,
+    Unicode-3.0, Unlicense, ISC, Zlib) need a one-line justification in deny.toml.
+  - An "A AND B" licence expression counts as requiring both. (This is why the dpi crate,
+    Apache-2.0 AND MIT, is rejected. We write our own DPI and geometry types.)
+  - Enforced in CI with cargo-deny: licences, advisories, bans, sources.
+  - Allowed low-level FFI crates: windows-sys, objc2 (or raw libobjc FFI), libloading.
+    Everything above raw FFI (windowing, webview, event loop, IPC) is our code.
+  - Candidate utility crates, each subject to the policy check: serde, serde_json, sha2,
+    ed25519-dalek, zstd, thiserror, clap, notify (file watching), tiny_http or hand-rolled
+    HTTP for the dev server.
+  - System components that are not crates (WebView2 runtime and loader, WebKit, GTK) are
+    listed separately in THIRD_PARTY_NOTICES with their own licences.
+  - OPEN ITEM O1: confirm the redistribution licence of Microsoft's WebView2Loader.dll.
+    Design for two loader strategies behind one trait (§6.2): (a) the official loader,
+    (b) our own runtime discovery. Ship (b) as the default if (a)'s licence does not fit
+    the policy.
+
+5. Architecture
+
+5.1 Layers
+  app code (Rust)   ->  tpt-shell facade
+  contract layer    ->  tpt-shell-ipc + capabilities + audit
+  core              ->  windows, event loop, jobs, theme, clock/rng
+  platform backends ->  windows | macos | linux   (each implements the Backend trait set)
+  OS APIs
+
+5.2 Backend trait set (tpt-shell-core)
+  trait EventLoopBackend    run(), proxy() for cross-thread posts, quit()
+  trait WindowBackend       create, show/hide, bounds, title, fullscreen, frameless, always-on-top,
+                            transparency, backdrop effect, drag regions, close handling
+  trait WebviewBackend      load app:// url or html, eval script, post message, intercept
+                            requests, navigation policy, crash callback, snapshot, devtools toggle,
+                            profile binding, script-on-document-start, a11y tree access
+  trait Platform            menus, tray, dialogs, clipboard, notifications, deep links,
+                            single instance, theme and accent query, keystore
+All of core and everything above it is OS-independent and unit-testable with a fake
+backend (tpt-shell-core::fake). The conformance suite (§14) runs the same pages against
+every real backend.
+
+5.3 Threading
+  - One UI thread per process owns all windows and webviews. All platform calls happen there.
+  - Command handlers run on a worker pool by default (async via a minimal built-in executor,
+    no external runtime required; a tokio adapter is optional).
+  - EventLoopProxy is Send + Sync and is the only way to touch UI from other threads.
+  - Handlers marked #[command(ui)] run on the UI thread.
+
+5.4 Custom protocol
+  - Assets are served over app:// (e.g. app://localhost/index.html), never file://.
+  - Assets are embedded at build time (embed_dir!), zstd-compressed, with ETag and
+    precompressed delivery. In `dev` they are served from disk with hot reload.
+  - Interception per OS: WebView2 WebResourceRequested; WKURLSchemeHandler;
+    webkit_web_context_register_uri_scheme.
+  - Large binary payloads use app://__tpt/blob/<id> so they bypass JSON.
+
+5.5 Wire protocol (IPC v1)
+  JS -> Rust : {"v":1,"id":<u64>,"cmd":"name","args":{...}} via postMessage.
+  Rust -> JS : response {"id","ok":true,"data"} or {"id","ok":false,"error":{code,message,details}}
+               delivered by script evaluation or postMessage.
+  Events     : {"event":"name","data":...} Rust -> JS; JS subscribes with tpt.on().
+  Streams    : credit-based backpressure; the consumer grants credits, the producer waits.
+  Limits     : message size cap, per-window rate limit, depth limit on JSON, all configurable.
+  The envelope is versioned. Unknown versions are rejected with a clear error.
+
+6. Backends written from scratch
+
+6.1 Windows (tpt-shell-platform-windows)
+  Window: RegisterClassExW, CreateWindowExW, message loop, per-monitor-v2 DPI,
+  WM_DPICHANGED, DwmSetWindowAttribute for dark title bar and system backdrop (Mica,
+  Acrylic, Tabbed), frameless and kiosk styles, taskbar integration.
+  WebView2: COM on an STA thread (CoInitializeEx). We hand-write the COM vtables and
+  reference-counted handler objects (via a small internal macro) for the subset we use:
+    Environment (create controller, create web resource response, options incl. profile name,
+    in-private, user data folder, additional browser args), Controller (bounds, visibility,
+    focus, close), WebView (navigate, navigate to string, execute script, post web message,
+    WebMessageReceived, NavigationStarting, WebResourceRequested + filters, add script on
+    document created, CapturePreview, Settings, ProcessFailed, DocumentTitleChanged,
+    OpenDevToolsWindow), Profile (clear browsing data, profile path, theme).
+  Handlers are implemented in Rust; callbacks are marshalled onto the UI thread.
+  Runtime: Evergreen via registry discovery, or Fixed Version from a folder (§10.8).
+  Loader strategies behind trait RuntimeLoader: OfficialLoader and RegistryLoader (OPEN ITEM O1).
+  Extras: Shell_NotifyIcon tray, IFileDialog, clipboard (CF_UNICODETEXT/HTML/DIB/HDROP),
+  toast notifications, RegisterHotKey, named-mutex single instance, protocol handler
+  registration in HKCU, UIA bridge for accessibility-tree dumps (§10.6).
+
+6.2 macOS (tpt-shell-platform-macos)
+  NSApplication and NSWindow, NSVisualEffectView vibrancy, appearance observation,
+  WKWebView with WKUserContentController (script message handler), WKUserScript,
+  WKURLSchemeHandler for app://, WKNavigationDelegate, WKWebsiteDataStore
+  (nonPersistent, or dataStoreForIdentifier on macOS 14+), takeSnapshot, NSOpenPanel,
+  NSPasteboard, UNUserNotificationCenter, NSStatusItem, deep links via Apple Events,
+  single instance via NSRunningApplication, AX tree via NSAccessibility.
+  Objective-C is reached through objc2 or raw libobjc FFI; class definitions we need
+  (delegates, scheme handler) are declared in our own module.
+
+6.3 Linux (tpt-shell-platform-linux)
+  GTK3 + WebKit2GTK 4.1 and GTK4 + WebKitGTK 6.0, bound by hand through dlopen
+  (libloading). Two thin adapters hide API drift. WebKitUserContentManager for messages
+  and scripts, webkit_web_context_register_uri_scheme for app://, WebsiteDataManager
+  with base directories or ephemeral mode, webkit_web_view_get_snapshot, GtkFileChooser,
+  GtkClipboard / GdkClipboard, GtkStatusIcon or StatusNotifier over D-Bus for tray,
+  freedesktop notifications over D-Bus, single instance via a UNIX socket, AT-SPI for
+  accessibility dumps. Wayland and X11 through GTK; global hotkeys are X11-only (Partial).
+
+6.4 Cross-engine consistency
+  The three engines differ. The shell provides:
+  - tpt.caps: runtime feature detection (engine name and version, supported APIs)
+  - A small normalisation shim (opt-in, documented): viewport and scrollbar defaults,
+    font stack defaults, drag-region helper, safe-area insets
+  - A published compatibility report generated from the conformance suite
+  - Cross-engine visual diff in CI (§10.6)
+
+7. Core API
+
+7.1 Rust
+  use tpt_shell::{App, Window, Theme, command, commands, embed_dir, include_manifest};
+
+  #[command(capability = "fs.read", agent = false)]
+  async fn list_dir(ctx: &Ctx, path: ScopedPath) -> Result<Vec<Entry>, CmdError> { ... }
+
+  #[command(job)]                       // long-running: progress, cancel, streamed results
+  async fn scan(ctx: &Ctx, job: &Job, root: ScopedPath) -> Result<ScanSummary, CmdError> { ... }
+
+  fn main() -> tpt_shell::Result<()> {
+      App::new()
+          .manifest(include_manifest!("tpt-shell.toml"))
+          .assets(embed_dir!("dist"))
+          .commands(commands![list_dir, scan])
+          .window(Window::new("main").title("My App").size(1100, 700).theme(Theme::System))
+          .run()
+  }
+
+7.2 JavaScript
+  Plain, no build step:   await window.tpt.invoke("list_dir", { path: "C:/Users" })
+  Generated, typed:       import { api } from "./tpt-shell.gen"; await api.listDir({ path })
+  Events and jobs:        tpt.on("scan:progress", cb); const job = api.scan({ root }); job.cancel()
+  The runtime is plain JavaScript under 4 KB gzipped. It is injected at document start.
+
+7.3 Manifest (tpt-shell.toml)
+  [app]            id, name, version, identifier, icons
+  [windows.main]   title, size, min_size, frameless, backdrop, start_url, profile, capabilities
+  [capabilities]   named sets of permissions with scopes
+  [kiosk]          §10.1
+  [devices]        §10.2
+  [audit]          §10.3
+  [agent]          §10.4
+  [replay]         §10.5
+  [test]           §10.6
+  [profiles]       §10.7
+  [compliance]     §10.8
+  The manifest has a published JSON Schema (editors/vscode and docs use it) and
+  `tpt-shell manifest check` validates it with line-accurate errors.
+
+8. Typed IPC contract
+  - #[command] registers: name, parameter schema, return schema, required capabilities,
+    kind (sync, async, job, stream), flags (ui, agent).
+  - Parameter and return types derive a schema through a derive macro (Contract). Supported:
+    primitives with bounds attributes, strings with max length and patterns, enums,
+    structs, Option, Vec, maps with string keys, and scoped types (ScopedPath, DeviceId).
+  - Validation happens in Rust before the handler runs: unknown fields rejected, bounds checked,
+    scope checked. A handler never sees out-of-contract input.
+  - Errors are typed: CmdError carries a stable code, message, and optional details.
+  - `tpt-shell contract gen` writes contract.json (JSON Schema + metadata) and a TypeScript
+    client with types, JSDoc and JS runtime bindings. Output is deterministic (golden-tested).
+  - The contract is also the source for: the mock backend (§12), the docs, the MCP tool list
+    (§10.4), and fuzz targets.
+  - Compatibility: a Tauri-style invoke shim (tpt.compat.tauri) lets existing front-ends call
+    commands by name with the same call shape (migration aid, documented subset).
+
+9. Security model
+  Threat model: web content is untrusted; the Rust backend is trusted; the user is trusted
+  but may be a guest on a shared terminal.
+  Defaults:
+  - Only app:// content is loaded. Remote navigation is blocked unless allowlisted per window.
+  - Strict CSP injected for app:// responses (configurable, not removable in release builds
+    without an explicit manifest flag that is itself audited).
+  - Devtools, context menu and view-source are disabled in release builds.
+  - Every command checks capabilities; no capability means no call.
+  - Capabilities are per window and per origin, with scopes: path globs, device identifiers,
+    URL patterns, size caps.
+  - Consent prompts use native dialogs (not web content) and can be remembered per profile.
+  - IPC input is size-capped, depth-capped, rate-limited, and schema-validated.
+  - The test driver and agent control channels exist only in builds with the matching Cargo
+    feature, require a per-run token, and bind to local IPC (named pipe or UNIX socket).
+  - A SECURITY.md defines private disclosure and a response timeline.
+  - Fuzz targets cover the envelope parser, the validator, and the manifest parser.
+
+10. The eight differentiators
+
+10.1 Appliance / kiosk mode
+  Market: digital signage, retail POS, industrial HMI, public terminals, check-in kiosks.
+  Features:
+  - [kiosk] mode = "single-app": full-screen, single window, no navigation outside an allowlist.
+  - Disabled: devtools, context menu, zoom, text selection (optional), drag-drop, print shortcuts,
+    function-key shortcuts, back/forward gestures and swipes.
+  - Key chord blocking: Windows low-level keyboard hook (Alt+Tab, Win key, Alt+F4, Ctrl+Esc),
+    best effort. Docs state plainly that real lock-down needs OS configuration (Windows
+    Assigned Access, macOS guided access / MDM, Linux dedicated session) and give recipes.
+  - Supervisor (tpt-shell-supervisor, separate small binary): starts the app, watches a heartbeat
+    over local IPC, restarts on crash or hang, exponential backoff with crash-loop cap and
+    alert hook (command or file), optional scheduled restart (e.g. 03:00 daily).
+  - State survival: app.snapshot_state() is called on an interval and on exit; on restart the
+    app can restore it. A contract-defined state store makes this typed.
+  - Page crash recovery: webview process failure (ProcessFailed, WebKit crash signals) triggers
+    reload to the last good state without restarting the whole app.
+  - Idle reset: after N seconds without input, return to the home route and clear the session
+    (integrates with ephemeral profiles, §10.7).
+  - Multi-monitor placement, rotation handling, per-monitor kiosk windows.
+  - Boot integration: `tpt-shell install-service` writes a Windows Task Scheduler / Startup entry,
+    a macOS LaunchAgent, or a systemd user unit.
+  - Signed local config: an optional signed config file can change kiosk settings offline.
+    A local admin endpoint exists but is off by default and token-protected.
+  - Health: heartbeat file and optional local HTTP health endpoint (off by default).
+  Acceptance: 72-hour soak test with injected crashes, hangs and page failures; app returns to
+  the configured state each time; supervisor logs are complete.
+
+10.2 Uniform peripheral bridge
+  Market: POS, labs, industrial automation, IoT, logistics.
+  Why: web serial/USB/HID support differs by engine; the shell gives one permissioned API.
+  Features:
+  - Transports, implemented against OS APIs behind one Transport trait:
+      serial (Win32 COM / termios), HID (Windows HID, IOKit HID, hidraw), USB raw bulk/
+      interrupt/control (WinUSB, IOKit, usbfs), TCP/UDP raw sockets (network printers).
+  - Higher level helpers: ESC/POS and ZPL builders, receipt/label printing, raw print via OS
+    spooler, barcode scanners (keyboard-wedge, serial, HID POS), scales (common serial
+    protocols), customer displays.
+  - Device discovery and hotplug events (opt-in).
+  - API: devices.list(filter), devices.open(id, options), read/write streams that use the
+    stream channel with backpressure, ioctl-style control transfers where supported.
+  - Permissions: capabilities device.serial, device.hid, device.usb, device.net, device.print
+    with scopes (vendor/product IDs, port globs, host:port patterns). First use shows a native
+    consent dialog; the decision can be remembered per profile.
+  - Every open, close and write is audited (§10.3). Payload logging is off by default and can
+    store a hash only, or the bytes, per manifest.
+  - Virtual devices for development and tests: VirtualSerial, VirtualHid, VirtualPrinter
+    (renders ESC/POS to a receipt preview), VirtualScanner (scripted scans). They are
+    selected by manifest or env var and need no hardware.
+  - Per-OS tags: Windows Full, Linux Full (udev notes), macOS Partial for some USB classes
+    where the OS reserves devices (documented).
+  Acceptance: round-trip tests on virtual devices on all three OSes; documented real-device
+  matrix tested on at least one serial adapter, one HID scanner, one ESC/POS printer.
+
+10.3 Tamper-evident audit trail
+  Market: health, government, finance, legal, any regulated deployment.
+  Features:
+  - Every privileged call (commands with capabilities, device operations, profile changes, agent
+    actions, manifest overrides) writes an entry: seq, wall time, monotonic time, actor (window,
+    origin, agent id), command, capability used, parameter hash (SHA-256 of canonical JSON),
+    optional redacted parameters, outcome, duration.
+  - Each entry's hash = SHA-256(previous hash || canonical entry bytes). Entries form a chain.
+  - Checkpoints: every N entries or T seconds the chain head is signed with Ed25519. The key is
+    held in the OS keystore (DPAPI, Keychain, Secret Service) or supplied by a hook for an HSM.
+  - External anchor hook: checkpoint hashes can be written to a second sink (file on another
+    volume, syslog, HTTP) so truncation of the primary log is detectable.
+  - `tpt-shell audit verify <file>` detects modification, reordering, deletion and truncation,
+    and reports the first bad sequence number.
+  - Rotation, size limits, export (JSON Lines, CSV), and a viewer panel in devtools.
+  - Privacy: a redaction policy in the manifest controls what parameters are stored.
+  Acceptance: property tests for chain integrity; tamper tests that flip, drop, swap and
+  truncate entries are all detected; documented limits (a fully compromised host can still
+  delete everything; anchoring is how that is mitigated).
+
+10.4 Agent-operable apps
+  Market: teams adding AI automation or assistive agents to desktop software.
+  Features:
+  - Semantic tree: from DOM plus ARIA, with roles, names, states, values, bounds, and stable
+    element references valid for one snapshot.
+  - Action API: click, type, select, scroll, focus, key, wait_for, read, and invoke (typed commands
+    explicitly flagged agent = true). No raw JavaScript evaluation.
+  - Policies: manifest [agent] defines agent profiles: allowed actions, allowed routes,
+    rate limits, commands that require native confirmation, and maximum session length.
+  - Redaction: password fields and anything with data-tpt-redact never appear in the tree.
+  - Human in the loop: sensitive actions open a native confirmation dialog; a kill switch (hotkey
+    and API) ends the session at once.
+  - MCP server over stdio and localhost HTTP (token required): tools generated from the contract
+    (agent-flagged commands) plus UI tools; resources for the semantic tree and the audit tail.
+  - Prompt-injection hygiene: tree text is marked untrusted in tool output; agents cannot navigate
+    outside the allowlist; actions and results are audited and can be recorded to a replay (§10.5).
+  - Off unless the build enables the agent feature and the manifest enables an agent profile.
+  Acceptance: an example agent completes a scripted task in the sample app; policy tests prove
+  forbidden actions, rate limits, redaction and the kill switch work; every action appears in
+  the audit log.
+
+10.5 Record / replay and time-travel debugging
+  Market: developers, QA, support teams.
+  Features:
+  - Recorder captures: IPC calls with args, results and timing; DOM input events (click, key, scroll,
+    focus) with stable target paths; window events (resize, theme, focus); custom-protocol loads.
+  - Determinism: Rust-side Clock and Rng traits are virtualised in record/replay mode. In the page,
+    an injected shim virtualises Date.now, performance.now, Math.random and timers (record/replay
+    mode only, never in normal runs).
+  - File format .tptreplay: zstd-compressed JSON Lines plus an assets section, with a format
+    version. Specified in docs/replay-format.md.
+  - Replay modes: strict (fail on divergence) and lenient (report divergences). Runs in a hidden
+    window for CI.
+  - Time-travel UI in devtools: timeline scrubber, step forward and back, inspect IPC state and a
+    DOM snapshot at any event, jump to divergence.
+  - `tpt-shell report` makes a bug-report bundle (replay + logs + versions + redacted audit tail),
+    with redaction hooks so secrets never leave the machine unintentionally.
+  - Documented limits: engine-internal nondeterminism (GPU, layout timing, network outside
+    app://) cannot be fully removed; divergence reports say where.
+  Acceptance: a recorded session of the sample app replays identically on its recording OS, in
+  strict mode, 100 times in a row; cross-OS replay is lenient and reports differences.
+
+10.6 First-party test driver, cross-engine visual diff, accessibility audit
+  Market: teams shipping on three OSes; accessibility-sensitive sectors.
+  Features:
+  - Test driver built into the shell (feature test-driver). No external WebDriver binary, which
+    is what makes macOS work. A local control channel with a per-run token drives the real app.
+  - Rust API: app.window("main").find(role("button").name("Compress")).click().await,
+    type_text, press, screenshot, dom_snapshot, a11y_tree, eval (test builds only), wait_for,
+    and expectations with automatic retry.
+  - CLI: `tpt-shell test` runs tests, collects artifacts (screenshots, replays, logs).
+  - Screenshots: CapturePreview (WebView2), takeSnapshot (WKWebView),
+    webkit_web_view_get_snapshot (WebKitGTK).
+  - Visual diff: our own comparer (perceptual, region masks, per-region tolerance). Because each
+    OS has one engine, "cross-engine" is done by comparing screenshots collected from the CI
+    matrix: `tpt-shell visual compare` merges artifacts from the three jobs, produces an HTML
+    report, and fails above thresholds. On Windows it can also run WebView2 channels
+    (stable/beta/canary) for forward-compatibility checks.
+  - Accessibility audit: our own rule engine for a WCAG 2.2 AA subset (names and roles, colour
+    contrast, focus order, keyboard traps, target size, form labels, reduced-motion respect),
+    plus a native accessibility-tree dump (UIA, NSAccessibility, AT-SPI) to compare what screen
+    readers receive with what the DOM promises.
+  - Test mode integrates with virtual devices (§10.2) and replay (§10.5).
+  Acceptance: the same test suite runs green on all three CI OSes; the visual-compare report is
+  produced from real artifacts; the a11y audit finds seeded violations in a fixture page.
+
+10.7 Isolated profiles and ephemeral sessions
+  Market: shared workstations, multi-tenant admin tools, privacy-sensitive apps, kiosks.
+  Features:
+  - Profile kinds: default, named (e.g. per user or tenant), ephemeral (nothing persists).
+  - Each window is bound to a profile. Storage (cookies, localStorage, IndexedDB, cache,
+    service workers) is isolated per profile.
+  - Mapping: WebView2 profile name or user data folder; WKWebsiteDataStore (identifier on
+    macOS 14+, non-persistent otherwise); WebKitGTK WebsiteDataManager base dirs or ephemeral.
+  - Wipe on close, wipe on idle, and secure erase (best-effort overwrite before delete where the
+    file system allows; docs explain SSD and journaling limits).
+  - Quotas and a profile manager API: create, list, switch, export (encrypted), delete.
+  - Consent decisions (§10.2) and agent profiles (§10.4) are stored per profile.
+  - Conformance tests prove isolation: writes in profile A are invisible in profile B, and
+    ephemeral profiles leave no files behind.
+  Acceptance: isolation and no-residue tests pass on all three OSes.
+
+10.8 Procurement-ready builds
+  Market: enterprise and government buyers, regulated industries, air-gapped sites.
+  Features:
+  - `tpt-shell build` produces, next to the binary:
+      sbom.cdx.json    (CycloneDX 1.5)
+      sbom.spdx.json   (SPDX 2.3)
+      licenses.html    (also embedded at app://__tpt/licenses)
+      THIRD_PARTY_NOTICES
+      attestation.json (rustc version, lockfile hash, policy result, git commit, build flags,
+                        reproducible-build settings)
+      optional detached signature (Ed25519) over the artifacts
+  - Policy gate: the build fails if a dependency violates the configured policy (default is the
+    project policy in §4). The gate is the same cargo-deny logic CI uses.
+  - Pinned runtime: `tpt-shell runtime pin` fetches a WebView2 Fixed Version runtime on the
+    developer machine and bundles it. The shipped app never contacts Microsoft. macOS and Linux
+    use the system engine (cannot be pinned); the build records the minimum versions and
+    `tpt-shell doctor` checks them. This limit is documented, not hidden.
+  - Air-gapped use: the shell opens no sockets by default (enforced by a test); `tpt-shell vendor`
+    vendors dependencies; `tpt-shell docs --offline` produces an offline docs bundle; reproducible
+    build guidance and flags (--locked, path remapping, SOURCE_DATE_EPOCH).
+  - A procurement pack template: security questionnaire answers, data-flow diagram, SBOM, licence
+    summary, and an explanation of the audit and kiosk features.
+  Acceptance: SBOMs validate against the CycloneDX and SPDX schemas; a deliberately bad
+  dependency fails the build; two builds of the same commit on the same toolchain produce
+  identical artifacts, or the diff is explained in docs.
+
+11. Baseline desktop features
+  - Windows: multiple, parent/child, modal, frameless, always-on-top, transparent, snap layouts.
+  - Native menus (app and context), tray, dialogs (open, save, message, folder), clipboard
+    (text, HTML, image, files), notifications, drag-drop of files, printing to PDF and print dialog.
+  - Deep links and custom URL scheme registration, single-instance with argument forwarding.
+  - Native theming: the shell injects OS theme data as CSS custom properties (--tpt-accent,
+    --tpt-bg, --tpt-fg, --tpt-font, etc.), keeps prefers-color-scheme in sync, and signals
+    high contrast, reduced motion and reduced transparency. Windows 11 Mica/Acrylic and macOS
+    vibrancy are available per window. Pages look native with no extra styling.
+  - Jobs API: spawn, progress, cancel, streamed results with backpressure, typed events, and an
+    optional built-in progress component. Long scans such as rustvac's use this.
+  - Global hotkeys: Windows Full, macOS Partial, Linux X11 only.
+  - DPI and multi-monitor handling, fullscreen, window state restore.
+
+12. Developer experience and tooling
+  Goal: from nothing to a running window in under five minutes, three commands:
+      cargo install tpt-shell-cli
+      tpt-shell new my-app
+      cd my-app && tpt-shell dev
+  CLI (tpt-shell):
+  - new            templates: vanilla, typescript, appfront-dom, kiosk, pos, agent-demo, audit-app
+                   (zero Node by default; bring-your-own bundler is supported)
+  - dev            file watcher, hot reload that preserves Rust state, devtools, mock toggle,
+                   automatic replay of the last session after a reload
+  - build          release build plus compliance outputs (§10.8)
+  - bundle         Windows: portable folder, zip, and installer via an optional external tool;
+                   macOS: .app and .dmg; Linux: tar.gz, .deb, .rpm, AppImage
+  - sign           code signing hooks (Windows, macOS notarisation, minisign for archives)
+  - doctor         checks WebView2 or WebKit versions, signing tools, licence policy, toolchain
+  - contract       gen, check, diff (breaking-change detection between two contracts)
+  - manifest       check, explain
+  - test, visual   §10.6
+  - replay, report §10.5
+  - audit          verify, export, view
+  - mock           serve the front-end in a normal browser against a mock backend generated from
+                   the contract, so front-end developers do not need Rust running
+  - runtime        pin, list (§10.8)
+  - add            scaffold a feature (kiosk, devices, audit, agent) into manifest and code
+  - install-service, explain <code>, vendor, docs
+  Devtools overlay (toggle in dev builds): IPC log with latency, jobs, capabilities in effect,
+  audit tail, contract explorer (browse and call commands), time-travel panel, engine and caps
+  info, a11y quick check.
+  Errors: every error has a stable code (TS####), a plain explanation and a fix hint.
+  `tpt-shell explain TS0123` prints the long form. Errors point at manifest lines or source spans.
+  Editor support: VS Code extension (manifest schema and completion, contract explorer,
+  run and debug configs, audit viewer, inline error codes). The macros are friendly to
+  rust-analyzer.
+  Documentation (mdBook, published and offline-buildable): five-minute quickstart, concepts,
+  cookbook of 20+ recipes, per-feature guides (kiosk deployment, devices, audit, agents, profiles,
+  compliance), security guide, platform notes, troubleshooting, API reference with support tags,
+  migration guides from Tauri and Electron, and an examples gallery.
+  CI: reusable GitHub Actions (build matrix, test, visual compare, compliance gate, release).
+  Every template is generated and built in CI, then smoke-tested.
+  Release and distribution: cargo-dist binaries, crates.io, plus winget, Scoop and Homebrew
+  manifests. Semver, MSRV policy, deprecation policy, changelog, RFC process, CONTRIBUTING,
+  CODE_OF_CONDUCT, issue and PR templates, SECURITY.md. No telemetry. Stated explicitly.
+
+13. Performance and size budgets (targets, to be measured and published)
+  - Hello-world release binary: <= 4 MB stripped on Windows (excluding the WebView2 runtime).
+  - Cold start to first paint: <= 500 ms with Evergreen WebView2 on a mid-range laptop; startup
+    overhead of the shell itself (excluding WebView2 init) <= 50 ms.
+  - IPC round trip, small payload: p95 <= 5 ms.
+  - Streams: sustained >= 50 MB/s on the blob channel locally.
+  - Idle memory overhead of the shell (excluding the webview process) <= 25 MB.
+  - Supervisor: <= 5 MB RAM idle.
+  A benchmark suite and results are committed (BENCHMARKS.md) with methodology.
+
+14. Testing strategy
+  - Unit tests everywhere above the platform layer, using the fake backend.
+  - Conformance suite: the same set of pages and scripted checks run against each backend:
+    IPC round trip, large blobs, streams and backpressure, custom protocol, CSP, navigation
+    policy, theme injection, snapshot, profile isolation, crash recovery, drag regions, DPI.
+    The suite also generates the public compatibility report.
+  - Golden tests: contract and TypeScript generation, manifest schema, audit format, replay format.
+  - Property and fuzz tests: envelope parser, validator, manifest parser, audit chain, replay reader.
+  - Security tests: capability bypass attempts, oversized and malformed messages, path-scope escapes.
+  - Soak tests: kiosk 72 h with fault injection; memory growth checks.
+  - FFI hygiene: unsafe confined to platform modules; sanitiser and Miri runs where possible;
+    a short soundness review before 1.0.
+  - Template tests: generate, build and smoke-test each template.
+  - Docs tests: code samples in docs are compiled.
+
+15. CI and platforms
+  GitHub Actions matrix: windows-latest, macos-latest, ubuntu-latest (with Xvfb and Wayland
+  headless where possible), plus aarch64 where runners exist. Jobs: fmt, clippy, tests,
+  conformance, cargo-deny, fuzz smoke, docs build, template build, visual artifacts upload,
+  benchmark run. The development machine for the first author is Windows, so macOS and Linux
+  work depends on CI from day one (M0).
+
+16. Milestones (all of them are inside v1.0; each has a definition of done)
+  M0  Repo, policy, CI skeleton, docs skeleton, competitive scan recorded in docs.
+      Done: cargo-deny passes on an empty workspace; the scan document exists with sources.
+  M1  Core traits, fake backend, Windows window + WebView2 + app:// + raw IPC.
+      Done: a Windows hello-world serves embedded assets and round-trips a message.
+  M2  Typed contract, macros, codegen, manifest, capabilities, audit log (basic chain).
+      Done: generated TypeScript client calls validated commands; bypass attempts fail.
+  M3  CLI core (new, dev, build, doctor, contract, manifest), devtools overlay, theme injection,
+      jobs API, error codes.
+      Done: the three-command quickstart works on Windows in under five minutes.
+  M4  macOS backend and conformance parity with Windows.
+  M5  Linux backend (GTK3/WebKit2GTK 4.1 and GTK4/WebKitGTK 6.0) and conformance parity.
+  M6  Profiles and ephemeral sessions (§10.7); kiosk runtime and supervisor (§10.1).
+  M7  Device bridge, virtual devices, printers and scanners (§10.2).
+  M8  Test driver, a11y audit, visual diff (§10.6); record/replay and time-travel (§10.5).
+  M9  Agent surface and MCP server (§10.4); audit checkpoints, anchoring, verify tool (§10.3).
+  M10 Compliance outputs, pinned runtime, vendoring, reproducible builds (§10.8); bundling and signing.
+  M11 Docs site, templates, VS Code extension, migration shims, examples, rustvac port.
+  M12 Hardening: fuzzing, soak, soundness review, benchmarks, security review; v1.0.0 tag.
+
+17. Definition of done for v1.0
+  - All eight differentiators are implemented, documented and tested on Windows, macOS and Linux,
+    with per-OS support tags that are accurate.
+  - cargo-deny passes: licences, advisories, bans, sources.
+  - The three-command quickstart works on all three OSes.
+  - Conformance suite green on all three CI OSes; compatibility report published.
+  - 72 h kiosk soak passed; audit tamper tests pass; replay determinism test passes.
+  - Benchmarks published; budgets in §13 met or the gaps are documented.
+  - Docs site, templates, VS Code extension, CI actions and migration guides are released.
+  - rustvac runs on tpt-shell as its UI.
+  - A v1.0.0 tag, release notes, SBOM and attestation exist for the release itself.
+
+18. Risks and mitigations
+  R1  Writing three webview backends from scratch is the largest risk and effort.
+      Mitigation: strict trait boundary, conformance suite first, Windows first, unsafe confined and
+      tested, study platform documentation (not copy code from other projects), CI for all OSes.
+  R2  WebView2 loader licence and discovery (O1).
+      Mitigation: two loader strategies behind one trait; verify before M1 completes.
+  R3  Hand-written COM and Objective-C code can leak or crash.
+      Mitigation: small internal macros for COM objects and ObjC classes, leak and soak tests,
+      sanitisers, review.
+  R4  WebKitGTK API drift (4.0 / 4.1 / 6.0). Mitigation: two thin adapters, doctor checks, matrix CI.
+  R5  Eight features across three OSes can sprawl. Mitigation: per-OS support tags, clear Partial
+      labels, features share infrastructure (contract, capabilities, audit, jobs, replay).
+  R6  Device access differs widely by OS. Mitigation: Transport trait, virtual devices, documented
+      real-device matrix, honest Partial tags.
+  R7  Control channels (test driver, agent) are attack surface. Mitigation: build-feature gated,
+      per-run token, local IPC only, audited, fuzzed.
+  R8  Replay determinism is bounded by engine behaviour. Mitigation: documented limits, divergence
+      reports, lenient mode.
+  R9  "First and only" claims may not hold. Mitigation: competitive scan at M0, evidence-based wording.
+  R10 Kiosk lock-down cannot be fully achieved from user space. Mitigation: say so; ship OS hardening
+      recipes; label key-blocking best-effort.
+
+19. Open items needing a decision
+  O1  Licence of WebView2Loader.dll redistribution; choose default loader strategy.
+  O2  Windows installer technology (optional external tool vs our own writer).
+  O3  Which front-end templates to maintain beyond vanilla and TypeScript.
+  O4  Whether to publish crates under the tpt-shell- prefix on crates.io now (name availability).
+  O5  Hosting for docs and the visual-diff baseline store.
+  O6  macOS and Linux test hardware beyond CI runners (real kiosks, real devices).
+
+20. First consumer: rustvac
+  rustvac-gui is rewritten as an HTML UI served by tpt-shell once M3 lands (scan jobs use the jobs
+  API; compress/trash use capabilities and audit entries). The FLTK GUI stays until then. rustvac is
+  the dogfooding project and the source of real bug reports during M3–M11.

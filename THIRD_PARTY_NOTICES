@@ -1,0 +1,59 @@
+THIRD_PARTY_NOTICES for tpt-shell
+Copyright (c) 2026 TPT Solutions
+
+This file lists third-party software that tpt-shell uses or links, with its licence.
+It is generated and checked as the project grows (see todo.md, M10). For now it contains
+the policy and the placeholders for system components.
+
+== Rust crate dependencies ==
+
+None yet. Every dependency must be MIT, or dual-licensed with MIT (see deny.toml).
+
+== System components (not Rust crates) ==
+
+These are provided by the operating system or the user and are not redistributed by
+tpt-shell unless the pinned-runtime build option is used (spec §10.8).
+
+- WebView2Loader.dll (Windows, x64 and arm64), from the Microsoft.Web.WebView2 NuGet
+  package, version 1.0.4312-prerelease (checked 2026-10-20). Licence: BSD-3-Clause, text
+  reproduced below. SHA-256 of the x64 file: 909828eb2922694b156ae367751466722fe148a1b151245bbc8a80a24dc32645. Shipped with the app; this is the
+  OfficialLoader strategy (spec §6.1, decision O1). The package's NOTICE.txt also lists
+  third-party components bundled in that package; check them before shipping any file
+  from it other than the loader.
+- Microsoft WebView2 Runtime (Windows). Not redistributed by default. Licence: Microsoft
+  Edge WebView2 Runtime EULA. Covers the runtime only when the pinned-runtime option
+  (spec §10.8) is used; that path needs a legal review first.
+- WebKit / WebKitGTK (Linux). Licence: LGPL-2.1+ and BSD-style, as shipped by the
+  distribution. Dynamically loaded with dlopen. Not statically linked.
+- GTK 3 / GTK 4 (Linux). Licence: LGPL-2.1+. Dynamically loaded with dlopen.
+- WKWebView / AppKit (macOS). Part of the operating system.
+
+== WebView2Loader.dll licence text (Microsoft.Web.WebView2 1.0.4312-prerelease, LICENSE.txt) ==
+
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * The name of Microsoft Corporation, or the names of its contributors 
+may not be used to endorse or promote products derived from this
+software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
