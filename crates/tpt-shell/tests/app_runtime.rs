@@ -176,3 +176,161 @@ fn a_consent_grant_refuses_the_command_when_the_user_says_no() {
         "after No: {title}"
     );
 }
+
+/// The start page. Its script is a separate asset, because the page policy blocks inline script.
+const LISTENER_HTML: &str =
+    r#"<!doctype html><title>starting</title><script src="listen.js"></script>"#;
+
+/// Registers a listener for `greet` and reports that it is ready.
+const LISTENER_JS: &str = r#"
+    window.tpt.on('greet', function (data) { document.title = 'got ' + data.name; });
+    document.title = 'ready';
+"#;
+
+#[test]
+fn an_event_from_rust_reaches_the_page_listener() {
+    let Some((loader, _serial)) = runtime_test_loader() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("tpt-app-event-{}", std::process::id()));
+    let mut running = App::new()
+        .name("app-event-test")
+        .loader(loader)
+        .data_dir(&dir)
+        .asset("index.html", "text/html", LISTENER_HTML)
+        .asset("listen.js", "text/javascript", LISTENER_JS)
+        .window(Window::new("main").title("app-event-test"))
+        .build()
+        .expect("the app should start");
+    let id = running.window("main").expect("the main window");
+    let mut title = String::new();
+    let ready = pump_until(Duration::from_secs(30), || {
+        title = running.backend().document_title(id).unwrap_or_default();
+        title == "ready"
+    });
+    assert!(
+        ready,
+        "the page never registered its listener; title was {title:?}"
+    );
+
+    running
+        .emit("main", "greet", serde_json::json!({ "name": "rust" }))
+        .expect("emit");
+    let got = pump_until(Duration::from_secs(30), || {
+        title = running.backend().document_title(id).unwrap_or_default();
+        title == "got rust"
+    });
+    drop(running);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(got, "the event never reached the page; title was {title:?}");
+}
+
+/// Calls a command that does not exist, and shows the reply in the title.
+const UNKNOWN_CALL_JS: &str = r#"
+    window.chrome.webview.addEventListener('message', function (e) { document.title = e.data; });
+    window.chrome.webview.postMessage('{"v":1,"id":1,"cmd":"no_such_command","args":{"x":1}}');
+"#;
+
+#[test]
+fn a_command_call_from_a_page_is_written_to_the_audit_log() {
+    let Some((loader, _serial)) = runtime_test_loader() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("tpt-app-audit-{}", std::process::id()));
+    let log = dir.join("audit.jsonl");
+    let running = App::new()
+        .name("app-audit-test")
+        .loader(loader)
+        .data_dir(&dir)
+        .audit(&log, tpt_shell_audit::Policy::default())
+        .asset(
+            "index.html",
+            "text/html",
+            r#"<!doctype html><title>start</title><script src="app.js"></script>"#,
+        )
+        .asset("app.js", "text/javascript", UNKNOWN_CALL_JS)
+        .window(Window::new("main").title("app-audit-test"))
+        .build()
+        .expect("the app should start");
+    let id = running.window("main").expect("the main window");
+    let mut title = String::new();
+    let answered = pump_until(Duration::from_secs(30), || {
+        title = running.backend().document_title(id).unwrap_or_default();
+        title.contains("IPC_UNKNOWN_COMMAND")
+    });
+    drop(running);
+
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    let verified = tpt_shell_audit::verify_file(&log);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(answered, "the page got no reply; title was {title:?}");
+    assert!(
+        text.contains(r#""no_such_command""#),
+        "entry missing: {text}"
+    );
+    assert!(
+        text.contains("IPC_UNKNOWN_COMMAND"),
+        "outcome missing: {text}"
+    );
+    assert!(verified.is_ok(), "the log does not verify: {verified:?}");
+}
+
+/// Asks for a blob through the page runtime, fetches it from its app URL, and shows the size and
+/// media type in the title.
+const BLOB_JS: &str = r#"
+    window.tpt.invoke('make_blob').then(function (url) {
+      return fetch(url).then(function (r) {
+        return r.arrayBuffer().then(function (b) {
+          document.title = 'len ' + b.byteLength + ' ' + r.headers.get('content-type');
+        });
+      });
+    }).catch(function (e) { document.title = 'error ' + JSON.stringify(e); });
+"#;
+
+#[test]
+fn a_blob_from_a_command_is_fetched_by_the_page_from_its_app_url() {
+    let Some((loader, _serial)) = runtime_test_loader() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("tpt-app-blob-{}", std::process::id()));
+    let running = App::new()
+        .name("app-blob-test")
+        .loader(loader)
+        .data_dir(&dir)
+        .grant(Grant {
+            capability: "blob.make".into(),
+            window: "main".into(),
+            origin: "https://tpt-app.localhost".into(),
+            scope: Scope::Unrestricted,
+            consent: false,
+        })
+        .command(
+            "make_blob",
+            "blob.make",
+            |_| Target::None,
+            |_| {
+                tpt_shell::blob::put_blob("text/plain", vec![b'x'; 1000])
+                    .map(|url| serde_json::json!(url))
+                    .map_err(|e| CommandError::new("BLOB_FAILED", &e.to_string()))
+            },
+        )
+        .asset(
+            "index.html",
+            "text/html",
+            r#"<!doctype html><title>start</title><script src="app.js"></script>"#,
+        )
+        .asset("app.js", "text/javascript", BLOB_JS)
+        .window(Window::new("main").title("app-blob-test"))
+        .build()
+        .expect("the app should start");
+    let id = running.window("main").expect("the main window");
+    let mut title = String::new();
+    let got = pump_until(Duration::from_secs(30), || {
+        title = running.backend().document_title(id).unwrap_or_default();
+        title.starts_with("len ") || title.starts_with("error")
+    });
+    drop(running);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(got, "the page never finished; title was {title:?}");
+    assert_eq!(title, "len 1000 text/plain");
+}

@@ -7,10 +7,14 @@
 //! commands, then starts them. Running today is Windows only; see [`app`].
 
 pub mod app;
+#[cfg(windows)]
+pub mod blob;
 
 #[cfg(windows)]
 pub use app::Running;
 pub use app::{App, CommandError, Scope, Window};
+#[cfg(windows)]
+pub use app::{MenuItem, TRAY_ACTIVATE};
 pub use tpt_shell_capabilities::{ConsentPrompt, Engine, Grant};
 pub use tpt_shell_core::{Error, Result};
 pub use tpt_shell_ipc::{Caller, Limits, Router, Target, Value};

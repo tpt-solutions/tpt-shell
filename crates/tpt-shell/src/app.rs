@@ -12,6 +12,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+#[cfg(windows)]
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+#[cfg(windows)]
+use crate::blob;
+use tpt_shell_audit::Policy;
+#[cfg(windows)]
+use tpt_shell_audit::{AuditLog, Entry, Outcome};
 use tpt_shell_capabilities::Grant;
 use tpt_shell_core::backend::Asset;
 #[cfg(windows)]
@@ -20,6 +28,8 @@ use tpt_shell_core::backend::WindowSpec;
 use tpt_shell_core::geometry::LogicalSize;
 use tpt_shell_core::Error;
 use tpt_shell_core::Result;
+#[cfg(windows)]
+use tpt_shell_ipc::Caller;
 use tpt_shell_ipc::{Router, Target, Value};
 
 pub use tpt_shell_capabilities::Scope;
@@ -96,7 +106,25 @@ pub struct App {
     /// Files the app serves from its origin, by path.
     #[cfg_attr(not(windows), allow(dead_code))]
     assets: HashMap<String, Asset>,
+    /// Where command calls are audited, and what the log keeps.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    audit: Option<(PathBuf, Policy)>,
+    /// The single-instance id, and what to do with a later launch's arguments.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    instance: Option<(String, ArgsHandler)>,
+    /// The notification-area icon: tooltip, menu, and what a pick does.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    tray: Option<(String, Vec<MenuItem>, TrayHandler)>,
 }
+
+/// Receives the arguments of a later launch of a single-instance app.
+type ArgsHandler = Box<dyn FnMut(Vec<String>)>;
+
+/// Receives the id of a tray click or menu pick.
+type TrayHandler = Box<dyn FnMut(u32)>;
+
+#[cfg(windows)]
+pub use tpt_shell_platform_windows::tray::{MenuItem, ACTIVATE as TRAY_ACTIVATE};
 
 impl App {
     pub fn new() -> Self {
@@ -115,6 +143,13 @@ impl App {
     /// The WebView2 loader DLL (`WebView2Loader.dll`) to load. Required on Windows.
     pub fn loader(mut self, path: impl Into<PathBuf>) -> Self {
         self.loader = Some(path.into());
+        self
+    }
+
+    /// Writes every command call from the app's pages to an audit log at `path` (spec §10.3).
+    /// `policy` decides whether the parameters are kept; their hash is always kept.
+    pub fn audit(mut self, path: impl Into<PathBuf>, policy: Policy) -> Self {
+        self.audit = Some((path.into(), policy));
         self
     }
 
@@ -180,11 +215,41 @@ impl App {
         self
     }
 
+    /// Adds an icon to the notification area with a context menu (Windows). A left click calls
+    /// `on_select` with [`TRAY_ACTIVATE`], and a right click shows the menu, whose pick calls it
+    /// with that item's id (non-zero). The icon is removed when the app stops.
+    pub fn tray(
+        mut self,
+        tooltip: &str,
+        items: Vec<MenuItem>,
+        on_select: impl FnMut(u32) + 'static,
+    ) -> Self {
+        self.tray = Some((tooltip.to_string(), items, Box::new(on_select)));
+        self
+    }
+
+    /// Makes the app a single instance named `app_id` (Windows). A later launch does not open a
+    /// second app: its arguments go to `on_forwarded` in the first one, and that launch's
+    /// [`App::run`] returns at once. The first instance's arguments are not passed on.
+    pub fn single_instance(
+        mut self,
+        app_id: &str,
+        on_forwarded: impl FnMut(Vec<String>) + 'static,
+    ) -> Self {
+        self.instance = Some((app_id.to_string(), Box::new(on_forwarded)));
+        self
+    }
+
     /// Starts the app and runs it until its last window closes or the app quits.
-    pub fn run(self) -> Result<()> {
+    pub fn run(mut self) -> Result<()> {
         #[cfg(windows)]
         {
-            self.build()?.run()
+            let guard = match self.claim_instance()? {
+                Claimed::Forwarded => return Ok(()),
+                Claimed::Alone => None,
+                Claimed::First(guard) => Some(guard),
+            };
+            self.build_with(guard)?.run()
         }
         #[cfg(not(windows))]
         {
@@ -195,8 +260,45 @@ impl App {
     }
 
     /// Creates the windows and wires them, without running the event loop. Windows only.
+    /// Fails when another launch of a single-instance app already owns it.
     #[cfg(windows)]
-    pub fn build(self) -> Result<Running> {
+    pub fn build(mut self) -> Result<Running> {
+        let guard = match self.claim_instance()? {
+            Claimed::Forwarded => {
+                return Err(Error::Backend(
+                    "another instance of this app is running and received these arguments".into(),
+                ))
+            }
+            Claimed::Alone => None,
+            Claimed::First(guard) => Some(guard),
+        };
+        self.build_with(guard)
+    }
+
+    /// Claims the single instance, if one was asked for.
+    #[cfg(windows)]
+    fn claim_instance(&mut self) -> Result<Claimed> {
+        use tpt_shell_platform_windows::single_instance::{claim, Claim};
+
+        let Some((app_id, on_forwarded)) = self.instance.take() else {
+            return Ok(Claimed::Alone);
+        };
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        match claim(&app_id, &args).map_err(Error::Backend)? {
+            Claim::First(mut guard) => {
+                guard.on_forwarded(on_forwarded);
+                Ok(Claimed::First(guard))
+            }
+            Claim::Forwarded => Ok(Claimed::Forwarded),
+        }
+    }
+
+    /// Creates the windows, keeping `instance` alive for as long as the app runs.
+    #[cfg(windows)]
+    fn build_with(
+        self,
+        instance: Option<tpt_shell_platform_windows::single_instance::InstanceGuard>,
+    ) -> Result<Running> {
         use std::cell::RefCell;
         use std::rc::Rc;
         use tpt_shell_capabilities::Engine;
@@ -219,6 +321,14 @@ impl App {
             }
         };
 
+        let tray = match self.tray {
+            Some((tooltip, items, on_select)) => Some(
+                tpt_shell_platform_windows::tray::Tray::new(&tooltip, items, on_select)
+                    .map_err(Error::Backend)?,
+            ),
+            None => None,
+        };
+
         let mut engine = Engine::new();
         for grant in self.grants {
             engine.add_grant(grant).map_err(|e| Error::Backend(e.0))?;
@@ -229,6 +339,19 @@ impl App {
             register(&mut router);
         }
         let router = Rc::new(router);
+        let audit = match self.audit {
+            Some((path, policy)) => {
+                if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+                    std::fs::create_dir_all(dir).map_err(|e| {
+                        Error::Backend(format!("cannot create {}: {e}", dir.display()))
+                    })?;
+                }
+                Some(Rc::new(RefCell::new(
+                    AuditLog::open(&path, policy).map_err(|e| Error::Backend(e.to_string()))?,
+                )))
+            }
+            None => None,
+        };
 
         let assets = Rc::new(self.assets);
         let mut backend = WindowsBackend::new(&loader, &data_dir)?;
@@ -242,26 +365,100 @@ impl App {
             };
             let router = router.clone();
             let engine = engine.clone();
+            let audit = audit.clone();
             backend.set_message_handler(
                 id,
                 Box::new(move |text| {
                     let mut prompt = NativeConsent::for_window(id);
-                    Some(router.handle_authorized(
+                    let started = Instant::now();
+                    let reply = router.handle_authorized(
                         &caller,
                         &mut engine.borrow_mut(),
                         &mut prompt,
                         text.as_bytes(),
                         &Limits::default(),
-                    ))
+                    );
+                    if let Some(log) = &audit {
+                        let entry = audit_entry(&caller, &router, text, &reply, started.elapsed());
+                        // The command has already run, so a failed write cannot undo it.
+                        if let Err(e) = log.borrow_mut().append(&entry) {
+                            eprintln!("tpt-shell: audit write failed: {e}");
+                        }
+                    }
+                    Some(reply)
                 }),
             )?;
             let assets = assets.clone();
-            backend.set_asset_source(id, Box::new(move |path| assets.get(path).cloned()))?;
+            backend.set_asset_source(
+                id,
+                Box::new(move |path| match path.strip_prefix("__tpt/blob/") {
+                    Some(blob_id) => blob::blob_asset(blob_id),
+                    None => assets.get(path).cloned(),
+                }),
+            )?;
             backend.navigate(id, &format!("{APP_ORIGIN}/{}", window.page))?;
             windows.push((window.name, id));
         }
-        Ok(Running { backend, windows })
+        Ok(Running {
+            backend,
+            windows,
+            _instance: instance,
+            _tray: tray,
+        })
     }
+}
+
+/// Builds the audit record for one message from a page. The command and its arguments come from
+/// the request, and the outcome from the reply. A message that does not parse is recorded as
+/// `(unparsed)` with no parameters, so it still leaves a trace. The capability is the one the
+/// command is registered behind, if any.
+#[cfg(windows)]
+fn audit_entry(
+    caller: &Caller,
+    router: &Router,
+    text: &str,
+    reply: &str,
+    duration: Duration,
+) -> Entry {
+    let (command, params) = match serde_json::from_str::<Value>(text) {
+        Ok(request) => (
+            request["cmd"].as_str().unwrap_or("").to_string(),
+            request["args"].clone(),
+        ),
+        Err(_) => ("(unparsed)".to_string(), Value::Null),
+    };
+    let capability = router.capability_of(&command).map(str::to_string);
+    let outcome = match serde_json::from_str::<Value>(reply) {
+        Ok(response) if response["ok"] == Value::Bool(true) => Outcome::Ok,
+        Ok(response) => Outcome::Err(
+            response["error"]["code"]
+                .as_str()
+                .unwrap_or("UNKNOWN")
+                .to_string(),
+        ),
+        Err(_) => Outcome::Err("UNKNOWN".into()),
+    };
+    let wall_unix_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0);
+    Entry {
+        wall_unix_ms,
+        mono_ns: process_start().elapsed().as_nanos() as u64,
+        actor: caller.window.clone(),
+        command,
+        capability,
+        params,
+        outcome,
+        duration_us: u64::try_from(duration.as_micros()).unwrap_or(u64::MAX),
+    }
+}
+
+/// The reference point for `mono_ns`: the first time an audit record is built.
+#[cfg(windows)]
+fn process_start() -> Instant {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    *START.get_or_init(Instant::now)
 }
 
 /// A started app: its windows exist and their pages are loaded. Windows only.
@@ -269,6 +466,21 @@ impl App {
 pub struct Running {
     backend: tpt_shell_platform_windows::backend::WindowsBackend,
     windows: Vec<(String, tpt_shell_platform_windows::backend::WindowId)>,
+    /// Held so that no other launch can become the first instance while this app runs.
+    _instance: Option<tpt_shell_platform_windows::single_instance::InstanceGuard>,
+    /// Held so the icon stays until the app stops.
+    _tray: Option<tpt_shell_platform_windows::tray::Tray>,
+}
+
+/// How a launch relates to a single-instance app.
+#[cfg(windows)]
+enum Claimed {
+    /// The app did not ask for a single instance.
+    Alone,
+    /// This launch is the first instance.
+    First(tpt_shell_platform_windows::single_instance::InstanceGuard),
+    /// Another launch owns the app and received these arguments.
+    Forwarded,
 }
 
 #[cfg(windows)]
@@ -286,6 +498,18 @@ impl Running {
             .map(|(_, id)| *id)
     }
 
+    /// Sends an event to the page of the window called `window`. The page gets it through
+    /// `window.tpt.on(name, handler)`. Events are not queued: a page that is not listening
+    /// yet misses them, so wait until the page has registered its handler.
+    pub fn emit(&mut self, window: &str, name: &str, data: Value) -> Result<()> {
+        use tpt_shell_core::backend::WebviewBackend;
+        let id = self
+            .window(window)
+            .ok_or_else(|| Error::Backend(format!("no window named {window:?}")))?;
+        let message = tpt_shell_ipc::event(name, data).to_string();
+        self.backend.post_message(id, &message)
+    }
+
     /// Runs the event loop until the app quits.
     pub fn run(mut self) -> Result<()> {
         self.backend.run_until_quit()
@@ -295,6 +519,91 @@ impl Running {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn audit_entries_record_the_command_its_arguments_and_the_outcome() {
+        let caller = Caller {
+            window: "main".into(),
+            origin: "https://tpt-app.localhost".into(),
+        };
+        let mut router = Router::new();
+        router.register_guarded("read", "fs.read", |_| Target::None, |_| Ok(Value::Null));
+        router.register("greet", |_| Ok(Value::Null));
+        let ok = audit_entry(
+            &caller,
+            &router,
+            r#"{"v":1,"id":1,"cmd":"greet","args":{"name":"x"}}"#,
+            r#"{"id":1,"ok":true,"data":1}"#,
+            Duration::from_micros(7),
+        );
+        assert_eq!(ok.actor, "main");
+        assert_eq!(ok.command, "greet");
+        assert_eq!(ok.params, serde_json::json!({ "name": "x" }));
+        assert_eq!(ok.outcome, Outcome::Ok);
+        assert_eq!(ok.duration_us, 7);
+        assert_eq!(ok.capability, None);
+
+        let denied = audit_entry(
+            &caller,
+            &router,
+            r#"{"v":1,"id":2,"cmd":"read","args":{}}"#,
+            r#"{"id":2,"ok":false,"error":{"code":"CAP_DENIED","message":"no"}}"#,
+            Duration::ZERO,
+        );
+        assert_eq!(denied.outcome, Outcome::Err("CAP_DENIED".into()));
+        assert_eq!(denied.capability.as_deref(), Some("fs.read"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_later_launch_hands_its_arguments_over_and_does_not_start_the_app() {
+        use std::sync::{Arc, Mutex};
+        use tpt_shell_platform_windows::single_instance::{claim, Claim};
+
+        let app_id = format!("app-test-{}", std::process::id());
+        // Stands in for the first instance, which receives the arguments. This test thread is
+        // the later launch.
+        let mut first = match claim(&app_id, &[]).expect("first claim") {
+            Claim::First(guard) => guard,
+            Claim::Forwarded => panic!("the first claim should own the app"),
+        };
+        let seen: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        first.on_forwarded(move |args| sink.lock().expect("sink").push(args));
+        // No loader is set, so this only succeeds if `run` returns before it needs one.
+        App::new()
+            .single_instance(&app_id, |_| {})
+            .run()
+            .expect("a later launch returns at once");
+        assert_eq!(seen.lock().expect("seen").len(), 1);
+
+        let err = App::new()
+            .single_instance(&app_id, |_| {})
+            .build()
+            .err()
+            .expect("build refuses a forwarded launch");
+        assert!(err.to_string().contains("another instance"), "{err}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_message_that_does_not_parse_is_still_recorded() {
+        let caller = Caller {
+            window: "main".into(),
+            origin: "https://tpt-app.localhost".into(),
+        };
+        let junk = audit_entry(
+            &caller,
+            &Router::new(),
+            "not json",
+            "also not json",
+            Duration::ZERO,
+        );
+        assert_eq!(junk.command, "(unparsed)");
+        assert_eq!(junk.params, Value::Null);
+        assert_eq!(junk.outcome, Outcome::Err("UNKNOWN".into()));
+    }
 
     #[cfg(windows)]
     #[test]
