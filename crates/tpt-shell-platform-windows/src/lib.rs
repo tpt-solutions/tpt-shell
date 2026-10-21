@@ -7,7 +7,13 @@
 //! this crate is empty.
 
 #[cfg(windows)]
+pub mod backend;
+#[cfg(windows)]
+pub mod clipboard;
+#[cfg(windows)]
 pub mod com;
+#[cfg(windows)]
+pub mod dialogs;
 #[cfg(windows)]
 pub mod event_handler;
 #[cfg(windows)]

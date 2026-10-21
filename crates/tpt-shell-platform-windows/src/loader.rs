@@ -142,6 +142,25 @@ impl OfficialLoader {
     }
 }
 
+/// How the shell finds and talks to the WebView2 runtime (spec §6.1). The shell only uses
+/// [`OfficialLoader`] (decision O1). The trait lets other strategies, and test doubles, plug in.
+pub trait RuntimeLoader {
+    /// The environment entry point, typed.
+    fn create_environment_fn(&self) -> Result<CreateEnvironmentFn, LoadError>;
+    /// Version of the installed runtime, for example "155.0.4283.62".
+    fn runtime_version(&self) -> Result<String, LoadError>;
+}
+
+impl RuntimeLoader for OfficialLoader {
+    fn create_environment_fn(&self) -> Result<CreateEnvironmentFn, LoadError> {
+        OfficialLoader::create_environment_fn(self)
+    }
+
+    fn runtime_version(&self) -> Result<String, LoadError> {
+        OfficialLoader::runtime_version(self)
+    }
+}
+
 impl Drop for OfficialLoader {
     fn drop(&mut self) {
         // SAFETY: `module` came from LoadLibraryW and is freed exactly once, here.
@@ -152,6 +171,33 @@ impl Drop for OfficialLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test double for code that depends on `RuntimeLoader` rather than on the real DLL.
+    struct StubLoader;
+
+    impl RuntimeLoader for StubLoader {
+        fn create_environment_fn(&self) -> Result<CreateEnvironmentFn, LoadError> {
+            Err(LoadError::MissingExport(
+                "CreateCoreWebView2EnvironmentWithOptions",
+            ))
+        }
+
+        fn runtime_version(&self) -> Result<String, LoadError> {
+            Ok("155.0.4283.62".into())
+        }
+    }
+
+    #[test]
+    fn runtime_loader_is_usable_as_a_trait_object() {
+        let loader: &dyn RuntimeLoader = &StubLoader;
+        assert_eq!(loader.runtime_version().unwrap(), "155.0.4283.62");
+        assert_eq!(
+            loader.create_environment_fn().err(),
+            Some(LoadError::MissingExport(
+                "CreateCoreWebView2EnvironmentWithOptions"
+            ))
+        );
+    }
 
     #[test]
     fn missing_file_is_reported_with_path() {

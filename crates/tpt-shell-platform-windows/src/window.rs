@@ -5,11 +5,15 @@
 //! WebView2 completes its asynchronous setup through the UI thread's message queue, so
 //! waiting for it means pumping messages.
 
+use std::ffi::OsString;
 use std::ptr::{null, null_mut};
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::StationsAndDesktops::{
+    CloseDesktop, OpenInputDesktop, DESKTOP_READOBJECTS,
+};
 use windows_sys::Win32::System::Threading::Sleep;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW,
@@ -107,6 +111,32 @@ pub fn pump_until(timeout: Duration, mut done: impl FnMut() -> bool) -> bool {
         // SAFETY: Sleep has no preconditions.
         unsafe { Sleep(1) };
     }
+}
+
+/// Whether this session has an interactive desktop. Services and some CI sessions do not.
+pub fn interactive_desktop_available() -> bool {
+    // SAFETY: no pointer arguments. A non-null handle is closed below, once.
+    let desktop = unsafe { OpenInputDesktop(0, 0, DESKTOP_READOBJECTS) };
+    if desktop.is_null() {
+        return false;
+    }
+    // SAFETY: `desktop` came from OpenInputDesktop and is closed exactly once, here.
+    unsafe { CloseDesktop(desktop) };
+    true
+}
+
+/// Loader path for tests that need a real WebView2 runtime. Returns `None`, after saying why,
+/// when `TPT_WEBVIEW2_LOADER` is unset or there is no interactive desktop (RFC 0001, question 3).
+pub fn runtime_test_loader() -> Option<OsString> {
+    let Some(path) = std::env::var_os("TPT_WEBVIEW2_LOADER") else {
+        eprintln!("skipped: set TPT_WEBVIEW2_LOADER to run this test");
+        return None;
+    };
+    if !interactive_desktop_available() {
+        eprintln!("skipped: no interactive desktop in this session");
+        return None;
+    }
+    Some(path)
 }
 
 unsafe extern "system" fn wnd_proc(

@@ -7,10 +7,10 @@
 //! from the header, so slot positions match `WebView2.h`. The header test below checks that.
 
 use std::ffi::c_void;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 
-use windows_sys::Win32::Foundation::HWND;
+use windows_sys::Win32::Foundation::{HWND, RECT};
 
 use windows_sys::Win32::UI::Shell::SHCreateMemStream;
 
@@ -43,11 +43,29 @@ pub const IID_SCRIPT_ADDED_HANDLER: Guid = Guid {
     data3: 0x47b5,
     data4: [0xbc, 0x6f, 0x8e, 0x78, 0x95, 0xfc, 0xea, 0x17],
 };
+pub const IID_PROCESS_FAILED_HANDLER: Guid = Guid {
+    data1: 0x79e0aea4,
+    data2: 0x990b,
+    data3: 0x42d9,
+    data4: [0xaa, 0x1d, 0x0f, 0xcc, 0x2e, 0x5b, 0xc7, 0xf1],
+};
+pub const IID_DEVTOOLS_DONE_HANDLER: Guid = Guid {
+    data1: 0x5c4889f0,
+    data2: 0x5ef6,
+    data3: 0x4c5a,
+    data4: [0x95, 0x2c, 0xd8, 0xf1, 0xb9, 0x2d, 0x05, 0x74],
+};
 pub const IID_NAVIGATION_STARTING_HANDLER: Guid = Guid {
     data1: 0x9adbe429,
     data2: 0xf36d,
     data3: 0x432b,
     data4: [0x9d, 0xdc, 0xf8, 0x88, 0x1f, 0xbd, 0x76, 0xe3],
+};
+pub const IID_EXECUTE_SCRIPT_HANDLER: Guid = Guid {
+    data1: 0x49511172,
+    data2: 0xcc67,
+    data3: 0x4bca,
+    data4: [0x99, 0x23, 0x13, 0x71, 0x12, 0xf4, 0xc4, 0xcc],
 };
 pub const IID_WEB_MESSAGE_RECEIVED_HANDLER: Guid = Guid {
     data1: 0x57213f19,
@@ -83,7 +101,9 @@ struct EnvironmentVtbl {
 #[repr(C)]
 struct ControllerVtbl {
     base: IUnknownVtbl,
-    _before_close: [usize; 21],
+    _before_bounds: [usize; 3],
+    put_bounds: unsafe extern "system" fn(*mut c_void, RECT) -> HRESULT,
+    _before_close: [usize; 17],
     close: unsafe extern "system" fn(*mut c_void) -> HRESULT,
     get_core_webview2: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
 }
@@ -96,14 +116,28 @@ struct WebViewVtbl {
     navigate_to_string: unsafe extern "system" fn(*mut c_void, *const u16) -> HRESULT,
     add_navigation_starting:
         unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
-    _before_script: [usize; 19],
+    _before_frame_navigation: [usize; 9],
+    add_frame_navigation_starting:
+        unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
+    _before_script: [usize; 7],
+    add_process_failed: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
+    _before_process_failed_remove: [usize; 1],
     add_script_to_execute_on_document_created:
         unsafe extern "system" fn(*mut c_void, *const u16, *mut c_void) -> HRESULT,
-    _before_post_message: [usize; 5],
+    // Removes the script added to document creation (vtable 28), then ExecuteScript (29).
+    _before_execute_script: [usize; 1],
+    execute_script: unsafe extern "system" fn(*mut c_void, *const u16, *mut c_void) -> HRESULT,
+    // CapturePreview (30), then Reload (31).
+    _before_reload: [usize; 1],
+    reload: unsafe extern "system" fn(*mut c_void) -> HRESULT,
+    _before_post_message: [usize; 1],
     post_web_message_as_string: unsafe extern "system" fn(*mut c_void, *const u16) -> HRESULT,
     add_web_message_received:
         unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
-    _before_document_title: [usize; 13],
+    _before_devtools: [usize; 1],
+    call_devtools_protocol_method:
+        unsafe extern "system" fn(*mut c_void, *const u16, *const u16, *mut c_void) -> HRESULT,
+    _before_document_title: [usize; 11],
     get_document_title: unsafe extern "system" fn(*mut c_void, *mut *mut u16) -> HRESULT,
     _before_resource_requested: [usize; 6],
     add_web_resource_requested:
@@ -127,6 +161,13 @@ struct WebResourceArgsVtbl {
 struct WebResourceRequestVtbl {
     base: IUnknownVtbl,
     get_uri: unsafe extern "system" fn(*mut c_void, *mut *mut u16) -> HRESULT,
+}
+
+/// `ICoreWebView2ProcessFailedEventArgs`: get_ProcessFailedKind = 0.
+#[repr(C)]
+struct ProcessFailedArgsVtbl {
+    base: IUnknownVtbl,
+    get_process_failed_kind: unsafe extern "system" fn(*mut c_void, *mut i32) -> HRESULT,
 }
 
 /// `ICoreWebView2NavigationStartingEventArgs`: get_Uri = 0, put_Cancel = 5.
@@ -215,6 +256,27 @@ impl WebResourceRequest {
     }
 }
 
+/// Why a WebView2 process failed (`COREWEBVIEW2_PROCESS_FAILED_KIND`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessFailure {
+    /// The browser process exited. The whole webview is gone.
+    BrowserExited,
+    /// A renderer exited. The page is gone; reloading it usually recovers the page.
+    RenderExited,
+    /// A kind this version does not name, with its raw value.
+    Other(i32),
+}
+
+impl ProcessFailure {
+    fn from_kind(kind: i32) -> Self {
+        match kind {
+            0 => ProcessFailure::BrowserExited,
+            1 => ProcessFailure::RenderExited,
+            other => ProcessFailure::Other(other),
+        }
+    }
+}
+
 /// `ICoreWebView2Environment`.
 pub struct Environment(ComPtr);
 
@@ -223,6 +285,27 @@ pub struct Controller(ComPtr);
 
 /// `ICoreWebView2`.
 pub struct WebView(ComPtr);
+
+/// Default WebView2 user-data folder for an app (RFC 0001, question 2):
+/// `<local_app_data>\tpt-shell\<app_id>\webview2`. `app_id` must be one plain folder name:
+/// letters, digits, `-`, `_` or `.`, not `.` or `..`.
+pub fn default_user_data_dir(local_app_data: &Path, app_id: &str) -> Result<PathBuf, String> {
+    let plain = !app_id.is_empty()
+        && app_id != "."
+        && app_id != ".."
+        && app_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if !plain {
+        return Err(format!(
+            "invalid app id `{app_id}`: use one plain folder name"
+        ));
+    }
+    Ok(local_app_data
+        .join("tpt-shell")
+        .join(app_id)
+        .join("webview2"))
+}
 
 /// Starts environment creation. `on_done` runs on the UI thread, from the message pump.
 pub fn create_environment(
@@ -287,6 +370,18 @@ impl Environment {
 }
 
 impl Controller {
+    /// Sets the area the webview fills, in the parent window's client coordinates.
+    pub fn set_bounds(&self, bounds: RECT) -> Result<(), HRESULT> {
+        let vt: &ControllerVtbl = self.0.vtbl();
+        // SAFETY: `self.0` is a live controller; the RECT is passed by value, as the header declares.
+        let hr = unsafe { (vt.put_bounds)(self.0.as_ptr(), bounds) };
+        if hr < 0 {
+            Err(hr)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn webview(&self) -> Result<WebView, HRESULT> {
         let vt: &ControllerVtbl = self.0.vtbl();
         let mut out: *mut c_void = null_mut();
@@ -317,6 +412,28 @@ impl Controller {
 impl WebView {
     /// Runs `script` in every document before any page script, from now on. `on_done` receives
     /// the registration result on the UI thread.
+    /// Runs `script` in the page. `on_done` receives the call's HRESULT on the UI thread. The
+    /// script's result is not read: the completion handler's string argument is ignored.
+    pub fn execute_script(
+        &self,
+        script: &str,
+        on_done: impl FnOnce(HRESULT) + 'static,
+    ) -> Result<(), HRESULT> {
+        let handler =
+            new_completed_handler(IID_EXECUTE_SCRIPT_HANDLER, move |hr, _result| on_done(hr));
+        let text = wide(script);
+        let vt: &WebViewVtbl = self.0.vtbl();
+        // SAFETY: `text` is NUL-terminated and lives across the call; `handler` is live for the call.
+        let hr = unsafe { (vt.execute_script)(self.0.as_ptr(), text.as_ptr(), handler) };
+        // SAFETY: we release our reference. The webview keeps its own while it needs the callback.
+        unsafe { release(handler) };
+        if hr < 0 {
+            Err(hr)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn add_document_start_script(
         &self,
         script: &str,
@@ -328,6 +445,84 @@ impl WebView {
         // SAFETY: `text` is NUL-terminated and lives across the call; `handler` is live for the call.
         let hr = unsafe {
             (vt.add_script_to_execute_on_document_created)(self.0.as_ptr(), text.as_ptr(), handler)
+        };
+        // SAFETY: we release our reference. The webview keeps its own while it needs the callback.
+        unsafe { release(handler) };
+        if hr < 0 {
+            Err(hr)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Calls `f` when a WebView2 process fails. Use `WebView::reload` from inside `f` to recover a
+    /// page whose renderer exited (spec 10.1, page crash recovery).
+    pub fn on_process_failed(
+        &self,
+        mut f: impl FnMut(&WebView, ProcessFailure) + 'static,
+    ) -> Result<(), HRESULT> {
+        let handler = new_event_handler(IID_PROCESS_FAILED_HANDLER, move |sender, args| {
+            // SAFETY: both pointers are valid for the callback; the wrappers take their own references.
+            let (Some(sender), Some(args)) = (unsafe { ComPtr::from_borrowed(sender) }, unsafe {
+                ComPtr::from_borrowed(args)
+            }) else {
+                return;
+            };
+            let vt: &ProcessFailedArgsVtbl = args.vtbl();
+            let mut kind: i32 = -1;
+            // SAFETY: `kind` is a valid out-pointer for an enum value.
+            let hr = unsafe { (vt.get_process_failed_kind)(args.as_ptr(), &mut kind) };
+            if hr >= 0 {
+                f(&WebView(sender), ProcessFailure::from_kind(kind));
+            }
+        });
+        let mut token = 0i64;
+        let vt: &WebViewVtbl = self.0.vtbl();
+        // SAFETY: `handler` is live for the call; `token` is a valid out-pointer.
+        let hr = unsafe { (vt.add_process_failed)(self.0.as_ptr(), handler, &mut token) };
+        // SAFETY: we release our reference. The webview keeps its own.
+        unsafe { release(handler) };
+        if hr < 0 {
+            Err(hr)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Reloads the current page.
+    pub fn reload(&self) -> Result<(), HRESULT> {
+        let vt: &WebViewVtbl = self.0.vtbl();
+        // SAFETY: `self.0` is a live webview.
+        let hr = unsafe { (vt.reload)(self.0.as_ptr()) };
+        if hr < 0 {
+            Err(hr)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Runs a DevTools protocol method. Crate-private: raw protocol access is not offered to
+    /// pages or agents (spec 9, 10.4). Used by tests to crash a renderer on purpose.
+    #[cfg(test)]
+    pub(crate) fn call_devtools_protocol(
+        &self,
+        method: &str,
+        params_json: &str,
+        on_done: impl FnOnce(HRESULT) + 'static,
+    ) -> Result<(), HRESULT> {
+        let handler =
+            new_completed_handler(IID_DEVTOOLS_DONE_HANDLER, move |hr, _result| on_done(hr));
+        let name = wide(method);
+        let params = wide(params_json);
+        let vt: &WebViewVtbl = self.0.vtbl();
+        // SAFETY: both strings are NUL-terminated and live across the call; `handler` is live.
+        let hr = unsafe {
+            (vt.call_devtools_protocol_method)(
+                self.0.as_ptr(),
+                name.as_ptr(),
+                params.as_ptr(),
+                handler,
+            )
         };
         // SAFETY: we release our reference. The webview keeps its own while it needs the callback.
         unsafe { release(handler) };
@@ -430,44 +625,29 @@ impl WebView {
     }
 
     /// Calls `allow` for each top-level navigation before it starts. Returning false cancels it.
-    /// A URI that cannot be read is cancelled (fail closed). Frame navigations are not covered yet.
-    /// Each call adds one more policy handler; the policies all run.
+    /// A URI that cannot be read is cancelled (fail closed). Each call adds one more policy handler.
     pub fn set_navigation_policy(
         &self,
-        mut allow: impl FnMut(&str) -> bool + 'static,
+        allow: impl FnMut(&str) -> bool + 'static,
     ) -> Result<(), HRESULT> {
-        let handler = new_event_handler(IID_NAVIGATION_STARTING_HANDLER, move |_sender, args| {
-            // SAFETY: `args` is valid during the callback; the wrapper takes its own reference.
-            let Some(args) = (unsafe { ComPtr::from_borrowed(args) }) else {
-                return;
-            };
-            let vt: &NavigationArgsVtbl = args.vtbl();
-            let mut out: *mut u16 = null_mut();
-            // SAFETY: `out` is a valid out-pointer for a COM-allocated string.
-            let hr = unsafe { (vt.get_uri)(args.as_ptr(), &mut out) };
-            let permitted = if hr < 0 {
-                false
-            } else {
-                // SAFETY: on success `out` is a COM-allocated, NUL-terminated string.
-                let uri = unsafe { crate::com::take_co_string(out) };
-                allow(&uri)
-            };
-            if !permitted {
-                // SAFETY: `args` is live for the call. 1 is TRUE.
-                unsafe { (vt.put_cancel)(args.as_ptr(), 1) };
-            }
-        });
-        let mut token = 0i64;
         let vt: &WebViewVtbl = self.0.vtbl();
-        // SAFETY: `handler` is live for the call; `token` is a valid out-pointer.
-        let hr = unsafe { (vt.add_navigation_starting)(self.0.as_ptr(), handler, &mut token) };
-        // SAFETY: we release our reference. The webview keeps its own.
-        unsafe { release(handler) };
-        if hr < 0 {
-            Err(hr)
-        } else {
-            Ok(())
-        }
+        register_navigation_policy(self, allow, |web, handler, token| {
+            // SAFETY: `handler` is live for the call; `token` is a valid out-pointer.
+            unsafe { (vt.add_navigation_starting)(web.0.as_ptr(), handler, token) }
+        })
+    }
+
+    /// Like [`WebView::set_navigation_policy`], for navigations inside iframes. Each frame
+    /// navigation is checked against the same `allow` rule; a blocked one is cancelled.
+    pub fn set_frame_navigation_policy(
+        &self,
+        allow: impl FnMut(&str) -> bool + 'static,
+    ) -> Result<(), HRESULT> {
+        let vt: &WebViewVtbl = self.0.vtbl();
+        register_navigation_policy(self, allow, |web, handler, token| {
+            // SAFETY: `handler` is live for the call; `token` is a valid out-pointer.
+            unsafe { (vt.add_frame_navigation_starting)(web.0.as_ptr(), handler, token) }
+        })
     }
 
     pub fn navigate_to_string(&self, html: &str) -> Result<(), HRESULT> {
@@ -507,6 +687,45 @@ impl WebView {
     }
 }
 
+/// Builds one navigation-policy handler and registers it through `add`. The handler reads the
+/// URI and cancels the navigation when `allow` returns false, or when the URI cannot be read.
+fn register_navigation_policy(
+    web: &WebView,
+    mut allow: impl FnMut(&str) -> bool + 'static,
+    add: impl FnOnce(&WebView, *mut c_void, *mut i64) -> HRESULT,
+) -> Result<(), HRESULT> {
+    let handler = new_event_handler(IID_NAVIGATION_STARTING_HANDLER, move |_sender, args| {
+        // SAFETY: `args` is valid during the callback; the wrapper takes its own reference.
+        let Some(args) = (unsafe { ComPtr::from_borrowed(args) }) else {
+            return;
+        };
+        let vt: &NavigationArgsVtbl = args.vtbl();
+        let mut out: *mut u16 = null_mut();
+        // SAFETY: `out` is a valid out-pointer for a COM-allocated string.
+        let hr = unsafe { (vt.get_uri)(args.as_ptr(), &mut out) };
+        let permitted = if hr < 0 {
+            false
+        } else {
+            // SAFETY: on success `out` is a COM-allocated, NUL-terminated string.
+            let uri = unsafe { crate::com::take_co_string(out) };
+            allow(&uri)
+        };
+        if !permitted {
+            // SAFETY: `args` is live for the call. 1 is TRUE.
+            unsafe { (vt.put_cancel)(args.as_ptr(), 1) };
+        }
+    });
+    let mut token = 0i64;
+    let hr = add(web, handler, &mut token);
+    // SAFETY: we release our reference. The webview keeps its own.
+    unsafe { release(handler) };
+    if hr < 0 {
+        Err(hr)
+    } else {
+        Ok(())
+    }
+}
+
 /// Checks that each slot we call sits at its header index. A reordered vtable would
 /// otherwise call the wrong function at runtime.
 #[cfg(test)]
@@ -514,18 +733,29 @@ mod header_tests {
     use std::path::PathBuf;
 
     /// (interface, header index, method name) for every slot we call.
-    const USED_SLOTS: [(&str, usize, &str); 19] = [
+    const USED_SLOTS: [(&str, usize, &str); 26] = [
         (
             "ICoreWebView2Environment",
             0,
             "CreateCoreWebView2Controller",
         ),
         ("ICoreWebView2Environment", 1, "CreateWebResourceResponse"),
+        ("ICoreWebView2Controller", 3, "put_Bounds"),
         ("ICoreWebView2Controller", 21, "Close"),
         ("ICoreWebView2Controller", 22, "get_CoreWebView2"),
         ("ICoreWebView2", 2, "Navigate"),
         ("ICoreWebView2", 3, "NavigateToString"),
         ("ICoreWebView2", 4, "add_NavigationStarting"),
+        ("ICoreWebView2", 22, "add_ProcessFailed"),
+        ("ICoreWebView2", 26, "ExecuteScript"),
+        ("ICoreWebView2", 28, "Reload"),
+        ("ICoreWebView2", 33, "CallDevToolsProtocolMethod"),
+        (
+            "ICoreWebView2ProcessFailedEventArgs",
+            0,
+            "get_ProcessFailedKind",
+        ),
+        ("ICoreWebView2", 14, "add_FrameNavigationStarting"),
         ("ICoreWebView2", 30, "PostWebMessageAsString"),
         ("ICoreWebView2", 31, "add_WebMessageReceived"),
         ("ICoreWebView2", 45, "get_DocumentTitle"),
@@ -608,15 +838,40 @@ mod header_tests {
 }
 
 #[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn default_user_data_dir_follows_rfc_default() {
+        let dir = default_user_data_dir(Path::new(r"C:\Users\me\AppData\Local"), "my-app").unwrap();
+        assert_eq!(
+            dir,
+            Path::new(r"C:\Users\me\AppData\Local\tpt-shell\my-app\webview2")
+        );
+    }
+
+    #[test]
+    fn default_user_data_dir_rejects_path_tricks() {
+        let base = Path::new(r"C:\base");
+        for bad in ["", ".", "..", "a/b", r"a\b", "../x", "a b", "C:evil"] {
+            assert!(
+                default_user_data_dir(base, bad).is_err(),
+                "accepted `{bad}`"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod runtime_tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::time::Duration;
 
     use super::*;
     use crate::loader::OfficialLoader;
     use crate::shim::SHIM_JS;
-    use crate::window::{pump_until, HiddenWindow};
+    use crate::window::{pump_until, runtime_test_loader, HiddenWindow};
     use tpt_shell_ipc::{Limits, Router};
 
     const INDEX_HTML: &[u8] = b"<!doctype html><title>loading</title><script>window.chrome.webview.addEventListener('message', e => { document.title = 'got-' + e.data; });window.chrome.webview.postMessage('ping');</script>";
@@ -625,8 +880,7 @@ mod runtime_tests {
     /// page posts "ping", Rust replies "pong", and the page sets its title to "got-pong".
     #[test]
     fn serves_virtual_host_and_round_trips_a_message() {
-        let Some(loader_path) = std::env::var_os("TPT_WEBVIEW2_LOADER") else {
-            eprintln!("skipped: set TPT_WEBVIEW2_LOADER to run this test");
+        let Some(loader_path) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -714,8 +968,7 @@ mod runtime_tests {
     /// Navigations outside the app origin are cancelled before they start, and the page stays put.
     #[test]
     fn blocks_navigation_outside_the_app_origin() {
-        let Some(loader_path) = std::env::var_os("TPT_WEBVIEW2_LOADER") else {
-            eprintln!("skipped: set TPT_WEBVIEW2_LOADER to run this test");
+        let Some(loader_path) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -835,8 +1088,7 @@ mod runtime_tests {
     /// unknown command answers with a typed error. Both come back through the message channel.
     #[test]
     fn shim_invokes_a_rust_command_and_receives_a_typed_error() {
-        let Some(loader_path) = std::env::var_os("TPT_WEBVIEW2_LOADER") else {
-            eprintln!("skipped: set TPT_WEBVIEW2_LOADER to run this test");
+        let Some(loader_path) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -952,8 +1204,7 @@ mod runtime_tests {
     /// `app.js`, sets the title, so the title proves the embedded file was fetched and run.
     #[test]
     fn serves_embedded_assets_from_the_app_origin() {
-        let Some(loader_path) = std::env::var_os("TPT_WEBVIEW2_LOADER") else {
-            eprintln!("skipped: set TPT_WEBVIEW2_LOADER to run this test");
+        let Some(loader_path) = runtime_test_loader() else {
             return;
         };
         assert!(
@@ -1053,8 +1304,7 @@ mod runtime_tests {
     /// return to their starting counts. This checks that the COM references balance (spec R3).
     #[test]
     fn controller_cycles_do_not_leak() {
-        let Some(loader_path) = std::env::var_os("TPT_WEBVIEW2_LOADER") else {
-            eprintln!("skipped: set TPT_WEBVIEW2_LOADER to run this test");
+        let Some(loader_path) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -1133,12 +1383,267 @@ mod runtime_tests {
         );
     }
 
+    const FRAME_HTML: &[u8] =
+        b"<!doctype html><title>loading</title><iframe src=\"https://example.com/\"></iframe>";
+
+    /// An iframe pointing outside the app origin is cancelled. The top-level app page still loads.
+    #[test]
+    fn blocks_frame_navigation_outside_the_app_origin() {
+        let Some(loader_path) = runtime_test_loader() else {
+            return;
+        };
+        // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
+        let co = unsafe { windows_sys::Win32::System::Com::CoInitializeEx(std::ptr::null(), 2) };
+        assert!(co >= 0, "CoInitializeEx failed: 0x{co:08X}");
+
+        let loader = OfficialLoader::load(Path::new(&loader_path)).expect("loader should load");
+        let create = loader
+            .create_environment_fn()
+            .expect("environment entry point");
+        let window = HiddenWindow::new().expect("hidden window");
+        let data_dir = std::env::temp_dir().join(format!("tpt-shell-frame-{}", std::process::id()));
+
+        let env_slot: Rc<RefCell<Option<Result<Environment, HRESULT>>>> =
+            Rc::new(RefCell::new(None));
+        let slot = env_slot.clone();
+        create_environment(create, &data_dir, move |r| *slot.borrow_mut() = Some(r))
+            .expect("start environment");
+        assert!(
+            pump_until(Duration::from_secs(30), || env_slot.borrow().is_some()),
+            "environment timed out"
+        );
+        let env = env_slot
+            .borrow_mut()
+            .take()
+            .unwrap()
+            .expect("environment creation failed");
+
+        let ctrl_slot: Rc<RefCell<Option<Result<Controller, HRESULT>>>> =
+            Rc::new(RefCell::new(None));
+        let slot = ctrl_slot.clone();
+        env.create_controller(window.hwnd() as isize, move |r| {
+            *slot.borrow_mut() = Some(r)
+        })
+        .expect("start controller");
+        assert!(
+            pump_until(Duration::from_secs(30), || ctrl_slot.borrow().is_some()),
+            "controller timed out"
+        );
+        let ctrl = ctrl_slot
+            .borrow_mut()
+            .take()
+            .unwrap()
+            .expect("controller creation failed");
+
+        let web = ctrl.webview().expect("webview");
+        web.add_web_resource_requested_filter(&format!("{APP_ORIGIN}/*"))
+            .expect("filter");
+        web.on_web_resource_requested(move |req| {
+            let uri = req.uri().unwrap_or_default();
+            let (status, content_type, body): (i32, &str, &[u8]) =
+                if uri == format!("{APP_ORIGIN}/index.html") {
+                    (200, "text/html", FRAME_HTML)
+                } else {
+                    (404, "text/plain", b"not found")
+                };
+            let _ = req.respond(&env, status, content_type, body);
+        })
+        .expect("resource handler");
+
+        let blocked: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let top_blocked = blocked.clone();
+        web.set_navigation_policy(move |uri| {
+            let allowed = uri.starts_with(APP_ORIGIN) || uri == "about:blank";
+            if !allowed {
+                top_blocked.borrow_mut().push(format!("top {uri}"));
+            }
+            allowed
+        })
+        .expect("top-level policy");
+        let frame_blocked = blocked.clone();
+        web.set_frame_navigation_policy(move |uri| {
+            let allowed = uri.starts_with(APP_ORIGIN) || uri == "about:blank";
+            if !allowed {
+                frame_blocked.borrow_mut().push(format!("frame {uri}"));
+            }
+            allowed
+        })
+        .expect("frame policy");
+
+        web.navigate(&format!("{APP_ORIGIN}/index.html"))
+            .expect("navigate");
+        let mut title = String::new();
+        let loaded = pump_until(Duration::from_secs(30), || {
+            title = web.document_title().unwrap_or_default();
+            title == "loading"
+        });
+        let got_frame_block = pump_until(Duration::from_secs(30), || {
+            blocked
+                .borrow()
+                .iter()
+                .any(|b| b.starts_with("frame https://example.com"))
+        });
+        pump_until(Duration::from_millis(500), || false);
+        let title_after = web.document_title().unwrap_or_default();
+
+        ctrl.close().expect("close controller");
+        drop(web);
+        drop(ctrl);
+        // SAFETY: balances the successful CoInitializeEx above.
+        unsafe { windows_sys::Win32::System::Com::CoUninitialize() };
+
+        let list = blocked.borrow().clone();
+        assert!(loaded, "app page did not load; last title {title:?}");
+        assert!(
+            got_frame_block,
+            "iframe to example.com was not blocked; blocked list: {list:?}"
+        );
+        assert!(
+            !list.iter().any(|b| b.starts_with("top ")),
+            "the top-level app page was blocked: {list:?}"
+        );
+        assert_eq!(
+            title_after, "loading",
+            "the page changed after a blocked frame navigation"
+        );
+    }
+
+    /// Crashes the renderer on purpose (DevTools `Page.crash`). The shell reports a RenderExited
+    /// failure, the callback reloads the page, and the page loads again.
+    #[test]
+    fn renderer_crash_is_reported_and_the_page_reloads() {
+        let Some(loader_path) = runtime_test_loader() else {
+            return;
+        };
+        // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
+        let co = unsafe { windows_sys::Win32::System::Com::CoInitializeEx(std::ptr::null(), 2) };
+        assert!(co >= 0, "CoInitializeEx failed: 0x{co:08X}");
+
+        let loader = OfficialLoader::load(Path::new(&loader_path)).expect("loader should load");
+        let create = loader
+            .create_environment_fn()
+            .expect("environment entry point");
+        let window = HiddenWindow::new().expect("hidden window");
+        let data_dir = std::env::temp_dir().join(format!("tpt-shell-crash-{}", std::process::id()));
+
+        let env_slot: Rc<RefCell<Option<Result<Environment, HRESULT>>>> =
+            Rc::new(RefCell::new(None));
+        let slot = env_slot.clone();
+        create_environment(create, &data_dir, move |r| *slot.borrow_mut() = Some(r))
+            .expect("start environment");
+        assert!(
+            pump_until(Duration::from_secs(30), || env_slot.borrow().is_some()),
+            "environment timed out"
+        );
+        let env = env_slot
+            .borrow_mut()
+            .take()
+            .unwrap()
+            .expect("environment creation failed");
+
+        let ctrl_slot: Rc<RefCell<Option<Result<Controller, HRESULT>>>> =
+            Rc::new(RefCell::new(None));
+        let slot = ctrl_slot.clone();
+        env.create_controller(window.hwnd() as isize, move |r| {
+            *slot.borrow_mut() = Some(r)
+        })
+        .expect("start controller");
+        assert!(
+            pump_until(Duration::from_secs(30), || ctrl_slot.borrow().is_some()),
+            "controller timed out"
+        );
+        let ctrl = ctrl_slot
+            .borrow_mut()
+            .take()
+            .unwrap()
+            .expect("controller creation failed");
+
+        let web = ctrl.webview().expect("webview");
+        web.add_web_resource_requested_filter(&format!("{APP_ORIGIN}/*"))
+            .expect("filter");
+        let page_loads = Rc::new(Cell::new(0u32));
+        let loads = page_loads.clone();
+        web.on_web_resource_requested(move |req| {
+            let uri = req.uri().unwrap_or_default();
+            let path = uri
+                .strip_prefix(APP_ORIGIN)
+                .unwrap_or("")
+                .trim_start_matches('/');
+            let path = if path.is_empty() { "index.html" } else { path };
+            if path == "index.html" {
+                loads.set(loads.get() + 1);
+            }
+            match embedded(path) {
+                Some((content_type, body)) => {
+                    let _ = req.respond(&env, 200, content_type, body);
+                }
+                None => {
+                    let _ = req.respond(&env, 404, "text/plain", b"not found");
+                }
+            }
+        })
+        .expect("resource handler");
+
+        let failures: Rc<RefCell<Vec<ProcessFailure>>> = Rc::new(RefCell::new(Vec::new()));
+        let recorded = failures.clone();
+        web.on_process_failed(move |sender, failure| {
+            recorded.borrow_mut().push(failure);
+            if failure == ProcessFailure::RenderExited {
+                let _ = sender.reload();
+            }
+        })
+        .expect("process-failed handler");
+
+        web.navigate(&format!("{APP_ORIGIN}/index.html"))
+            .expect("navigate");
+        let mut title = String::new();
+        let loaded = pump_until(Duration::from_secs(30), || {
+            title = web.document_title().unwrap_or_default();
+            title == "embedded-ok"
+        });
+        assert!(
+            loaded,
+            "app page did not load before the crash; last title {title:?}"
+        );
+
+        let crash_hr: Rc<RefCell<Option<HRESULT>>> = Rc::new(RefCell::new(None));
+        let slot = crash_hr.clone();
+        web.call_devtools_protocol("Page.crash", "{}", move |hr| *slot.borrow_mut() = Some(hr))
+            .expect("start Page.crash");
+        let crashed = pump_until(Duration::from_secs(30), || {
+            failures.borrow().contains(&ProcessFailure::RenderExited)
+        });
+        let reloaded = pump_until(Duration::from_secs(30), || {
+            page_loads.get() >= 2 && {
+                title = web.document_title().unwrap_or_default();
+                title == "embedded-ok"
+            }
+        });
+        let list = failures.borrow().clone();
+
+        ctrl.close().expect("close controller");
+        drop(web);
+        drop(ctrl);
+        // SAFETY: balances the successful CoInitializeEx above.
+        unsafe { windows_sys::Win32::System::Com::CoUninitialize() };
+        let _ = std::fs::remove_dir_all(&data_dir);
+
+        assert!(
+            crashed,
+            "no RenderExited failure reported; failures: {list:?}"
+        );
+        assert!(
+            reloaded,
+            "the page did not reload after the crash; loads {}, title {title:?}",
+            page_loads.get()
+        );
+    }
+
     /// Renders HTML in a hidden window and reads the document title back. Needs a loader
     /// (`TPT_WEBVIEW2_LOADER`) and an installed WebView2 runtime. Skipped otherwise.
     #[test]
     fn renders_html_and_reads_title() {
-        let Some(loader_path) = std::env::var_os("TPT_WEBVIEW2_LOADER") else {
-            eprintln!("skipped: set TPT_WEBVIEW2_LOADER to run this test");
+        let Some(loader_path) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
