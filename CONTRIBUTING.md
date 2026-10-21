@@ -40,7 +40,9 @@ cargo deny check
 
 - The project follows Semantic Versioning once v1.0.0 is released. Before then, minor versions may break compatibility.
 - A breaking change to the contract (typed IPC) must pass `tpt-shell contract diff` once that command exists.
-- The minimum supported Rust version (MSRV) is not set yet. It will be recorded here when the first release is cut (todo.md, M0 governance).
+- The minimum supported Rust version (MSRV) is **1.90**. It is set once in `[workspace.package]` (`rust-version`) and inherited by every crate, so Cargo refuses to build on an older toolchain.
+- The MSRV was measured, not assumed: the whole workspace builds and passes its tests on Rust 1.90.0. Older installed toolchains fail, either on a dependency that needs a newer Rust or on `unsigned_is_multiple_of` (stable in 1.87).
+- Raising the MSRV is a minor-version change at the least. It is recorded in CHANGELOG under "Unreleased" with the reason, and it happens only when a dependency or a language or library feature needs it.
 - Deprecations are announced in the CHANGELOG for at least one minor release before removal, once releases exist.
 
 ## Pull requests

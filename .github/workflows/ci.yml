@@ -66,6 +66,20 @@ jobs:
           done < <(find crates -name '*.rs' -o -name 'Cargo.toml' | sort)
           exit $missing
 
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - run: cargo check --workspace --locked
+
+  runtime-size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tools/check-runtime-size.sh
+
 # Pending (added in their milestone):
 #   conformance  - M4 (macOS), M5 (Linux)
 #   fuzz-smoke   - M2 onward
