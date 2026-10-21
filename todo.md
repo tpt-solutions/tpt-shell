@@ -155,7 +155,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 
 ### Assets and protocol
 - [x] `embed_dir!` prototype: `tpt-shell-macros`, plain bytes, sorted, content types. zstd compression and ETag still to do
-- [x] Serving app pages from the virtual origin, from `embed_dir!` (verified with a subresource). DEVIATION from spec ยง5.4 `app://`
+- [x] Serving app pages from the virtual origin, from `embed_dir!` (verified with a subresource). DEVIATION from spec ยง5.4 `app://` Windows now answers every request under the app origin from the window's asset source (`set_asset_source`), with the page policy on each answer; `app_path` refuses `..` and backslashes. The facade serves `App::asset` files, and a runtime test shows a page's own script running at the app origin. The `embed_dir!` macro itself is still not wired to this
 - [x] Never use `file://` (the navigation policy rejects it; the only `file://` strings are in tests)
 - [x] JS runtime stub (`window.tpt.invoke`) injected at document start (`js/runtime/tpt-shell.js`, 661 bytes gzipped, verified end to end through the IPC router)
 
@@ -270,7 +270,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ### Windows baseline features (first pass)
 - [ ] Multiple windows, parent/child, modal, frameless, always-on-top, transparent (multiple windows, parent/child, modal, frameless and always-on-top work on Windows and are tested; transparency is still `Unsupported`)
 - [ ] Dialogs (open, save, message, folder) via IFileDialog (open, save and folder dialogs are built with hand-written vtables checked against the SDK header; they are never shown in tests, and multi-select and the message box are not built)
-- [x] App builder in the facade (`tpt_shell::App`): windows, grants and commands; each window's page messages go through the capability-checked router with that window's grants; consent is refused until the native dialog exists; a runtime test runs an app end to end. Windows only, with `App::loader` set explicitly. Still missing: `#[command]`, `commands![]`, `embed_dir!` (serving app assets), async handlers and the worker pool, and the app-origin serving that gives pages the virtual origin
+- [x] App builder in the facade (`tpt_shell::App`): windows, grants and commands; each window's page messages go through the capability-checked router with that window's grants; consent is refused until the native dialog exists; a runtime test runs an app end to end. Windows only, with `App::loader` set explicitly. Pages load from the app origin through `App::asset` (the old `Window::html` placed pages at a data: origin and is gone). Still missing: `#[command]`, `commands![]`, `embed_dir!`, async handlers and the worker pool
 - [x] Clipboard (text first): `tpt-shell-platform-windows::clipboard`, restores the user's clipboard in its test
 - [ ] Window state restore, fullscreen, multi-monitor
 
