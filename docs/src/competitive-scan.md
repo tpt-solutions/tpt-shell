@@ -1,6 +1,6 @@
 # Competitive scan
 
-Status: **initial pass** (M0). Built from search-result snippets, not from reading each project's own docs or code. Deepen it before any public claim (see "Open follow-ups"). Dates are the date of the search: 2026-10-20.
+Status: **initial pass** (M0), with a first check against primary sources on 2026-10-22 (see "Primary-source check"). Entries not re-checked against primary sources are still from search-result snippets. Deepen it before any public claim (see "Open follow-ups"). Dates are the date of the search unless marked otherwise.
 
 ## Rules for claims (spec §1, R9)
 
@@ -31,17 +31,20 @@ Source: crate metadata via `cargo info` against the crates.io index (local run).
 
 | Project | What it is | Relevance | Source |
 |---|---|---|---|
-| Wry | Cross-platform Rust webview library used by Tauri. WebView2, WebKit, WebKitGTK. | The main existing Rust webview layer. Confirms that no from-scratch platform layer is common. | [github.com/tauri-apps/wry](https://github.com/tauri-apps/wry) |
+| Wry | Cross-platform Rust webview library used by Tauri. WebView2, WebKit, WebKitGTK. Licence Apache-2.0 OR MIT (verified 2026-10-22 on docs.rs). | The main existing Rust webview layer. Confirms that no from-scratch platform layer is common. | [github.com/tauri-apps/wry](https://github.com/tauri-apps/wry); [docs.rs: wry WebContext](https://docs.rs/wry/latest/wry/struct.WebContext.html) |
 | webview_app | Simple Rust wrapper: WebView2 and WebKitGTK 6.0. Serves embedded resources. | Small overlap with M1 (embedded assets + WebView2). Windows and Linux only. | [rust-digger: webview_app](https://rust-digger.code-maven.com/crates/webview_app) |
 | Tauri v2 | Rust core, OS webview, IPC. | Closest mainstream comparison for the IPC and capability model. | [v2.tauri.app/security](https://v2.tauri.app/security/) |
-| Electron | Bundles Chromium and Node. | Used as the kiosk comparison point. Ships its own engine, which spec §1 excludes. | [Medium: HTML5 kiosk apps with Electron](https://medium.com/swlh/building-html5-kiosk-applications-with-vue-js-and-electron-c64ac928b59f) |
+| Electron | Bundles Chromium and Node. | Used as the kiosk comparison point. Ships its own engine, which spec §1 excludes. Has a kiosk mode (`BrowserWindow` `kiosk`, `setKiosk`, `isKiosk`). Licence MIT (verified 2026-10-22). | [electronjs.org: BrowserWindow](https://www.electronjs.org/docs/latest/api/browser-window); [electron LICENSE](https://github.com/electron/electron/blob/main/LICENSE) |
+| Neutralinojs | Lightweight desktop framework: HTML, CSS and JS on the OS web renderer (GTK WebKit2 on Linux), with a WebSocket channel to native code and an embedded static server. No bundled browser engine. Licence MIT (verified 2026-10-22). | Closest in spirit to the shell's no-bundled-engine rule. Its native channel is a local socket, so its security model is the one to read before comparing. | [github.com/neutralinojs/neutralinojs](https://github.com/neutralinojs/neutralinojs) |
+| Photino | .NET and C/C++ wrapper over WebView2, WKWebView and WebKitGTK. Licence Apache-2.0 per a directory listing (not yet read from the repository's LICENSE file). | Native-webview wrapper like the planned platform layer. Apache-only, so it cannot be reused under spec §4. | [tryphotino/photino.Native](https://github.com/tryphotino/photino.Native); [directory listing with licence](https://www.alternativeto.net/software/photino/about/) |
 
 ### Capability model (Tauri v2)
 
 - Capabilities control which windows can reach which IPC commands. A window that matches no capability has no IPC access.
 - Windows are matched by name or glob. Permissions can carry an allow-list scope (for example, one path).
 - Source: [v2.tauri.app/reference/acl/capability](https://v2.tauri.app/reference/acl/capability).
-- Gap: the snippet did not show how an app defines custom command scopes. Read the ACL docs before comparing in detail.
+- Verified 2026-10-22 on the Tauri v2 capabilities page: a capability lists target windows (for example `["main"]`, or `"*"`); the boundary follows window labels, not titles; remote URL access uses glob patterns such as `https://*.tauri.app`; by default every registered command is available to all windows, and `AppManifest::commands` in `build.rs` restricts that.
+- Gap: that page does not say whether a permission can carry a path scope. Its scope answers point to separate Command Scopes and Asset protocol scope pages, which are not yet read.
 
 ## Kiosk and supervision
 
@@ -102,9 +105,17 @@ No Tauri or Electron record-and-replay tool was found.
 - Agent control exists for other desktop apps through accessibility trees. Webview-internal control was not found.
 - Overall: none of the eight differentiators is confirmed as unique. No claim of uniqueness is made.
 
+## Primary-source check (2026-10-22)
+
+Checked against the project's own pages: Tauri v2 capabilities (v2.tauri.app), Electron BrowserWindow and LICENSE (electronjs.org, github.com/electron), Wry WebContext (docs.rs), Neutralinojs README and licence line (github.com/neutralinojs). Photino: the repository URL returned 404 on fetch, so its licence is taken from a directory listing and is marked as such. Not checked in this pass: the code of any project, and the Electron and Tauri licences as stated in their package metadata.
+
 ## Open follow-ups
 
-- [ ] Read primary docs for Tauri (ACL and isolation), Electron (kiosk, `partition`), and Wry (data directory and profiles).
+- [x] Read primary docs for Tauri capabilities, Electron kiosk and Wry data directory (2026-10-22; see "Primary-source check").
+- [ ] Read Tauri Command Scopes and Asset protocol scope, and Tauri isolation.
+- [ ] Read Electron session `partition` and the kiosk behaviour (the BrowserWindow page does not say what kiosk changes).
+- [ ] Read Wry's profile handling for separate data stores per window (the WebContext page only suggests separate contexts).
+- [ ] Read the Photino repository LICENSE file itself (the Apache-2.0 claim is from a directory listing; the repository URL returned 404 on the first fetch).
 - [ ] Read the code and licence of decern-ledger and secure-log before any reuse decision. Reuse is not planned; this is for comparison.
 - [ ] Search for webview-internal MCP or DOM-tree control projects.
 - [ ] Search for Rust kiosk or digital-signage projects by name.

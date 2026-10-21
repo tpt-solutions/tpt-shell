@@ -6,3 +6,6 @@ src = "src"
 
 [output.html]
 git-repository-url = ""
+
+[preprocessor.support-tags]
+command = "python3 -I ../tools/support-tags.py"
