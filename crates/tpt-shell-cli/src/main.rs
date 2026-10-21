@@ -9,6 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use tpt_shell_audit::AuditError;
 use tpt_shell_errors::lookup;
 
 const USAGE: &str = "usage:
@@ -17,7 +18,10 @@ const USAGE: &str = "usage:
   tpt-shell new vanilla <directory>
   tpt-shell new typescript <directory>
   tpt-shell doctor
-  tpt-shell compliance <output-directory>";
+  tpt-shell compliance <output-directory>
+  tpt-shell audit verify <audit.jsonl> [--key <public-key-file>]
+  tpt-shell audit export <audit.jsonl> --format csv|jsonl
+  tpt-shell audit view <audit.jsonl>";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -40,8 +44,102 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["new", "typescript", dir] => new_typescript(Path::new(dir)).map(|()| ExitCode::SUCCESS),
         ["doctor"] => Ok(doctor()),
         ["compliance", dir] => compliance(Path::new(dir)),
+        ["audit", "verify", path] => audit_verify(Path::new(path), None),
+        ["audit", "verify", path, "--key", key] => {
+            audit_verify(Path::new(path), Some(Path::new(key)))
+        }
+        ["audit", "export", path, "--format", "csv"] => audit_export_csv(Path::new(path)),
+        ["audit", "export", path, "--format", "jsonl"] => audit_export_jsonl(Path::new(path)),
+        ["audit", "view", path] => audit_view(Path::new(path)),
         _ => Err(USAGE.to_string()),
     }
+}
+
+/// A broken chain is a problem in the checked input (exit 1). Anything else is an I/O failure
+/// (exit 2), reported through the `Err` path.
+fn audit_failure(error: AuditError) -> Result<ExitCode, String> {
+    if let AuditError::Chain { .. } = error {
+        eprintln!("{error}");
+        return Ok(ExitCode::from(1));
+    }
+    Err(error.to_string())
+}
+
+/// Checks the hash chain, and the checkpoint signatures when a public key is given.
+fn audit_verify(path: &Path, key: Option<&Path>) -> Result<ExitCode, String> {
+    let summary = match key {
+        None => tpt_shell_audit::verify_file(path),
+        Some(key) => {
+            let text = fs::read_to_string(key)
+                .map_err(|e| format!("cannot read {}: {e}", key.display()))?;
+            let key = tpt_shell_audit::verifying_key_from_hex(&text).ok_or_else(|| {
+                format!("{} is not a 64-digit hex Ed25519 public key", key.display())
+            })?;
+            tpt_shell_audit::verify_file_with_key(path, &key)
+        }
+    };
+    match summary {
+        Ok(summary) => {
+            println!(
+                "ok: {} records, {} checkpoints, last hash {}",
+                summary.records, summary.checkpoints, summary.last_hash
+            );
+            if key.is_none() && summary.checkpoints > 0 {
+                println!("note: checkpoint signatures were not checked (pass --key)");
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(error) => audit_failure(error),
+    }
+}
+
+/// Prints the verified log as CSV (see [`tpt_shell_audit::export_csv`]).
+fn audit_export_csv(path: &Path) -> Result<ExitCode, String> {
+    match tpt_shell_audit::export_csv(path) {
+        Ok(csv) => {
+            print!("{csv}");
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(error) => audit_failure(error),
+    }
+}
+
+/// Prints the verified log as JSON Lines. The file already is JSON Lines, so this copies it.
+fn audit_export_jsonl(path: &Path) -> Result<ExitCode, String> {
+    if let Err(error) = tpt_shell_audit::verify_file(path) {
+        return audit_failure(error);
+    }
+    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    print!("{text}");
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Prints the verified log as a short table: sequence, time, actor, command and outcome.
+fn audit_view(path: &Path) -> Result<ExitCode, String> {
+    if let Err(error) = tpt_shell_audit::verify_file(path) {
+        return audit_failure(error);
+    }
+    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    println!(
+        "{:>6}  {:>13}  {:<12}  {:<24}  outcome",
+        "seq", "unix ms", "actor", "command"
+    );
+    for line in text.lines() {
+        let record: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
+        let field = |name: &str| match &record[name] {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        println!(
+            "{:>6}  {:>13}  {:<12}  {:<24}  {}",
+            field("seq"),
+            field("wall_unix_ms"),
+            field("actor"),
+            field("command"),
+            field("outcome")
+        );
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn explain(code: &str) -> ExitCode {
@@ -198,6 +296,59 @@ mod tests {
     fn unknown_commands_are_usage_errors() {
         assert!(run(&["bogus"]).is_err());
         assert!(run(&["explain"]).is_err());
+    }
+
+    /// Writes a three-record audit log and returns its path.
+    fn sample_audit_log(name: &str) -> PathBuf {
+        use tpt_shell_audit::{AuditLog, Entry, Outcome, Policy};
+        let path = scratch(name);
+        let mut log = AuditLog::open(&path, Policy::default()).unwrap();
+        for n in 0..3 {
+            log.append(&Entry {
+                wall_unix_ms: 1_700_000_000_000 + n,
+                mono_ns: n,
+                actor: "page".into(),
+                command: format!("cmd_{n}"),
+                capability: None,
+                params: serde_json::json!({ "n": n }),
+                outcome: Outcome::Ok,
+                duration_us: 1,
+            })
+            .unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn audit_commands_run_on_a_good_log() {
+        let path = sample_audit_log("good");
+        let path = path.to_str().unwrap();
+        assert!(run(&["audit", "verify", path]).is_ok());
+        assert!(run(&["audit", "export", path, "--format", "csv"]).is_ok());
+        assert!(run(&["audit", "export", path, "--format", "jsonl"]).is_ok());
+        assert!(run(&["audit", "view", path]).is_ok());
+    }
+
+    #[test]
+    fn a_tampered_log_is_a_problem_not_an_io_failure() {
+        let path = sample_audit_log("tampered");
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(&path, text.replacen("cmd_1", "cmd_x", 1)).unwrap();
+        let path = path.to_str().unwrap();
+        assert!(run(&["audit", "verify", path]).is_ok());
+        assert!(run(&["audit", "view", path]).is_ok());
+    }
+
+    #[test]
+    fn a_missing_log_is_an_io_failure() {
+        assert!(run(&["audit", "verify", "no-such-log.jsonl"]).is_err());
+    }
+
+    #[test]
+    fn bad_audit_usage_is_refused() {
+        assert!(run(&["audit"]).is_err());
+        assert!(run(&["audit", "export", "x.jsonl", "--format", "xlsx"]).is_err());
+        assert!(run(&["audit", "verify", "x.jsonl", "--key"]).is_err());
     }
 }
 

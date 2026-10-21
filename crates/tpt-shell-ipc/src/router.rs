@@ -8,6 +8,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use serde_json::json;
+
 use crate::rate_limit::RateLimiter;
 use crate::schema::{self, validate, Schema};
 use crate::{
@@ -15,10 +17,12 @@ use crate::{
 };
 
 /// A failed command. `code` is stable and meant for the page; `message` is for developers.
+/// `details` is optional structured data for the page, such as the path of a bad argument.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandError {
     pub code: String,
     pub message: String,
+    pub details: Option<Value>,
 }
 
 impl CommandError {
@@ -26,7 +30,14 @@ impl CommandError {
         CommandError {
             code: code.to_string(),
             message: message.to_string(),
+            details: None,
         }
+    }
+
+    /// Attaches structured details, sent as `error.details` in the response.
+    pub fn with_details(mut self, details: Value) -> Self {
+        self.details = Some(details);
+        self
     }
 }
 
@@ -61,8 +72,10 @@ impl Router {
         handler: impl Fn(&Value) -> Result<Value, CommandError> + 'static,
     ) {
         self.register(cmd, move |args| {
-            validate(&schema, args, "args")
-                .map_err(|e| CommandError::new(schema::INVALID_ARGS, &e.to_string()))?;
+            validate(&schema, args, "args").map_err(|e| {
+                CommandError::new(schema::INVALID_ARGS, &e.to_string())
+                    .with_details(json!({ "path": e.path }))
+            })?;
             handler(args)
         });
     }
@@ -108,7 +121,13 @@ impl Router {
             ),
             Some(handler) => match handler(&request.args) {
                 Ok(data) => ok_response(request.id, data),
-                Err(err) => err_response(request.id, &err.code, &err.message),
+                Err(err) => {
+                    let mut response = err_response(request.id, &err.code, &err.message);
+                    if let Some(details) = err.details {
+                        response["error"]["details"] = details;
+                    }
+                    response
+                }
             },
         }
     }
@@ -250,6 +269,38 @@ mod tests {
         );
         assert_eq!(good["ok"], true);
         assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn error_details_are_sent_when_the_handler_gives_them() {
+        let mut r = Router::new();
+        r.register("quota", |_| {
+            Err(CommandError::new("APP_QUOTA", "over quota").with_details(json!({ "used": 9 })))
+        });
+        let v = reply(&r, r#"{"v":1,"id":6,"cmd":"quota"}"#);
+        assert_eq!(v["error"]["details"], json!({ "used": 9 }));
+        assert_eq!(
+            reply(&router(), r#"{"v":1,"id":7,"cmd":"fail"}"#)["error"].get("details"),
+            None
+        );
+    }
+
+    #[test]
+    fn invalid_args_name_the_field_in_details() {
+        let mut r = Router::new();
+        r.register_validated(
+            "set_volume",
+            Schema::Struct(&[schema::Field {
+                name: "level",
+                schema: Schema::Int { min: 0, max: 10 },
+            }]),
+            |_| Ok(json!(null)),
+        );
+        let v = reply(
+            &r,
+            r#"{"v":1,"id":8,"cmd":"set_volume","args":{"level":11}}"#,
+        );
+        assert_eq!(v["error"]["details"], json!({ "path": "args.level" }));
     }
 
     #[test]

@@ -52,8 +52,19 @@ pub struct Manifest {
     pub app: App,
     pub windows: Vec<Window>,
     pub capabilities: Vec<String>,
+    pub audit: AuditSettings,
     /// Raw sections for later phases, keyed by section name.
     pub stubs: Vec<(String, toml::Table)>,
+}
+
+/// `[audit]`: what the audit writer keeps from action parameters. The defaults keep only the
+/// hash, which is what `tpt_shell_audit::Policy::default()` does too.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AuditSettings {
+    /// Keep a copy of the parameters, with `redact` applied. Off means only the hash.
+    pub store_params: bool,
+    /// Object keys whose values are replaced with `[redacted]` before the parameters are kept.
+    pub redact: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -92,7 +103,7 @@ struct RawManifest {
     capabilities: Option<RawCapabilities>,
     kiosk: Option<toml::Table>,
     devices: Option<toml::Table>,
-    audit: Option<toml::Table>,
+    audit: Option<RawAudit>,
     agent: Option<toml::Table>,
     replay: Option<toml::Table>,
     test: Option<toml::Table>,
@@ -114,6 +125,14 @@ struct RawWindow {
     title: Option<String>,
     width: Option<Spanned<f64>>,
     height: Option<Spanned<f64>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAudit {
+    store_params: Option<bool>,
+    #[serde(default)]
+    redact: Vec<Spanned<String>>,
 }
 
 #[derive(Deserialize)]
@@ -183,10 +202,22 @@ pub fn parse(text: &str) -> Result<Manifest, ManifestError> {
         capabilities.push(cap.get_ref().clone());
     }
 
+    let audit = match raw.audit {
+        None => AuditSettings::default(),
+        Some(audit) => {
+            for key in &audit.redact {
+                check_name(key, "audit.redact", line_of)?;
+            }
+            AuditSettings {
+                store_params: audit.store_params.unwrap_or(false),
+                redact: audit.redact.iter().map(|k| k.get_ref().clone()).collect(),
+            }
+        }
+    };
+
     let stubs = [
         (LATER_SECTIONS[0], raw.kiosk),
         (LATER_SECTIONS[1], raw.devices),
-        (LATER_SECTIONS[2], raw.audit),
         (LATER_SECTIONS[3], raw.agent),
         (LATER_SECTIONS[4], raw.replay),
         (LATER_SECTIONS[5], raw.test),
@@ -201,6 +232,7 @@ pub fn parse(text: &str) -> Result<Manifest, ManifestError> {
         app,
         windows,
         capabilities,
+        audit,
         stubs,
     })
 }
@@ -423,6 +455,60 @@ mod schema_tests {
         assert_eq!(schema_sections, parser_sections);
     }
 
+    /// Every app and window key the schema lists must parse, and a key it does not list must
+    /// be refused. The parser's structs deny unknown fields, so this ties the two together.
+    #[test]
+    fn schema_app_and_window_keys_are_the_ones_the_parser_accepts() {
+        let schema = schema();
+        let app = &schema["properties"]["app"]["properties"];
+        let window = &schema["properties"]["windows"]["items"]["properties"];
+        let mut app_keys: Vec<&str> = app
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut window_keys: Vec<&str> = window
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        app_keys.sort();
+        window_keys.sort();
+        assert_eq!(app_keys, ["name", "version"]);
+        assert_eq!(window_keys, ["height", "name", "title", "width"]);
+
+        let full = "[app]
+name = \"demo\"
+version = \"1.0.0\"
+\
+            [[windows]]
+name = \"main\"
+title = \"Main\"
+width = 640
+height = 480
+";
+        assert!(parse(full).is_ok());
+        assert!(parse(
+            "[app]
+name = \"demo\"
+bogus = 1
+"
+        )
+        .is_err());
+        let extra_window = format!(
+            "{full}[[windows]]
+name = \"x\"
+title = \"X\"
+width = 1
+height = 1
+bogus = 1
+"
+        );
+        assert!(parse(&extra_window).is_err());
+    }
+
     #[test]
     fn schema_name_pattern_matches_the_parser_rule() {
         let pattern = schema()["properties"]["app"]["properties"]["name"]["pattern"]
@@ -485,5 +571,67 @@ mod smoke_tests {
                 let _ = parse(&text);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod audit_section_tests {
+    use super::*;
+
+    fn with_app(extra: &str) -> String {
+        format!("[app]\nname = \"demo\"\n{extra}")
+    }
+
+    #[test]
+    fn without_an_audit_section_only_hashes_are_kept() {
+        let m = parse(&with_app("")).unwrap();
+        assert_eq!(m.audit, AuditSettings::default());
+        assert!(!m.audit.store_params);
+        assert!(m.audit.redact.is_empty());
+    }
+
+    #[test]
+    fn audit_section_sets_storage_and_redaction() {
+        let m = parse(&with_app(
+            "[audit]\nstore_params = true\nredact = [\"password\", \"api-token\"]\n",
+        ))
+        .unwrap();
+        assert!(m.audit.store_params);
+        assert_eq!(m.audit.redact, ["password", "api-token"]);
+        assert!(m.stubs.is_empty(), "audit is parsed, not kept as a stub");
+    }
+
+    #[test]
+    fn a_redact_name_with_a_space_is_refused_at_its_line() {
+        let err = parse(&with_app("[audit]\nredact = [\"ok\", \"bad key\"]\n")).unwrap_err();
+        assert_eq!(err.code, codes::INVALID_VALUE);
+        assert_eq!(err.line, Some(4));
+        assert!(err.message.starts_with("audit.redact `bad key`"));
+    }
+
+    #[test]
+    fn schema_audit_keys_are_the_ones_the_parser_accepts() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../schema/tpt-shell.manifest.schema.json")).unwrap();
+        let keys: Vec<&str> = schema["properties"]["audit"]["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(keys, ["redact", "store_params"]);
+        let full = with_app(
+            "[audit]
+store_params = true
+redact = [\"a\"]
+",
+        );
+        assert!(parse(&full).is_ok());
+    }
+
+    #[test]
+    fn an_unknown_key_in_audit_is_refused() {
+        let err = parse(&with_app("[audit]\nstore_paramz = true\n")).unwrap_err();
+        assert_eq!(err.code, codes::UNKNOWN_KEY);
     }
 }

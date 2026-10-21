@@ -643,6 +643,7 @@ name = "tpt-shell-cli"
 version = "0.0.0"
 dependencies = [
  "serde_json",
+ "tpt-shell-audit",
  "tpt-shell-compliance",
  "tpt-shell-errors",
  "tpt-shell-ipc",

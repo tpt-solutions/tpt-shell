@@ -338,6 +338,58 @@ fn check_checkpoint(
     Ok(())
 }
 
+/// Reads a verifying key from its 64 hex digits, as written by a key file.
+pub fn verifying_key_from_hex(text: &str) -> Option<VerifyingKey> {
+    let bytes: [u8; 32] = hex_decode(text.trim())?.try_into().ok()?;
+    VerifyingKey::from_bytes(&bytes).ok()
+}
+
+/// Column names of [`export_csv`], in order.
+pub const CSV_HEADER: &str =
+    "seq,wall_unix_ms,mono_ns,actor,command,capability,outcome,error_code,duration_us,params_sha256";
+
+/// Verifies `path`, then renders one CSV row per record under [`CSV_HEADER`]. Parameters are
+/// left out: the CSV is for review, and the file itself (JSON Lines) is the full record. A file
+/// that does not verify exports nothing.
+pub fn export_csv(path: impl AsRef<Path>) -> Result<String, AuditError> {
+    let path = path.as_ref();
+    verify_file(path)?;
+    let mut out = String::from(CSV_HEADER);
+    out.push('\n');
+    for line in BufReader::new(File::open(path)?).lines() {
+        let record: Map<String, Value> = serde_json::from_str(&line?)
+            .map_err(|_| AuditError::Io("verified record did not parse".into()))?;
+        let cells: Vec<String> = CSV_HEADER
+            .split(',')
+            .map(|column| csv_cell(record.get(column)))
+            .collect();
+        out.push_str(&cells.join(","));
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+/// One CSV cell, quoted when it needs to be. Text that a spreadsheet would read as a formula
+/// gets a leading apostrophe, because actor and command names come from the page.
+fn csv_cell(value: Option<&Value>) -> String {
+    let text = match value {
+        None | Some(Value::Null) => return String::new(),
+        Some(Value::String(s)) => {
+            if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+                format!("'{s}")
+            } else {
+                s.clone()
+            }
+        }
+        Some(other) => other.to_string(),
+    };
+    if text.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", text.replace('"', "\"\""))
+    } else {
+        text
+    }
+}
+
 /// The bytes a checkpoint signature covers. The prefix keeps it apart from other signatures.
 pub fn checkpoint_message(upto: u64, hash: &str) -> Vec<u8> {
     format!("tpt-shell-audit-checkpoint\n{upto}\n{hash}").into_bytes()
@@ -868,5 +920,94 @@ mod signed_tests {
         assert_eq!(hex_decode("0"), None);
         assert_eq!(hex_decode("zz"), None);
         assert_eq!(hex_decode("é0"), None);
+    }
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("tpt-audit-export-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
+
+    fn entry(command: &str) -> Entry {
+        Entry {
+            wall_unix_ms: 1_700_000_000_123,
+            mono_ns: 42,
+            actor: "page".into(),
+            command: command.into(),
+            capability: Some("fs.read".into()),
+            params: json!({ "path": "a,b" }),
+            outcome: Outcome::Err("IPC_DENIED".into()),
+            duration_us: 7,
+        }
+    }
+
+    fn write(path: &Path, entries: &[Entry]) {
+        let mut log = AuditLog::open(path, Policy::default()).unwrap();
+        for e in entries {
+            log.append(e).unwrap();
+        }
+    }
+
+    #[test]
+    fn csv_has_the_header_and_one_row_per_record() {
+        let path = temp_path("log.jsonl");
+        write(&path, &[entry("open"), entry("save")]);
+        let csv = export_csv(&path).unwrap();
+        let rows: Vec<&str> = csv.lines().collect();
+        assert_eq!(rows[0], CSV_HEADER);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows[1],
+            format!(
+                "0,1700000000123,42,page,open,fs.read,err,IPC_DENIED,7,{}",
+                sha256_hex(canonical(&json!({ "path": "a,b" })).as_bytes())
+            )
+        );
+        assert!(rows[2].starts_with("1,1700000000123,42,page,save,"));
+    }
+
+    #[test]
+    fn csv_quotes_cells_with_commas_and_neutralises_formulas() {
+        assert_eq!(csv_cell(Some(&json!("a,b"))), "\"a,b\"");
+        assert_eq!(csv_cell(Some(&json!("say \"hi\""))), "\"say \"\"hi\"\"\"");
+        assert_eq!(csv_cell(Some(&json!("=HYPERLINK(x)"))), "'=HYPERLINK(x)");
+        assert_eq!(csv_cell(Some(&json!("-1+1"))), "'-1+1");
+        assert_eq!(csv_cell(Some(&json!(-5))), "-5");
+        assert_eq!(csv_cell(Some(&Value::Null)), "");
+        assert_eq!(csv_cell(None), "");
+    }
+
+    #[test]
+    fn a_broken_chain_exports_nothing() {
+        let path = temp_path("broken.jsonl");
+        write(&path, &[entry("open"), entry("save")]);
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, text.replacen("\"open\"", "\"oped\"", 1)).unwrap();
+        assert!(matches!(
+            export_csv(&path),
+            Err(AuditError::Chain { seq: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn a_hex_key_file_round_trips_into_a_verifying_key() {
+        let key = SigningKey::from_bytes(&[9; 32]);
+        let hex = hex_encode(key.verifying_key().as_bytes());
+        assert_eq!(
+            verifying_key_from_hex(&format!("{hex}\n")),
+            Some(key.verifying_key())
+        );
+        assert_eq!(verifying_key_from_hex("abcd"), None);
+        assert_eq!(verifying_key_from_hex(&"zz".repeat(32)), None);
     }
 }

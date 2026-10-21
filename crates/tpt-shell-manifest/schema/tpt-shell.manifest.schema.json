@@ -55,7 +55,23 @@
     },
     "kiosk": { "type": "object" },
     "devices": { "type": "object" },
-    "audit": { "type": "object" },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "store_params": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep a copy of action parameters, with redact applied. Off keeps only their hash."
+        },
+        "redact": {
+          "type": "array",
+          "default": [],
+          "description": "Object keys whose values are replaced with [redacted] before parameters are kept.",
+          "items": { "type": "string", "maxLength": 64, "pattern": "^[A-Za-z0-9_-]+$" }
+        }
+      }
+    },
     "agent": { "type": "object" },
     "replay": { "type": "object" },
     "test": { "type": "object" },
