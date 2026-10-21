@@ -334,3 +334,49 @@ fn a_blob_from_a_command_is_fetched_by_the_page_from_its_app_url() {
     assert!(got, "the page never finished; title was {title:?}");
     assert_eq!(title, "len 1000 text/plain");
 }
+
+#[test]
+fn a_window_opens_where_it_was_saved_and_saves_where_it_is() {
+    let Some((loader, _serial)) = runtime_test_loader() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("tpt-app-state-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let state = dir.join("window-state.json");
+    std::fs::write(
+        &state,
+        r#"{"main": {"x": 120, "y": 140, "width": 640, "height": 480, "maximized": false}}"#,
+    )
+    .expect("write state");
+
+    let running = App::new()
+        .name("app-state-test")
+        .loader(loader)
+        .data_dir(&dir)
+        .remember_window_state(&state)
+        .asset(
+            "index.html",
+            "text/html",
+            "<!doctype html><title>state</title>",
+        )
+        .window(Window::new("main").title("app-state-test"))
+        .build()
+        .expect("the app should start");
+    let id = running.window("main").expect("the main window");
+    let placed = running.backend().placement(id).expect("placement");
+    assert_eq!(
+        (placed.x, placed.y, placed.width, placed.height),
+        (120, 140, 640, 480),
+        "the saved placement was not applied"
+    );
+
+    std::fs::remove_file(&state).expect("remove state");
+    running.save_window_state().expect("save");
+    let saved = std::fs::read_to_string(&state).expect("saved state");
+    let _ = std::fs::remove_dir_all(&dir);
+    drop(running);
+    assert!(
+        saved.contains("\"width\": 640") && saved.contains("\"maximized\": false"),
+        "{saved}"
+    );
+}

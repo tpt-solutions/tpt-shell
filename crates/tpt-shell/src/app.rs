@@ -115,10 +115,47 @@ pub struct App {
     /// The notification-area icon: tooltip, menu, and what a pick does.
     #[cfg_attr(not(windows), allow(dead_code))]
     tray: Option<(String, Vec<MenuItem>, TrayHandler)>,
+    /// Where window positions are remembered between runs, if anywhere.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    state_file: Option<PathBuf>,
+    /// The URL scheme to register for this app, if any.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    deep_link: Option<String>,
 }
 
 /// Receives the arguments of a later launch of a single-instance app.
 type ArgsHandler = Box<dyn FnMut(Vec<String>)>;
+
+/// Reads the window placements saved by [`Running::save_window_state`]. Entries that do not parse
+/// are skipped, and a file that is missing or not JSON gives no placements.
+#[cfg(windows)]
+fn load_window_state(
+    path: &std::path::Path,
+) -> HashMap<String, tpt_shell_platform_windows::backend::Placement> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&text)
+    else {
+        return HashMap::new();
+    };
+    map.into_iter()
+        .filter_map(|(name, v)| {
+            let placement = tpt_shell_platform_windows::backend::Placement {
+                x: i32::try_from(v["x"].as_i64()?).ok()?,
+                y: i32::try_from(v["y"].as_i64()?).ok()?,
+                width: i32::try_from(v["width"].as_i64()?)
+                    .ok()
+                    .filter(|w| *w > 0)?,
+                height: i32::try_from(v["height"].as_i64()?)
+                    .ok()
+                    .filter(|h| *h > 0)?,
+                maximized: v["maximized"].as_bool().unwrap_or(false),
+            };
+            Some((name, placement))
+        })
+        .collect()
+}
 
 /// Receives the id of a tray click or menu pick.
 type TrayHandler = Box<dyn FnMut(u32)>;
@@ -212,6 +249,23 @@ impl App {
         self.commands.push(Box::new(move |router: &mut Router| {
             router.register_guarded(&name, &capability, target_of, handler);
         }));
+        self
+    }
+
+    /// Remembers each window's position, size and maximized state in the JSON file at `path`,
+    /// keyed by window name (Windows). The file is read when the app starts and written when the
+    /// app's event loop ends. A missing or unreadable file means the windows open where they
+    /// would otherwise.
+    pub fn remember_window_state(mut self, path: impl Into<PathBuf>) -> Self {
+        self.state_file = Some(path.into());
+        self
+    }
+
+    /// Registers the URL scheme `scheme` for the current user when the app starts, so links such
+    /// as `scheme://...` start this app with the link as an argument (Windows). A running
+    /// instance gets the link through [`App::single_instance`].
+    pub fn deep_link(mut self, scheme: &str) -> Self {
+        self.deep_link = Some(scheme.to_string());
         self
     }
 
@@ -321,6 +375,12 @@ impl App {
             }
         };
 
+        if let Some(scheme) = &self.deep_link {
+            let exe = std::env::current_exe()
+                .map_err(|e| Error::Backend(format!("cannot find this program: {e}")))?;
+            tpt_shell_platform_windows::deep_link::register(scheme, &exe, &self.name)
+                .map_err(Error::Backend)?;
+        }
         let tray = match self.tray {
             Some((tooltip, items, on_select)) => Some(
                 tpt_shell_platform_windows::tray::Tray::new(&tooltip, items, on_select)
@@ -355,9 +415,19 @@ impl App {
 
         let assets = Rc::new(self.assets);
         let mut backend = WindowsBackend::new(&loader, &data_dir)?;
+        let state_file = self.state_file;
+        let saved = state_file
+            .as_deref()
+            .map(load_window_state)
+            .unwrap_or_default();
         let mut windows = Vec::new();
         for window in self.windows {
             let id = backend.create(&window.spec())?;
+            if let Some(placement) = saved.get(&window.name) {
+                if let Err(e) = backend.set_placement(id, *placement) {
+                    eprintln!("tpt-shell: cannot restore window {}: {e}", window.name);
+                }
+            }
             backend.show(id)?;
             let caller = Caller {
                 window: window.name.clone(),
@@ -403,7 +473,8 @@ impl App {
             backend,
             windows,
             _instance: instance,
-            _tray: tray,
+            tray,
+            state_file,
         })
     }
 }
@@ -468,8 +539,10 @@ pub struct Running {
     windows: Vec<(String, tpt_shell_platform_windows::backend::WindowId)>,
     /// Held so that no other launch can become the first instance while this app runs.
     _instance: Option<tpt_shell_platform_windows::single_instance::InstanceGuard>,
-    /// Held so the icon stays until the app stops.
-    _tray: Option<tpt_shell_platform_windows::tray::Tray>,
+    /// The notification-area icon, which stays until the app stops.
+    tray: Option<tpt_shell_platform_windows::tray::Tray>,
+    /// Where window positions are saved when the event loop ends.
+    state_file: Option<PathBuf>,
 }
 
 /// How a launch relates to a single-instance app.
@@ -510,9 +583,48 @@ impl Running {
         self.backend.post_message(id, &message)
     }
 
+    /// Shows a balloon notification from the tray icon. Needs an icon, so it fails when the app
+    /// has no [`App::tray`].
+    pub fn notify(&self, title: &str, body: &str) -> Result<()> {
+        match &self.tray {
+            Some(tray) => tray.notify(title, body).map_err(Error::Backend),
+            None => Err(Error::Backend(
+                "the app has no tray icon to notify from".into(),
+            )),
+        }
+    }
+
     /// Runs the event loop until the app quits.
     pub fn run(mut self) -> Result<()> {
-        self.backend.run_until_quit()
+        let result = self.backend.run_until_quit();
+        if self.state_file.is_some() {
+            if let Err(e) = self.save_window_state() {
+                eprintln!("tpt-shell: cannot save the window state: {e}");
+            }
+        }
+        result
+    }
+
+    /// Writes each window's placement to the state file, if one was set with
+    /// [`App::remember_window_state`]. Does nothing otherwise.
+    pub fn save_window_state(&self) -> Result<()> {
+        let Some(path) = &self.state_file else {
+            return Ok(());
+        };
+        let mut map = serde_json::Map::new();
+        for (name, id) in &self.windows {
+            let p = self.backend.placement(*id)?;
+            map.insert(
+                name.clone(),
+                serde_json::json!({
+                    "x": p.x, "y": p.y, "width": p.width, "height": p.height,
+                    "maximized": p.maximized,
+                }),
+            );
+        }
+        let text = serde_json::to_string_pretty(&map).map_err(|e| Error::Backend(e.to_string()))?;
+        std::fs::write(path, text)
+            .map_err(|e| Error::Backend(format!("cannot write {}: {e}", path.display())))
     }
 }
 
