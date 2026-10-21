@@ -10,10 +10,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use tpt_shell_audit::AuditError;
+
+mod dev;
 use tpt_shell_errors::lookup;
 
 const USAGE: &str = "usage:
   tpt-shell explain <TS####>
+  tpt-shell dev <directory> [--port <port>]   serve files on 127.0.0.1 and report changes
   tpt-shell manifest check <tpt-shell.toml>
   tpt-shell new vanilla <directory>
   tpt-shell new typescript <directory>
@@ -38,10 +41,35 @@ fn main() -> ExitCode {
 }
 
 /// Runs one command. `Err` means bad usage or an I/O failure (exit 2).
+/// Serves `dir` on the loopback address at `port`, reports file changes, and runs until stopped.
+fn dev_server(dir: &Path, port: u16) -> Result<ExitCode, String> {
+    if !dir.is_dir() {
+        return Err(format!("{} is not a directory", dir.display()));
+    }
+    let root =
+        fs::canonicalize(dir).map_err(|e| format!("cannot resolve {}: {e}", dir.display()))?;
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    dev::watch(root.clone(), std::time::Duration::from_millis(500));
+    dev::serve(&root, addr, |bound| {
+        println!(
+            "serving {} at http://{bound}/ (Ctrl+C to stop)",
+            root.display()
+        );
+    })?;
+    Ok(ExitCode::SUCCESS)
+}
+
 fn run(args: &[&str]) -> Result<ExitCode, String> {
     match args {
         ["explain", code] => Ok(explain(code)),
         ["manifest", "check", path] => manifest_check(Path::new(path)),
+        ["dev", dir] => dev_server(Path::new(dir), 8080),
+        ["dev", dir, "--port", port] => {
+            let port: u16 = port
+                .parse()
+                .map_err(|_| format!("{port:?} is not a port number"))?;
+            dev_server(Path::new(dir), port)
+        }
         ["new", "vanilla", dir] => new_vanilla(Path::new(dir)).map(|()| ExitCode::SUCCESS),
         ["new", "typescript", dir] => new_typescript(Path::new(dir)).map(|()| ExitCode::SUCCESS),
         ["doctor"] => Ok(doctor()),
