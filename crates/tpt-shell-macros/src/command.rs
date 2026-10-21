@@ -22,6 +22,29 @@ use syn::{Expr, FnArg, Ident, ItemFn, LitStr, Pat, PatType, ReturnType, Token, T
 struct Options {
     name: Option<String>,
     capability: Option<String>,
+    /// What the call acts on, and the argument that carries it: `target(path = "file")`.
+    target: Option<(TargetKind, String)>,
+}
+
+/// The kinds of target a grant's scope can check (see `tpt_shell_ipc::Target`).
+#[derive(Clone, Copy)]
+enum TargetKind {
+    Path,
+    Device,
+    Url,
+    Bytes,
+}
+
+impl TargetKind {
+    fn from_ident(ident: &Ident) -> Option<Self> {
+        match ident.to_string().as_str() {
+            "path" => Some(TargetKind::Path),
+            "device" => Some(TargetKind::Device),
+            "url" => Some(TargetKind::Url),
+            "bytes" => Some(TargetKind::Bytes),
+            _ => None,
+        }
+    }
 }
 
 fn parse_options(attr: TokenStream2) -> syn::Result<Options> {
@@ -32,6 +55,22 @@ fn parse_options(attr: TokenStream2) -> syn::Result<Options> {
             Ok(())
         } else if meta.path.is_ident("capability") {
             options.capability = Some(meta.value()?.parse::<LitStr>()?.value());
+            Ok(())
+        } else if meta.path.is_ident("target") {
+            let mut found = None;
+            meta.parse_nested_meta(|inner| {
+                let kind = TargetKind::from_ident(
+                    inner
+                        .path
+                        .get_ident()
+                        .ok_or_else(|| inner.error("expected path, device, url or bytes"))?,
+                )
+                .ok_or_else(|| inner.error("expected path, device, url or bytes"))?;
+                let arg = inner.value()?.parse::<LitStr>()?.value();
+                found = Some((kind, arg));
+                Ok(())
+            })?;
+            options.target = found;
             Ok(())
         } else if meta.path.is_ident("kind") {
             let kind = meta.value()?.parse::<LitStr>()?;
@@ -58,6 +97,43 @@ fn is_result(ty: &Type) -> bool {
             .last()
             .is_some_and(|s| s.ident == "Result"),
         _ => false,
+    }
+}
+
+/// The closure that reads the call's target from its arguments. Without a `target` option the
+/// target is `None`: only an unrestricted grant lets the call run. A missing or wrong-typed
+/// argument also gives `None`, so the grant decides, and the handler's own validation refuses
+/// the bad argument.
+fn target_of(target: Option<&(TargetKind, String)>) -> TokenStream2 {
+    let Some((kind, arg)) = target else {
+        return quote! { |_: &::tpt_shell::__private::ipc::Value| ::tpt_shell::__private::ipc::Target::None };
+    };
+    let arg = LitStr::new(arg, proc_macro2::Span::call_site());
+    match kind {
+        TargetKind::Path => quote! {
+            |args: &::tpt_shell::__private::ipc::Value| match args[#arg].as_str() {
+                Some(value) => ::tpt_shell::__private::ipc::Target::Path(value.to_string()),
+                None => ::tpt_shell::__private::ipc::Target::None,
+            }
+        },
+        TargetKind::Device => quote! {
+            |args: &::tpt_shell::__private::ipc::Value| match args[#arg].as_str() {
+                Some(value) => ::tpt_shell::__private::ipc::Target::Device(value.to_string()),
+                None => ::tpt_shell::__private::ipc::Target::None,
+            }
+        },
+        TargetKind::Url => quote! {
+            |args: &::tpt_shell::__private::ipc::Value| match args[#arg].as_str() {
+                Some(value) => ::tpt_shell::__private::ipc::Target::Url(value.to_string()),
+                None => ::tpt_shell::__private::ipc::Target::None,
+            }
+        },
+        TargetKind::Bytes => quote! {
+            |args: &::tpt_shell::__private::ipc::Value| match args[#arg].as_u64() {
+                Some(n) => ::tpt_shell::__private::ipc::Target::Bytes(n),
+                None => ::tpt_shell::__private::ipc::Target::None,
+            }
+        },
     }
 }
 
@@ -144,17 +220,26 @@ pub fn expand_command(attr: TokenStream2, item: ItemFn) -> syn::Result<TokenStre
     let register_call = match &options.capability {
         Some(c) => {
             let c = LitStr::new(c, proc_macro2::Span::call_site());
+            let target_of = target_of(options.target.as_ref());
             quote! {
                 router.register_guarded_validated(
                     command.name,
                     #c,
                     command.args,
-                    |_| ::tpt_shell::__private::ipc::Target::None,
+                    #target_of,
                     #handler_fn,
                 );
             }
         }
-        None => quote! { router.register_validated(command.name, command.args, #handler_fn); },
+        None => {
+            if options.target.is_some() {
+                return Err(syn::Error::new_spanned(
+                    &item.sig.ident,
+                    "target needs a capability: add capability = \"...\"",
+                ));
+            }
+            quote! { router.register_validated(command.name, command.args, #handler_fn); }
+        }
     };
 
     Ok(quote! {

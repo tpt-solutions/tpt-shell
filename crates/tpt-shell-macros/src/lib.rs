@@ -84,7 +84,8 @@ fn content_type(path: &str) -> &'static str {
 ///
 /// The function itself is unchanged. Hidden helpers are added beside it; see [`commands!`]
 /// and [`register_commands!`]. Options: `name` (defaults to the function name), `capability`,
-/// and `kind = "sync"` (the only kind so far).
+/// `target(path = "arg")` (or `device`, `url`, `bytes`: the argument the grant's scope checks,
+/// which needs a capability), and `kind = "sync"` (the only kind so far).
 #[proc_macro_attribute]
 pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as syn::ItemFn);

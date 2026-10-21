@@ -4,6 +4,8 @@
 //! `#[command]` end to end, through the facade: the contract, the typed handler, and the
 //! capability check on the authorized path.
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use serde_json::{json, Value};
 use tpt_shell::{
     command, commands, register_commands, Caller, CommandError, ConsentPrompt, Engine, Grant,
@@ -21,6 +23,15 @@ fn list_dir(path: String, depth: u8) -> Result<Vec<String>, CommandError> {
 #[command(name = "add", kind = "sync")]
 fn add_numbers(x: i64, y: Option<i64>) -> i64 {
     x + y.unwrap_or(0)
+}
+
+/// How many times `read_file`'s body has run.
+static READS: AtomicU32 = AtomicU32::new(0);
+
+#[command(capability = "fs.read", target(path = "file"))]
+fn read_file(file: String) -> Result<String, CommandError> {
+    READS.fetch_add(1, Ordering::SeqCst);
+    Ok(format!("contents of {file}"))
 }
 
 const ORIGIN: &str = "https://tpt-app.localhost";
@@ -188,4 +199,41 @@ fn optional_arguments_may_be_left_out() {
     register_commands!(&mut router, add_numbers);
     let two = unauthorized(&router, r#"{"v":1,"id":7,"cmd":"add","args":{"x":2}}"#);
     assert_eq!(two["data"], json!(2));
+}
+
+#[test]
+fn a_scoped_command_is_checked_against_the_argument_it_names() {
+    let mut router = Router::new();
+    register_commands!(&mut router, read_file);
+    let mut engine = Engine::new();
+    engine
+        .add_grant(grant(Scope::Paths(vec!["C:/data".into()])))
+        .unwrap();
+
+    let inside = ask(
+        &router,
+        &mut engine,
+        r#"{"v":1,"id":8,"cmd":"read_file","args":{"file":"C:/data/notes.txt"}}"#,
+    );
+    assert_eq!(inside["data"], json!("contents of C:/data/notes.txt"));
+
+    let outside = ask(
+        &router,
+        &mut engine,
+        r#"{"v":1,"id":9,"cmd":"read_file","args":{"file":"C:/secrets/key"}}"#,
+    );
+    assert_eq!(outside["error"]["code"], "CAP_OUT_OF_SCOPE");
+
+    let missing = ask(
+        &router,
+        &mut engine,
+        r#"{"v":1,"id":10,"cmd":"read_file","args":{}}"#,
+    );
+    assert_eq!(missing["error"]["code"], "CAP_BAD_REQUEST");
+
+    assert_eq!(
+        READS.load(Ordering::SeqCst),
+        1,
+        "only the in-scope call ran the body"
+    );
 }
