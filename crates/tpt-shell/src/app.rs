@@ -3,14 +3,17 @@
 
 //! The app builder (spec §7.1). It gathers windows, grants and commands, then starts them.
 //!
-//! What runs today: Windows, with WebView2. Every window loads the HTML the app gives it, and
-//! its page messages go through the capability-checked router with the window's own grants.
-//! Consent prompts are refused until the native consent dialog exists. On other platforms
-//! [`App::run`] and [`App::build`] return [`Error::Unsupported`].
+//! What runs today: Windows, with WebView2. Each window loads one of the app's assets from the
+//! app origin, so its pages are at the origin its grants name. Its page messages go through the
+//! capability-checked router with the window's own grants. Consent prompts are refused until the
+//! native consent dialog exists. On other platforms [`App::run`] and [`App::build`] return
+//! [`Error::Unsupported`].
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use tpt_shell_capabilities::Grant;
+use tpt_shell_core::backend::Asset;
 #[cfg(windows)]
 use tpt_shell_core::backend::WindowSpec;
 #[cfg(windows)]
@@ -29,7 +32,9 @@ pub struct Window {
     title: String,
     width: f64,
     height: f64,
-    html: Option<String>,
+    /// The asset the window opens, relative to the app origin.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    page: String,
 }
 
 impl Window {
@@ -40,7 +45,7 @@ impl Window {
             title: name.to_string(),
             width: 800.0,
             height: 600.0,
-            html: None,
+            page: "index.html".into(),
         }
     }
 
@@ -56,9 +61,9 @@ impl Window {
         self
     }
 
-    /// The document the window shows. The app supplies it, so it counts as app content.
-    pub fn html(mut self, html: &str) -> Self {
-        self.html = Some(html.to_string());
+    /// The asset the window opens first, such as `index.html`. It is served from the app origin.
+    pub fn page(mut self, path: &str) -> Self {
+        self.page = path.to_string();
         self
     }
 
@@ -74,13 +79,6 @@ impl Window {
             allow_navigation: Vec::new(),
         }
     }
-
-    #[cfg(windows)]
-    fn document(&self) -> String {
-        self.html
-            .clone()
-            .unwrap_or_else(|| format!("<!doctype html><title>{}</title>", self.title))
-    }
 }
 
 /// Registers one guarded command on the router.
@@ -95,6 +93,9 @@ pub struct App {
     windows: Vec<Window>,
     grants: Vec<Grant>,
     commands: Vec<Register>,
+    /// Files the app serves from its origin, by path.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    assets: HashMap<String, Asset>,
 }
 
 impl App {
@@ -125,6 +126,19 @@ impl App {
 
     pub fn window(mut self, window: Window) -> Self {
         self.windows.push(window);
+        self
+    }
+
+    /// Adds a file the app serves from its origin, such as `index.html` or `app.js`. Pages load
+    /// their scripts and styles from these, because the page policy blocks inline ones.
+    pub fn asset(mut self, path: &str, content_type: &str, body: impl Into<Vec<u8>>) -> Self {
+        self.assets.insert(
+            path.to_string(),
+            Asset {
+                content_type: content_type.to_string(),
+                body: body.into(),
+            },
+        );
         self
     }
 
@@ -200,6 +214,7 @@ impl App {
         }
         let router = Rc::new(router);
 
+        let assets = Rc::new(self.assets);
         let mut backend = WindowsBackend::new(&loader, &data_dir)?;
         let mut windows = Vec::new();
         for window in self.windows {
@@ -224,7 +239,9 @@ impl App {
                     ))
                 }),
             )?;
-            backend.load_html(id, &window.document())?;
+            let assets = assets.clone();
+            backend.set_asset_source(id, Box::new(move |path| assets.get(path).cloned()))?;
+            backend.navigate(id, &format!("{APP_ORIGIN}/{}", window.page))?;
             windows.push((window.name, id));
         }
         Ok(Running { backend, windows })
@@ -277,24 +294,28 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn a_window_keeps_its_name_title_size_and_document() {
-        let w = Window::new("main")
-            .title("Demo")
-            .size(1100.0, 700.0)
-            .html("<p>x</p>");
+    fn a_window_keeps_its_name_title_and_size() {
+        let w = Window::new("main").title("Demo").size(1100.0, 700.0);
         let spec = w.spec();
         assert_eq!(spec.name, "main");
         assert_eq!(spec.title, "Demo");
         assert_eq!((spec.size.width, spec.size.height), (1100.0, 700.0));
         assert!(spec.allow_navigation.is_empty());
-        assert_eq!(w.document(), "<p>x</p>");
     }
 
-    #[cfg(windows)]
     #[test]
-    fn a_window_without_html_gets_a_titled_placeholder() {
-        let w = Window::new("main").title("Demo");
-        assert_eq!(w.document(), "<!doctype html><title>Demo</title>");
+    fn a_window_opens_index_html_unless_told_otherwise() {
+        assert_eq!(Window::new("main").page, "index.html");
+        assert_eq!(Window::new("main").page("start.html").page, "start.html");
+    }
+
+    #[test]
+    fn assets_are_kept_by_path_and_a_later_one_replaces_an_earlier_one() {
+        let app = App::new()
+            .asset("index.html", "text/html", "<p>one</p>")
+            .asset("index.html", "text/html", "<p>two</p>");
+        assert_eq!(app.assets.len(), 1);
+        assert_eq!(app.assets["index.html"].body, b"<p>two</p>");
     }
 
     #[cfg(not(windows))]

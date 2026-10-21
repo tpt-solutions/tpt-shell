@@ -11,8 +11,11 @@ use std::time::Duration;
 use tpt_shell::{App, CommandError, Grant, Scope, Target, Value, Window};
 use tpt_shell_platform_windows::window::{pump_until, runtime_test_loader};
 
+/// The start page. Its script is a separate asset, because the page policy blocks inline script.
+const INDEX: &str = r#"<!doctype html><title>start</title><script src="app.js"></script>"#;
+
 /// Asks for a file in scope, then one out of scope, and shows each reply in the title.
-const PAGE: &str = r#"<!doctype html><title>start</title><script>
+const APP_JS: &str = r#"
     var IN_SCOPE = '{"v":1,"id":1,"cmd":"read","args":{"path":"C:/data/notes.txt"}}';
     var OUT_OF_SCOPE = '{"v":1,"id":2,"cmd":"read","args":{"path":"C:/secrets/key"}}';
     var answers = 0;
@@ -22,7 +25,7 @@ const PAGE: &str = r#"<!doctype html><title>start</title><script>
       if (answers === 1) { window.chrome.webview.postMessage(OUT_OF_SCOPE); }
     });
     window.chrome.webview.postMessage(IN_SCOPE);
-    </script>"#;
+"#;
 
 #[test]
 fn an_app_window_calls_a_guarded_command_and_gets_the_reply() {
@@ -35,12 +38,9 @@ fn an_app_window_calls_a_guarded_command_and_gets_the_reply() {
         .name("app-runtime-test")
         .loader(loader)
         .data_dir(&dir)
-        .window(
-            Window::new("main")
-                .title("app-test")
-                .size(640.0, 480.0)
-                .html(PAGE),
-        )
+        .asset("index.html", "text/html", INDEX)
+        .asset("app.js", "text/javascript", APP_JS)
+        .window(Window::new("main").title("app-test").size(640.0, 480.0))
         .grant(Grant {
             capability: "fs.read".into(),
             window: "main".into(),
