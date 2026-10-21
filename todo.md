@@ -232,9 +232,9 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### tpt-shell-cli
 - [ ] `new` with vanilla and typescript templates (zero Node by default) (both are done; the TypeScript one needs `tsc` to build, which is the one place Node is used)
-- [ ] `dev`: file watcher, hot reload preserving Rust state, mock toggle
+- [ ] `dev`: file watcher, hot reload preserving Rust state, mock toggle (`tpt-shell dev <dir>` reports added, changed and removed files every half second; no hot reload into a running window yet, and no mock toggle)
 - [ ] `dev`: automatic replay of last session after reload (hook; full replay in M8)
-- [ ] Dev server (hand-rolled HTTP or licence-clean crate)
+- [x] Dev server (hand-rolled HTTP or licence-clean crate) (`tpt-shell dev` serves GET and HEAD on 127.0.0.1 only, refuses paths that leave the directory, and has tests with a real socket; the server answers one request at a time)
 - [ ] `build` (release build; compliance outputs added in M10)
 - [ ] `doctor` (WebView2 version, toolchain, licence policy): WebView2 version, rustc and cargo-deny presence are checked; the licence policy is not yet
 - [ ] `contract gen | check | diff` (breaking-change detection)
@@ -362,12 +362,12 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### tpt-shell-profiles
 - [x] Profile kinds: default, named, ephemeral (`tpt-shell-profiles`)
-- [ ] Window-to-profile binding
+- [ ] Window-to-profile binding (`App::profile(ProfileKind::Named | Ephemeral)` chooses the folder the windows keep their data in; every window of an app shares that folder, so per-window profiles are not built)
 - [ ] Windows mapping: WebView2 profile name / user data folder
 - [ ] macOS mapping: data-store identifier (14+), non-persistent otherwise
 - [ ] Linux mapping: WebsiteDataManager base dirs / ephemeral
 - [ ] `tpt.caps` reports profile capability level
-- [ ] Wipe on close, wipe on idle (the wipe and idle policy exist in `tpt-shell-profiles`; no window calls them yet)
+- [ ] Wipe on close, wipe on idle (an ephemeral session is wiped when the app stops, through its guard; the idle wipe and wipe on window close are not wired, because WebView2 holds the files while a window is open)
 - [x] Secure erase (best-effort) with documented SSD/journaling limits (`wipe_dir` overwrites file contents before removal; the limits are in its doc comment)
 - [x] Quotas (`usage` and `enforce_quota`; not yet applied to a live WebView2 profile)
 - [ ] Profile manager API: create, list, switch, export (encrypted), delete (create, list and delete are done; switch and encrypted export are not)

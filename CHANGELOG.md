@@ -23,6 +23,8 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 - Kiosk: `App::kiosk_config` applies a signed config (home page, idle reset). `App::snapshot_state` saves app state on a timer and at exit, and restores it at the next start.
 - Devices: `tpt_shell::devices` re-exports the device crate. A page command with a device grant can print through the hub; live test with a virtual printer.
 - Windows: timers on the UI thread (`WindowsBackend::every`, `cancel`).
+- CLI: `tpt-shell dev <dir> [--port N]` serves an app's files on 127.0.0.1 and reports which files change.
+- `App::profile(ProfileKind::Named(..) | Ephemeral)` picks the folder the windows keep their data in. An ephemeral session is wiped when the app stops.
 - Agent: the page's accessible tree as a snapshot (roles, names, states, values, bounds, references), and the actions click, focus, type, select, key, scroll and read. Password values and `data-tpt-redact` blocks are never reported. Page text is wrapped in `<untrusted>` markers when rendered. Live test on WebView2.
 - Windows: keystore with DPAPI (per user, one encrypted file per name); balloon notifications from the tray icon; deep-link registration (`App::deep_link`); window placement saved and restored (`App::remember_window_state`).
 - Windows: `App::tray(tooltip, items, on_select)` adds a notification-area icon. A left click reports `TRAY_ACTIVATE`, and a right-click menu pick reports the item's id.
