@@ -66,6 +66,20 @@ impl ComPtr {
         Some(ComPtr(p))
     }
 
+    /// Asks the object for another interface (`QueryInterface`). The result holds its own
+    /// reference. Fails with `E_NOINTERFACE` when the object does not implement `iid`.
+    pub fn query(&self, iid: &Guid) -> Result<ComPtr, HRESULT> {
+        let vt: &IUnknownVtbl = self.vtbl();
+        let mut out: *mut c_void = std::ptr::null_mut();
+        // SAFETY: `self.0` is a live object; `iid` and `out` are valid for the call.
+        let hr = unsafe { (vt.query_interface)(self.0, iid, &mut out) };
+        if hr < 0 {
+            return Err(hr);
+        }
+        // SAFETY: on success the object gave us one reference, which we now own.
+        unsafe { ComPtr::from_owned(out) }.ok_or(E_POINTER)
+    }
+
     pub fn as_ptr(&self) -> *mut c_void {
         self.0
     }

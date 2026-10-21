@@ -1,14 +1,22 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! macOS backend for tpt-shell (spec §6.2). Built only on macOS; empty elsewhere.
+//! macOS backend for tpt-shell (spec §6.2). The AppKit and WebKit code is built only on macOS.
 //!
-//! Status: window lifecycle and HTML loading are written against the generated `objc2`
-//! bindings. The workspace can type-check them for the macOS target. Nothing here has run on
-//! a Mac yet. Navigation policy, the script bridge, the event loop and the other platform
-//! services are not built.
+//! Status: windows (frameless, always-on-top, transparency, close action), the WKWebView
+//! message bridge, the navigation policy, the `app://` scheme handler and page scripts are
+//! written against the generated `objc2` bindings. The workspace can type-check them for the
+//! macOS target. They have not run on a Mac yet. The policy rules in [`policy`] compile and
+//! are tested on every host. The event loop, dialogs, pasteboard, notifications, tray, deep
+//! links, single instance, keystore and accessibility are not built.
+
+pub mod policy;
 
 #[cfg(target_os = "macos")]
 pub mod backend;
+#[cfg(target_os = "macos")]
+pub mod shim;
+#[cfg(target_os = "macos")]
+pub mod webview;
 #[cfg(target_os = "macos")]
 pub mod window;

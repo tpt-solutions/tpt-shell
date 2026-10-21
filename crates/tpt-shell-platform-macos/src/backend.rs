@@ -9,9 +9,15 @@
 use std::collections::HashMap;
 
 use objc2::MainThreadMarker;
-use tpt_shell_core::backend::{WebviewBackend, WindowBackend, WindowSpec};
+use objc2_app_kit::{NSApplication, NSPasteboard, NSPasteboardTypeString};
+use objc2_foundation::NSString;
+use tpt_shell_core::backend::{
+    AssetSource, CloseAction, MessageHandler, WebviewBackend, WindowBackend, WindowSpec,
+};
+use tpt_shell_core::platform::{ClipboardBackend, ColorScheme, ThemeBackend};
 use tpt_shell_core::{Error, LogicalSize, Result};
 
+use crate::policy::is_app_url;
 use crate::window::MacWindow;
 
 /// Handle to a window managed by [`MacBackend`].
@@ -46,7 +52,13 @@ impl WindowBackend for MacBackend {
     type Id = WindowId;
 
     fn create(&mut self, spec: &WindowSpec) -> Result<WindowId> {
-        let window = MacWindow::new(self.mtm, &spec.title, spec.size.width, spec.size.height);
+        let window = MacWindow::new(
+            self.mtm,
+            &spec.title,
+            spec.size.width,
+            spec.size.height,
+            spec.allow_navigation.clone(),
+        );
         let id = self.next;
         self.next += 1;
         self.windows.insert(id, window);
@@ -90,11 +102,24 @@ impl WindowBackend for MacBackend {
         Ok(())
     }
 
-    fn set_frameless(&mut self, id: WindowId, _on: bool) -> Result<()> {
-        self.window(id)?;
-        Err(Error::Unsupported {
-            feature: "frameless (needs the style mask rebuilt without Titled)",
-        })
+    fn set_frameless(&mut self, id: WindowId, on: bool) -> Result<()> {
+        self.window(id)?.set_frameless(on);
+        Ok(())
+    }
+
+    fn set_always_on_top(&mut self, id: WindowId, on: bool) -> Result<()> {
+        self.window(id)?.set_always_on_top(on);
+        Ok(())
+    }
+
+    fn set_transparent(&mut self, id: WindowId, on: bool) -> Result<()> {
+        self.window(id)?.set_transparent(on);
+        Ok(())
+    }
+
+    fn set_close_action(&mut self, id: WindowId, action: CloseAction) -> Result<()> {
+        self.window(id)?.set_close_action(action);
+        Ok(())
     }
 }
 
@@ -104,19 +129,67 @@ impl WebviewBackend for MacBackend {
         Ok(())
     }
 
-    fn navigate(&mut self, _id: WindowId, _url: &str) -> Result<()> {
-        Err(Error::Unsupported {
-            feature: "navigate (needs the app:// scheme handler and navigation policy)",
-        })
+    fn navigate(&mut self, id: WindowId, url: &str) -> Result<()> {
+        if !is_app_url(url) {
+            return Err(Error::Backend(format!("navigation blocked: {url}")));
+        }
+        self.window(id)?.navigate(url).map_err(Error::Backend)
     }
 
-    fn eval(&mut self, _id: WindowId, _script: &str) -> Result<()> {
-        Err(Error::Unsupported { feature: "eval" })
+    /// Runs `script` in the page without waiting for it. Errors thrown by the script are not
+    /// reported yet; only the call itself is.
+    fn eval(&mut self, id: WindowId, script: &str) -> Result<()> {
+        self.window(id)?.eval(script);
+        Ok(())
     }
 
-    fn post_message(&mut self, _id: WindowId, _message: &str) -> Result<()> {
-        Err(Error::Unsupported {
-            feature: "post_message (needs the script message handler)",
-        })
+    fn post_message(&mut self, id: WindowId, message: &str) -> Result<()> {
+        self.window(id)?.post_message(message);
+        Ok(())
+    }
+
+    fn set_message_handler(&mut self, id: WindowId, handler: MessageHandler) -> Result<()> {
+        self.window(id)?.set_message_handler(handler);
+        Ok(())
+    }
+
+    fn set_asset_source(&mut self, id: WindowId, source: AssetSource) -> Result<()> {
+        self.window(id)?.set_asset_source(source);
+        Ok(())
+    }
+}
+
+impl ClipboardBackend for MacBackend {
+    fn clipboard_text(&self) -> Result<Option<String>> {
+        let board = NSPasteboard::generalPasteboard();
+        // SAFETY: NSPasteboardTypeString is a constant provided by AppKit.
+        let text = unsafe { board.stringForType(NSPasteboardTypeString) };
+        Ok(text.map(|s| s.to_string()))
+    }
+
+    fn set_clipboard_text(&mut self, text: &str) -> Result<()> {
+        let board = NSPasteboard::generalPasteboard();
+        board.clearContents();
+        // SAFETY: NSPasteboardTypeString is a constant provided by AppKit, and the string outlives the call.
+        let ok =
+            unsafe { board.setString_forType(&NSString::from_str(text), NSPasteboardTypeString) };
+        if ok {
+            Ok(())
+        } else {
+            Err(Error::Backend("the pasteboard refused the text".into()))
+        }
+    }
+}
+
+impl ThemeBackend for MacBackend {
+    fn color_scheme(&self) -> Result<ColorScheme> {
+        let app = NSApplication::sharedApplication(self.mtm);
+        let name = app.effectiveAppearance().name().to_string();
+        // The dark appearances are NSAppearanceNameDarkAqua and the high contrast dark one.
+        if name.contains("Dark") {
+            Ok(ColorScheme::Dark)
+        } else {
+            Ok(ColorScheme::Light)
+        }
     }
 }

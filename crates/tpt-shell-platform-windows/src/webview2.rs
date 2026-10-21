@@ -73,6 +73,42 @@ pub const IID_WEB_MESSAGE_RECEIVED_HANDLER: Guid = Guid {
     data3: 0x49fa,
     data4: [0x8e, 0x07, 0x89, 0x8e, 0xa0, 0x1e, 0xcb, 0xd2],
 };
+/// `ICoreWebView2Controller2`: the controller's background colour.
+const IID_CONTROLLER2: Guid = Guid {
+    data1: 0xc979_903e,
+    data2: 0xd4ca,
+    data3: 0x4228,
+    data4: [0x92, 0xeb, 0x47, 0xee, 0x3f, 0xa9, 0x6e, 0xab],
+};
+/// `ICoreWebView2Settings9`: non-client region support (CSS drag regions).
+const IID_SETTINGS9: Guid = Guid {
+    data1: 0x0528_a73b,
+    data2: 0xe92d,
+    data3: 0x49f4,
+    data4: [0x92, 0x7a, 0xe5, 0x47, 0xdd, 0xda, 0xa3, 0x7d],
+};
+/// `ICoreWebView2_13`: the webview's profile, which holds the preferred colour scheme.
+const IID_WEBVIEW_13: Guid = Guid {
+    data1: 0xf75f_09a8,
+    data2: 0x667e,
+    data3: 0x4983,
+    data4: [0x88, 0xd6, 0xc8, 0x77, 0x3f, 0x31, 0x5e, 0x84],
+};
+
+/// `COREWEBVIEW2_COLOR`: a background colour, one byte per channel.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Color {
+    pub a: u8,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+/// `COREWEBVIEW2_PREFERRED_COLOR_SCHEME` values.
+pub const SCHEME_AUTO: i32 = 0;
+pub const SCHEME_LIGHT: i32 = 1;
+pub const SCHEME_DARK: i32 = 2;
 
 /// Origin the app's own pages are served from on Windows. WebView2 does not route a custom
 /// scheme such as `app://` through `WebResourceRequested` (checked against runtime 155.0.4283.62),
@@ -140,7 +176,7 @@ struct WebViewVtbl {
     // Removes the script added to document creation (vtable 28), then ExecuteScript (29).
     _before_execute_script: [usize; 1],
     execute_script: unsafe extern "system" fn(*mut c_void, *const u16, *mut c_void) -> HRESULT,
-    // CapturePreview (30), then Reload (31).
+    // CapturePreview (30) is not called; see the snapshot in backend.rs. Slot 30 is a placeholder.
     _before_reload: [usize; 1],
     reload: unsafe extern "system" fn(*mut c_void) -> HRESULT,
     _before_post_message: [usize; 1],
@@ -152,12 +188,52 @@ struct WebViewVtbl {
         unsafe extern "system" fn(*mut c_void, *const u16, *const u16, *mut c_void) -> HRESULT,
     _before_document_title: [usize; 11],
     get_document_title: unsafe extern "system" fn(*mut c_void, *mut *mut u16) -> HRESULT,
-    _before_resource_requested: [usize; 6],
+    _before_open_devtools: [usize; 2],
+    // OpenDevToolsWindow (48). Slots 49-51 are other methods we do not call.
+    open_devtools_window: unsafe extern "system" fn(*mut c_void) -> HRESULT,
+    _before_resource_requested: [usize; 3],
     add_web_resource_requested:
         unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
     _before_resource_filter: [usize; 1],
     add_web_resource_requested_filter:
         unsafe extern "system" fn(*mut c_void, *const u16, i32) -> HRESULT,
+}
+
+/// `ICoreWebView2Controller2`: the controller's background colour. Slots 3-25 are the base
+/// interfaces'; get_DefaultBackgroundColor = 26, put_DefaultBackgroundColor = 27.
+#[repr(C)]
+struct Controller2Vtbl {
+    base: IUnknownVtbl,
+    _before_background: [usize; 23],
+    _get_background: usize,
+    put_default_background_color: unsafe extern "system" fn(*mut c_void, Color) -> HRESULT,
+}
+
+/// `ICoreWebView2Settings9`: put_IsNonClientRegionSupportEnabled = 38 (the getter is 37). The
+/// base interfaces take slots 3-36.
+#[repr(C)]
+struct Settings9Vtbl {
+    base: IUnknownVtbl,
+    _before_non_client: [usize; 34],
+    _get_non_client: usize,
+    put_non_client_region_support: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
+}
+
+/// `ICoreWebView2_13`: get_Profile = 105, after the 102 slots of its base interfaces.
+#[repr(C)]
+struct Webview13Vtbl {
+    base: IUnknownVtbl,
+    _before_profile: [usize; 102],
+    get_profile: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+}
+
+/// `ICoreWebView2Profile`: get_PreferredColorScheme = 8, put_PreferredColorScheme = 9.
+#[repr(C)]
+struct ProfileVtbl {
+    base: IUnknownVtbl,
+    _before_scheme: [usize; 5],
+    _get_scheme: usize,
+    put_preferred_color_scheme: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
 }
 
 /// `ICoreWebView2WebResourceRequestedEventArgs`: get_Request = 0, put_Response = 2.
@@ -422,6 +498,54 @@ impl Settings {
     }
 }
 
+impl Settings {
+    /// Lets CSS `-webkit-app-region` mark drag areas (WebView2 1.0.1518 and later). Fails with
+    /// `E_NOINTERFACE` on a runtime that does not have the setting.
+    pub fn set_non_client_region_support(&self, on: bool) -> Result<(), HRESULT> {
+        let s9 = self.0.query(&IID_SETTINGS9)?;
+        let vt: &Settings9Vtbl = s9.vtbl();
+        // SAFETY: `s9` is a live ICoreWebView2Settings9 object.
+        check(unsafe { (vt.put_non_client_region_support)(s9.as_ptr(), i32::from(on)) })
+    }
+}
+
+impl Controller {
+    /// Sets the colour behind the page (`ICoreWebView2Controller2`). An alpha of 0 makes the page
+    /// background see-through, so the window (or a backdrop) shows behind the page.
+    pub fn set_default_background(&self, color: Color) -> Result<(), HRESULT> {
+        let c2 = self.0.query(&IID_CONTROLLER2)?;
+        let vt: &Controller2Vtbl = c2.vtbl();
+        // SAFETY: `c2` is a live ICoreWebView2Controller2 object; `Color` is passed by value,
+        // as the header declares.
+        check(unsafe { (vt.put_default_background_color)(c2.as_ptr(), color) })
+    }
+}
+
+impl WebView {
+    /// Opens the developer tools in their own window. The runtime ignores the call when the
+    /// developer tools are turned off in the settings.
+    pub fn open_devtools_window(&self) -> Result<(), HRESULT> {
+        let vt: &WebViewVtbl = self.0.vtbl();
+        // SAFETY: `self.0` is a live webview.
+        check(unsafe { (vt.open_devtools_window)(self.0.as_ptr()) })
+    }
+
+    /// Sets the colour scheme the page's `prefers-color-scheme` media query sees: one of
+    /// `SCHEME_AUTO` (follow the system), `SCHEME_LIGHT` or `SCHEME_DARK`. It applies to the
+    /// webview's profile, so every window in the same environment is affected.
+    pub fn set_preferred_color_scheme(&self, scheme: i32) -> Result<(), HRESULT> {
+        let v13 = self.0.query(&IID_WEBVIEW_13)?;
+        let mut out: *mut c_void = null_mut();
+        // SAFETY: `v13` is a live ICoreWebView2_13 object; `out` is a valid out-pointer.
+        check(unsafe { (v13.vtbl::<Webview13Vtbl>().get_profile)(v13.as_ptr(), &mut out) })?;
+        // SAFETY: on success the callee returned a new reference that we now own.
+        let profile = unsafe { ComPtr::from_owned(out) }.ok_or(E_POINTER)?;
+        let vt: &ProfileVtbl = profile.vtbl();
+        // SAFETY: `profile` is a live ICoreWebView2Profile object.
+        check(unsafe { (vt.put_preferred_color_scheme)(profile.as_ptr(), scheme) })
+    }
+}
+
 /// Maps a failed HRESULT to `Err`.
 fn check(hr: HRESULT) -> Result<(), HRESULT> {
     if hr < 0 {
@@ -624,6 +748,38 @@ impl WebView {
         }
     }
 
+    /// Runs a DevTools protocol method and passes its JSON result to `on_done` on the UI thread.
+    /// `None` when the method failed or returned nothing. Crate-private, like the test helper:
+    /// the snapshot uses it, and pages and agents get no raw protocol access (spec 9, 10.4).
+    pub(crate) fn call_devtools_protocol_json(
+        &self,
+        method: &str,
+        params_json: &str,
+        on_done: impl FnOnce(HRESULT, Option<String>) + 'static,
+    ) -> Result<(), HRESULT> {
+        let handler = new_completed_handler(IID_DEVTOOLS_DONE_HANDLER, move |hr, result| {
+            // SAFETY: WebView2 passes the result string for the duration of this callback.
+            let json =
+                (!result.is_null()).then(|| unsafe { crate::com::read_wide(result as *const u16) });
+            on_done(hr, json);
+        });
+        let name = wide(method);
+        let params = wide(params_json);
+        let vt: &WebViewVtbl = self.0.vtbl();
+        // SAFETY: both strings are NUL-terminated and live across the call; `handler` is live.
+        let hr = unsafe {
+            (vt.call_devtools_protocol_method)(
+                self.0.as_ptr(),
+                name.as_ptr(),
+                params.as_ptr(),
+                handler,
+            )
+        };
+        // SAFETY: we release our reference. The webview keeps its own while it needs the callback.
+        unsafe { release(handler) };
+        check(hr)
+    }
+
     /// Sends a string to the page. The page sees it in `window.chrome.webview` `message` events.
     pub fn post_web_message(&self, message: &str) -> Result<(), HRESULT> {
         let vt: &WebViewVtbl = self.0.vtbl();
@@ -824,7 +980,7 @@ mod header_tests {
     use std::path::PathBuf;
 
     /// (interface, header index, method name) for every slot we call.
-    const USED_SLOTS: [(&str, usize, &str); 30] = [
+    const USED_SLOTS: [(&str, usize, &str); 35] = [
         (
             "ICoreWebView2Environment",
             0,
@@ -879,6 +1035,17 @@ mod header_tests {
         ("ICoreWebView2NavigationStartingEventArgs", 0, "get_Uri"),
         ("ICoreWebView2NavigationStartingEventArgs", 5, "put_Cancel"),
         ("ICoreWebView2", 24, "AddScriptToExecuteOnDocumentCreated"),
+        // Slots of the derived interfaces, counted from the C vtables (IUnknown included):
+        // Controller2 put_DefaultBackgroundColor 27, Settings9 put 38, ICoreWebView2_13 get_Profile 105.
+        ("ICoreWebView2", 48, "OpenDevToolsWindow"),
+        ("ICoreWebView2Controller2", 1, "put_DefaultBackgroundColor"),
+        (
+            "ICoreWebView2Settings9",
+            1,
+            "put_IsNonClientRegionSupportEnabled",
+        ),
+        ("ICoreWebView2_13", 0, "get_Profile"),
+        ("ICoreWebView2Profile", 6, "put_PreferredColorScheme"),
     ];
 
     /// Method names of `iface`, in declaration order, from the header text.
@@ -894,7 +1061,7 @@ mod header_tests {
                     .rfind("MIDL_INTERFACE(")
                     .is_some_and(|p| at - p < 120)
                 && after.starts_with(':')
-                && after[1..].trim_start().starts_with("public IUnknown");
+                && after[1..].trim_start().starts_with("public ");
             if !is_decl {
                 continue;
             }

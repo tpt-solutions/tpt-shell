@@ -9,7 +9,8 @@
 //! the SDK's `um` include folder. Dialogs are modal and block until the user answers, so the
 //! tests only create, configure and read back items; they never show a dialog.
 //!
-//! Limit: multi-select is not built. `open_file` returns one path.
+//! `open_files` allows several files to be picked. `open_file` picks one. The message box is
+//! the plain `MessageBoxW`, modal to its owner window.
 
 use std::ffi::c_void;
 use std::path::PathBuf;
@@ -18,6 +19,7 @@ use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
 use windows_sys::Win32::UI::Shell::SHCreateItemFromParsingName;
+use windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW;
 
 use crate::com::{take_co_string, wide, ComPtr, Guid, IUnknownVtbl, E_POINTER, HRESULT};
 
@@ -48,8 +50,28 @@ const IID_ISHELL_ITEM: Guid = Guid {
     data4: [0xBC, 0x55, 0xA1, 0xE2, 0x61, 0xC3, 0x7B, 0xFE],
 };
 
+/// `IFileOpenDialog`, which adds `GetResults` to `IFileDialog`.
+const IID_IFILE_OPEN_DIALOG: Guid = Guid {
+    data1: 0xD57C_7288,
+    data2: 0xD4AD,
+    data3: 0x4768,
+    data4: [0xBE, 0x02, 0x9D, 0x96, 0x95, 0x32, 0xD9, 0x60],
+};
+
 const FOS_PICKFOLDERS: u32 = 0x20;
 const FOS_FORCEFILESYSTEM: u32 = 0x40;
+const FOS_ALLOWMULTISELECT: u32 = 0x200;
+/// Message box button and icon flags, and the answers `MessageBoxW` returns.
+const MB_OK: u32 = 0x0000_0000;
+const MB_OKCANCEL: u32 = 0x0000_0001;
+const MB_YESNO: u32 = 0x0000_0004;
+const MB_YESNOCANCEL: u32 = 0x0000_0003;
+const MB_ICONWARNING: u32 = 0x0000_0030;
+const MB_ICONERROR: u32 = 0x0000_0010;
+const MB_ICONINFORMATION: u32 = 0x0000_0040;
+const IDOK: i32 = 1;
+const IDYES: i32 = 6;
+const IDNO: i32 = 7;
 const SIGDN_FILESYSPATH: u32 = 0x8005_8000;
 /// `HRESULT_FROM_WIN32(ERROR_CANCELLED)`: the user closed the dialog.
 const CANCELLED: HRESULT = 0x8007_04C7_u32 as i32;
@@ -83,6 +105,23 @@ struct ShellItemVtbl {
     base: IUnknownVtbl,
     _before_display_name: [usize; 2],
     get_display_name: unsafe extern "system" fn(*mut c_void, u32, *mut *mut u16) -> HRESULT,
+}
+
+/// `IFileOpenDialog`: GetResults = 27 (the slots after `IFileDialog`'s 23 methods, 4-26).
+#[repr(C)]
+struct OpenDialogVtbl {
+    base: IUnknownVtbl,
+    _before_results: [usize; 24],
+    get_results: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+}
+
+/// `IShellItemArray`: GetCount = 7, GetItemAt = 8 (its base methods take slots 3-6).
+#[repr(C)]
+struct ShellItemArrayVtbl {
+    base: IUnknownVtbl,
+    _before_count: [usize; 4],
+    get_count: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
+    get_item_at: unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> HRESULT,
 }
 
 /// What a dialog should look like.
@@ -207,6 +246,118 @@ pub fn pick_folder(owner: HWND, options: &DialogOptions) -> Result<Option<PathBu
     show(&dialog, owner)
 }
 
+/// Shows an open-file dialog that lets the user pick several files. `None` means the user
+/// cancelled. The paths come back in the order the dialog lists them.
+pub fn open_files(owner: HWND, options: &DialogOptions) -> Result<Option<Vec<PathBuf>>, HRESULT> {
+    let dialog = create_dialog(&CLSID_FILE_OPEN_DIALOG, options, FOS_ALLOWMULTISELECT)?;
+    if !show_modal(&dialog, owner)? {
+        return Ok(None);
+    }
+    let open = dialog.query(&IID_IFILE_OPEN_DIALOG)?;
+    let open_vt: &OpenDialogVtbl = open.vtbl();
+    let mut raw: *mut c_void = null_mut();
+    // SAFETY: `raw` is a valid out-pointer.
+    check(unsafe { (open_vt.get_results)(open.as_ptr(), &mut raw) })?;
+    // SAFETY: on success the dialog gave us one `IShellItemArray` reference.
+    let items = unsafe { ComPtr::from_owned(raw) }.ok_or(E_POINTER)?;
+    let items_vt: &ShellItemArrayVtbl = items.vtbl();
+    let mut count: u32 = 0;
+    // SAFETY: `count` is a valid out-pointer.
+    check(unsafe { (items_vt.get_count)(items.as_ptr(), &mut count) })?;
+    let mut paths = Vec::with_capacity(count as usize);
+    for index in 0..count {
+        let mut raw_item: *mut c_void = null_mut();
+        // SAFETY: `index` is below the count the array reported; `raw_item` is a valid out-pointer.
+        check(unsafe { (items_vt.get_item_at)(items.as_ptr(), index, &mut raw_item) })?;
+        // SAFETY: on success the array gave us one `IShellItem` reference.
+        let item = unsafe { ComPtr::from_owned(raw_item) }.ok_or(E_POINTER)?;
+        paths.push(item_path(&item)?);
+    }
+    Ok(Some(paths))
+}
+
+/// Which buttons a message box shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Buttons {
+    Ok,
+    OkCancel,
+    YesNo,
+    YesNoCancel,
+}
+
+/// The icon a message box shows, if any.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Icon {
+    None,
+    Info,
+    Warning,
+    Error,
+}
+
+/// The button the user pressed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Answer {
+    Ok,
+    Cancel,
+    Yes,
+    No,
+}
+
+/// The `MessageBoxW` style flags for a button set and icon.
+pub fn message_style(buttons: Buttons, icon: Icon) -> u32 {
+    let b = match buttons {
+        Buttons::Ok => MB_OK,
+        Buttons::OkCancel => MB_OKCANCEL,
+        Buttons::YesNo => MB_YESNO,
+        Buttons::YesNoCancel => MB_YESNOCANCEL,
+    };
+    let i = match icon {
+        Icon::None => 0,
+        Icon::Info => MB_ICONINFORMATION,
+        Icon::Warning => MB_ICONWARNING,
+        Icon::Error => MB_ICONERROR,
+    };
+    b | i
+}
+
+/// Maps a `MessageBoxW` result to the answer. Codes the box cannot give map to `Cancel`.
+pub fn answer_of(code: i32) -> Answer {
+    match code {
+        IDOK => Answer::Ok,
+        IDYES => Answer::Yes,
+        IDNO => Answer::No,
+        _ => Answer::Cancel,
+    }
+}
+
+/// Shows the dialog modally. Returns `false` when the user cancelled.
+fn show_modal(dialog: &ComPtr, owner: HWND) -> Result<bool, HRESULT> {
+    let vt: &FileDialogVtbl = dialog.vtbl();
+    // SAFETY: the dialog is live; `owner` is a window handle or null.
+    let hr = unsafe { (vt.show)(dialog.as_ptr(), owner) };
+    if hr == CANCELLED {
+        return Ok(false);
+    }
+    check(hr)?;
+    Ok(true)
+}
+
+/// Shows a modal message box owned by `owner` (or by no window) and waits for the answer.
+pub fn message_box(owner: HWND, title: &str, text: &str, buttons: Buttons, icon: Icon) -> Answer {
+    answer_of(message_box_code(
+        owner,
+        &to_cstring(title),
+        &to_cstring(text),
+        message_style(buttons, icon),
+    ))
+}
+
+/// Calls `MessageBoxW`. Both strings are NUL-terminated UTF-16 buffers. A failed call returns 0.
+fn message_box_code(owner: HWND, title: &[u16], text: &[u16], style: u32) -> i32 {
+    // SAFETY: both buffers are NUL-terminated and live across the call; `owner` is a window
+    // handle or null.
+    unsafe { MessageBoxW(owner, text.as_ptr(), title.as_ptr(), style) }
+}
 /// Creates a shell item for an existing path and reads its path back. Used to check the
 /// `IShellItem` slots without showing a dialog.
 pub fn path_round_trip(path: &std::path::Path) -> Result<PathBuf, HRESULT> {
@@ -338,5 +489,62 @@ mod tests {
         let item = sdk_methods(&text, "IShellItem", &[]).expect("IShellItem in header");
         let item_slot = |name: &str| item.iter().position(|n| n == name).expect(name) + 3;
         assert_eq!(item_slot("GetDisplayName"), 5);
+
+        // IFileOpenDialog adds its own methods after IFileDialog's 23 (slots 4-26).
+        let open = sdk_methods(&text, "IFileOpenDialog", &[]).expect("IFileOpenDialog in header");
+        assert_eq!(open.first().map(String::as_str), Some("GetResults"));
+        let array = sdk_methods(&text, "IShellItemArray", &[]).expect("IShellItemArray in header");
+        let array_slot = |name: &str| array.iter().position(|n| n == name).expect(name) + 3;
+        assert_eq!(array_slot("GetCount"), 7);
+        assert_eq!(array_slot("GetItemAt"), 8);
+    }
+}
+
+#[cfg(test)]
+mod message_tests {
+    use super::*;
+    use crate::window::interactive_desktop_available;
+
+    #[test]
+    fn button_sets_and_icons_map_to_message_box_flags() {
+        assert_eq!(message_style(Buttons::Ok, Icon::None), 0x0);
+        assert_eq!(message_style(Buttons::OkCancel, Icon::Info), 0x1 | 0x40);
+        assert_eq!(message_style(Buttons::YesNo, Icon::Warning), 0x4 | 0x30);
+        assert_eq!(message_style(Buttons::YesNoCancel, Icon::Error), 0x3 | 0x10);
+    }
+
+    #[test]
+    fn message_box_codes_map_to_answers_and_unknown_codes_cancel() {
+        assert_eq!(answer_of(1), Answer::Ok);
+        assert_eq!(answer_of(6), Answer::Yes);
+        assert_eq!(answer_of(7), Answer::No);
+        assert_eq!(answer_of(2), Answer::Cancel);
+        // MessageBoxW returns 0 when it fails; that must not read as a yes.
+        assert_eq!(answer_of(0), Answer::Cancel);
+    }
+
+    #[test]
+    fn a_multi_select_dialog_is_an_open_file_dialog() {
+        if !interactive_desktop_available() {
+            eprintln!("skipped: no interactive desktop in this session");
+            return;
+        }
+        // SAFETY: standard apartment init for this test thread, balanced below.
+        let hr = unsafe {
+            windows_sys::Win32::System::Com::CoInitializeEx(
+                std::ptr::null(),
+                windows_sys::Win32::System::Com::COINIT_APARTMENTTHREADED as u32,
+            )
+        };
+        assert!(hr >= 0);
+        let dialog = create_dialog(
+            &CLSID_FILE_OPEN_DIALOG,
+            &DialogOptions::default(),
+            FOS_ALLOWMULTISELECT,
+        )
+        .expect("the open dialog should be created");
+        assert!(dialog.query(&IID_IFILE_OPEN_DIALOG).is_ok());
+        // SAFETY: balances the successful CoInitializeEx above.
+        unsafe { windows_sys::Win32::System::Com::CoUninitialize() };
     }
 }

@@ -11,5 +11,12 @@ authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+[features]
+# D-Bus services (StatusNotifier tray, notifications, Secret Service, AT-SPI dump, colour
+# scheme). Off by default: with it off, the crate opens no socket and those calls return
+# Error::Unsupported.
+dbus = []
+
 [dependencies]
 libloading = "0.8"
+tpt-shell-core = { path = "../tpt-shell-core", version = "0.0.0" }
