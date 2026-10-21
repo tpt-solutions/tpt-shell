@@ -7,8 +7,8 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use crate::backend::{
-    Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler, WebviewBackend,
-    WindowBackend, WindowSpec,
+    AssetSource, Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler,
+    WebviewBackend, WindowBackend, WindowSpec,
 };
 use crate::error::{Error, Result};
 use crate::geometry::{LogicalRect, LogicalSize};
@@ -64,6 +64,8 @@ pub struct FakeBackend {
     windows: Vec<FakeWindow>,
     /// Page message handlers, by window index.
     page_handlers: HashMap<u64, MessageHandler>,
+    /// App asset sources, by window index.
+    asset_sources: HashMap<u64, AssetSource>,
     proxy: FakeProxy,
     pub quit_requested: bool,
     pub log: Vec<String>,
@@ -292,9 +294,24 @@ impl WebviewBackend for FakeBackend {
         self.page_handlers.insert(id.0, handler);
         Ok(())
     }
+
+    fn set_asset_source(&mut self, id: FakeId, source: AssetSource) -> Result<()> {
+        self.window(id)?;
+        self.asset_sources.insert(id.0, source);
+        Ok(())
+    }
 }
 
 impl FakeBackend {
+    /// What the window's asset source returns for `path`, as the page would receive it.
+    pub fn fetch_asset(&self, id: FakeId, path: &str) -> Result<Option<crate::backend::Asset>> {
+        self.window(id)?;
+        Ok(self
+            .asset_sources
+            .get(&id.0)
+            .and_then(|source| source(path)))
+    }
+
     /// Simulates the page posting `text` to the shell. The window's handler runs, and its reply
     /// (if any) is recorded as a message to the page, as the real backend would post it.
     pub fn page_sends(&mut self, id: FakeId, text: &str) -> Result<Option<String>> {
@@ -567,5 +584,49 @@ mod page_message_tests {
             .set_message_handler(FakeId(9), Box::new(|_| None))
             .is_err());
         assert!(b.page_sends(FakeId(9), "x").is_err());
+    }
+}
+
+#[cfg(test)]
+mod asset_tests {
+    use super::*;
+    use crate::backend::Asset;
+
+    fn spec() -> WindowSpec {
+        WindowSpec {
+            name: "main".into(),
+            title: "t".into(),
+            size: LogicalSize {
+                width: 800.0,
+                height: 600.0,
+            },
+            allow_navigation: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_asset_source_answers_for_its_window() {
+        let mut b = FakeBackend::new();
+        let id = b.create(&spec()).unwrap();
+        b.set_asset_source(
+            id,
+            Box::new(|path| {
+                (path == "index.html").then(|| Asset {
+                    content_type: "text/html".into(),
+                    body: b"<p>hi</p>".to_vec(),
+                })
+            }),
+        )
+        .unwrap();
+        let found = b.fetch_asset(id, "index.html").unwrap().unwrap();
+        assert_eq!(found.content_type, "text/html");
+        assert_eq!(b.fetch_asset(id, "missing.js").unwrap(), None);
+    }
+
+    #[test]
+    fn a_window_without_a_source_has_no_assets() {
+        let mut b = FakeBackend::new();
+        let id = b.create(&spec()).unwrap();
+        assert_eq!(b.fetch_asset(id, "index.html").unwrap(), None);
     }
 }

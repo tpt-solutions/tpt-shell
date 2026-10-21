@@ -133,6 +133,17 @@ pub trait WindowBackend {
 /// Receives a message the page posted, and returns the reply to post back, if there is one.
 pub type MessageHandler = Box<dyn FnMut(&str) -> Option<String>>;
 
+/// A file the app serves from its own origin.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Asset {
+    pub content_type: String,
+    pub body: Vec<u8>,
+}
+
+/// Finds the asset for a path under the app origin, such as `index.html` or `app.js`. `None`
+/// is answered as not found.
+pub type AssetSource = Box<dyn Fn(&str) -> Option<Asset>>;
+
 /// Webview inside a window.
 pub trait WebviewBackend: WindowBackend {
     /// Loads an HTML document into the window's webview.
@@ -150,6 +161,15 @@ pub trait WebviewBackend: WindowBackend {
         let _ = (id, handler);
         Err(Error::Unsupported {
             feature: "page messages",
+        })
+    }
+    /// Sets where the window's app pages come from. Requests for the app origin are answered
+    /// from `source`; a path it does not return is answered as not found. Backends without it
+    /// return [`Error::Unsupported`].
+    fn set_asset_source(&mut self, id: Self::Id, source: AssetSource) -> Result<()> {
+        let _ = (id, source);
+        Err(Error::Unsupported {
+            feature: "app assets",
         })
     }
 }
