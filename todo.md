@@ -380,11 +380,11 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Disable devtools, context menu, zoom, optional text selection, drag-drop, print shortcuts, function keys, swipe gestures
 - [ ] Windows low-level keyboard hook (Alt+Tab, Win, Alt+F4, Ctrl+Esc), best effort
 - [ ] Document OS lock-down recipes: Windows Assigned Access, macOS guided access/MDM, Linux dedicated session (R10)
-- [ ] `app.snapshot_state()` on interval and on exit, typed state store, restore on restart (`tpt-shell-kiosk::state` saves atomically with a temporary file and restores with a typed `serde` value, and reports a corrupt snapshot instead of using it; not yet called by the app on an interval or at exit)
+- [ ] `app.snapshot_state()` on interval and on exit, typed state store, restore on restart (`App::snapshot_state(path, every, capture, restore)` saves what `capture` returns on a UI-thread timer and when the event loop ends, and calls `restore` once with the saved value before the windows show; live test. Typed state is `serde_json::Value` for now, not a derived struct; a corrupt file is reported and skipped)
 - [ ] Page crash recovery: reload to last good state
-- [ ] Idle reset: home route, clear session, ephemeral integration (`tpt-shell-kiosk::idle::IdleTimer` tracks time since input; the app does not yet reset to the home page or clear the session when it is due)
+- [ ] Idle reset: home route, clear session, ephemeral integration (`App::kiosk_config` with `idle_seconds` resets every window to the `home` page after that long with no page messages; live test. Clearing the session and the ephemeral profile are not done)
 - [ ] Multi-monitor placement, rotation, per-monitor kiosk windows
-- [ ] Signed local config (Ed25519) (`tpt-shell-kiosk::config` verifies a detached Ed25519 signature over the exact config bytes before parsing, and refuses an edited or foreign-signed config; the app does not load it yet, and the signing tool is not written)
+- [ ] Signed local config (Ed25519) (`App::kiosk_config` loads the config only when its signature checks out, and rejects a `home` path that leaves the app; tested. The signing tool is not written, and the config does not yet set the windows or the policy beyond home and idle)
 - [ ] Local admin endpoint (off by default, token protected)
 - [ ] Heartbeat file and optional local HTTP health endpoint (off by default)
 
@@ -438,7 +438,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Customer displays
 
 ### Security and audit
-- [ ] Capabilities `device.serial`, `device.hid`, `device.usb`, `device.net`, `device.print` with scopes (the hub takes a `DeviceScope` for each open; the capability engine does not hand scopes to it yet)
+- [ ] Capabilities `device.serial`, `device.hid`, `device.usb`, `device.net`, `device.print` with scopes (a page command under `device.print` with a `Devices` scope opens a device through the hub and prints; live test with a virtual printer. The other kinds and the consent prompt for devices are not wired)
 - [ ] Native consent dialog on first use, remembered per profile
 - [x] Audit every open, close, write (`DeviceHub` reports each to its audit sink with the byte count; reads are not audited)
 - [x] Payload logging off by default; hash-only or bytes per manifest (only byte counts are logged; the option to log bytes or hashes per manifest is not built)
