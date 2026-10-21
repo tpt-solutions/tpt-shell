@@ -302,6 +302,7 @@ impl ProcessFailure {
 }
 
 /// `ICoreWebView2Environment`.
+#[derive(Clone)]
 pub struct Environment(ComPtr);
 
 /// `ICoreWebView2Controller`.

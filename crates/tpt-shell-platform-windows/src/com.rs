@@ -78,6 +78,14 @@ impl ComPtr {
     }
 }
 
+impl Clone for ComPtr {
+    fn clone(&self) -> Self {
+        // SAFETY: `self.0` is a live interface pointer (the constructors reject null), and
+        // AddRef gives the clone a reference of its own.
+        unsafe { ComPtr::from_borrowed(self.0) }.expect("a live COM pointer is not null")
+    }
+}
+
 impl Drop for ComPtr {
     fn drop(&mut self) {
         // SAFETY: we hold one reference, and release it exactly once here.

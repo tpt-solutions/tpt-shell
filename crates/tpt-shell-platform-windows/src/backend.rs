@@ -19,8 +19,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use tpt_shell_core::backend::{
-    Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler, WebviewBackend,
-    WindowBackend, WindowSpec,
+    AssetSource, Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler,
+    WebviewBackend, WindowBackend, WindowSpec,
 };
 use tpt_shell_core::theme::{injection_script, Signals, Theme};
 use tpt_shell_core::{Error, LogicalSize, PhysicalSize, Result, ScaleFactor};
@@ -86,6 +86,8 @@ struct Entry {
     host_document: Rc<RefCell<Option<String>>>,
     /// Receives messages the page posts. Set by `set_message_handler`; empty until then.
     page_handler: Rc<RefCell<Option<MessageHandler>>>,
+    /// Answers requests for the app origin. Set by `set_asset_source`; empty until then.
+    assets: Rc<RefCell<Option<AssetSource>>>,
 }
 
 thread_local! {
@@ -109,6 +111,28 @@ fn allowed_navigation(url: &str, host_document: &Option<String>, allowlist: &[St
         || url == "about:blank"
         || host_document.as_deref() == Some(url)
         || tpt_shell_core::navigation::url_is_allowlisted(url, allowlist)
+}
+
+/// The path under the app origin that `uri` names, or `None` if it is not a safe app path. An
+/// empty path or `/` means `index.html`. A query or fragment is ignored. A `..` segment or a
+/// backslash is refused, so a path cannot reach outside what the app supplies.
+pub fn app_path(uri: &str) -> Option<String> {
+    if !is_app_url(uri) {
+        return None;
+    }
+    let rest = &uri[APP_ORIGIN.len()..];
+    let path = rest
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_start_matches('/');
+    if path.is_empty() {
+        return Some("index.html".into());
+    }
+    if path.contains('\\') || path.split('/').any(|segment| segment == "..") {
+        return None;
+    }
+    Some(path.to_string())
 }
 
 /// The URL WebView2 uses when a document is loaded with NavigateToString.
@@ -582,6 +606,10 @@ impl WebviewBackend for WindowsBackend {
         self.with_entry(id, |e| *e.page_handler.borrow_mut() = Some(handler))
     }
 
+    fn set_asset_source(&mut self, id: WindowId, source: AssetSource) -> Result<()> {
+        self.with_entry(id, |e| *e.assets.borrow_mut() = Some(source))
+    }
+
     fn load_html(&mut self, id: WindowId, html: &str) -> Result<()> {
         self.with_entry(id, |e| {
             *e.host_document.borrow_mut() = Some(html_data_url(html));
@@ -698,6 +726,27 @@ impl WindowsBackend {
             }
         })
         .map_err(|hr| hr_error("add_WebMessageReceived", hr))?;
+        // App pages come from the app origin. Requests for it are answered from the window's
+        // asset source, and every answer carries the page policy (see `respond`).
+        let assets: Rc<RefCell<Option<AssetSource>>> = Rc::new(RefCell::new(None));
+        let for_assets = assets.clone();
+        let serve_env = env.clone();
+        web.add_web_resource_requested_filter(&format!("{APP_ORIGIN}/*"))
+            .map_err(|hr| hr_error("AddWebResourceRequestedFilter", hr))?;
+        web.on_web_resource_requested(move |req| {
+            let uri = req.uri().unwrap_or_default();
+            let found = app_path(&uri).and_then(|path| {
+                for_assets
+                    .borrow()
+                    .as_ref()
+                    .and_then(|source| source(&path))
+            });
+            let _ = match found {
+                Some(asset) => req.respond(&serve_env, 200, &asset.content_type, &asset.body),
+                None => req.respond(&serve_env, 404, "text/plain", b"not found"),
+            };
+        })
+        .map_err(|hr| hr_error("add_WebResourceRequested", hr))?;
         let for_top = host_document.clone();
         let allow_top = allow_navigation.to_vec();
         web.set_navigation_policy(move |url| {
@@ -729,6 +778,7 @@ impl WindowsBackend {
             modal: false,
             host_document,
             page_handler,
+            assets,
         })
     }
 }
@@ -1179,6 +1229,44 @@ mod tests {
         }
 
         #[test]
+        fn app_pages_load_from_the_app_origin_with_their_own_scripts() {
+            use tpt_shell_core::backend::Asset;
+            let Some((mut b, dir, _serial)) = start("assets") else {
+                return;
+            };
+            let id = b.create(&spec("main")).expect("create");
+            b.show(id).expect("show");
+            b.set_asset_source(
+                id,
+                Box::new(|path| {
+                    let (content_type, body) = match path {
+                        "index.html" => (
+                            "text/html",
+                            r#"<!doctype html><title>start</title><script src="app.js"></script>"#,
+                        ),
+                        "app.js" => ("text/javascript", "document.title = location.origin;"),
+                        _ => return None,
+                    };
+                    Some(Asset {
+                        content_type: content_type.into(),
+                        body: body.as_bytes().to_vec(),
+                    })
+                }),
+            )
+            .expect("set_asset_source");
+            b.navigate(id, &format!("{APP_ORIGIN}/index.html"))
+                .expect("navigate");
+            let mut title = String::new();
+            let got = pump_until(Duration::from_secs(30), || {
+                title = b.document_title(id).unwrap_or_default();
+                title == APP_ORIGIN
+            });
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(got, "title was {title:?}, expected the app origin");
+        }
+
+        #[test]
         fn creates_a_window_and_renders_html() {
             let Some((mut b, dir, _serial)) = start("render") else {
                 return;
@@ -1450,5 +1538,40 @@ mod tests {
             drop(b);
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+}
+
+#[cfg(test)]
+mod app_path_tests {
+    use super::*;
+
+    #[test]
+    fn app_paths_map_onto_the_asset_names() {
+        assert_eq!(app_path(APP_ORIGIN).as_deref(), Some("index.html"));
+        assert_eq!(
+            app_path(&format!("{APP_ORIGIN}/")).as_deref(),
+            Some("index.html")
+        );
+        assert_eq!(
+            app_path(&format!("{APP_ORIGIN}/app.js")).as_deref(),
+            Some("app.js")
+        );
+        assert_eq!(
+            app_path(&format!("{APP_ORIGIN}/app.js?v=2#top")).as_deref(),
+            Some("app.js")
+        );
+        assert_eq!(
+            app_path(&format!("{APP_ORIGIN}/css/site.css")).as_deref(),
+            Some("css/site.css")
+        );
+    }
+
+    #[test]
+    fn paths_that_leave_the_app_or_its_origin_are_refused() {
+        assert_eq!(app_path(&format!("{APP_ORIGIN}/../secret")), None);
+        assert_eq!(app_path(&format!("{APP_ORIGIN}/a/../../secret")), None);
+        assert_eq!(app_path(&format!("{APP_ORIGIN}/a\\b")), None);
+        assert_eq!(app_path("https://tpt-app.localhost.evil.net/app.js"), None);
+        assert_eq!(app_path("https://example.com/app.js"), None);
     }
 }
