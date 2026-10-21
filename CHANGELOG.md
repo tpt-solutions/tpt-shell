@@ -17,6 +17,8 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 - `BENCHMARKS.md` with the method and the hello-world binary size (690 KiB, budget 4 MB).
 - `tpt-shell-kiosk` (new crate): a kiosk config that loads only with a valid Ed25519 signature, atomic state snapshots that restore on the next start, and an idle timer. The app does not use them yet.
 - `tpt-shell-supervisor`: runs the app as a child process with a heartbeat file, stops a run that stops beating or reaches its scheduled restart, restarts with backoff, gives up after a crash loop, and writes an alert (command or file) and a rotating log.
+- Agent: the page's accessible tree as a snapshot (roles, names, states, values, bounds, references), and the actions click, focus, type, select, key, scroll and read. Password values and `data-tpt-redact` blocks are never reported. Page text is wrapped in `<untrusted>` markers when rendered. Live test on WebView2.
+- Windows: keystore with DPAPI (per user, one encrypted file per name); balloon notifications from the tray icon; deep-link registration (`App::deep_link`); window placement saved and restored (`App::remember_window_state`).
 - Windows: `App::tray(tooltip, items, on_select)` adds a notification-area icon. A left click reports `TRAY_ACTIVATE`, and a right-click menu pick reports the item's id.
 - Windows: `App::single_instance(id, on_forwarded)`. A later launch hands its arguments to the first instance and exits. `tpt_shell_platform_windows::single_instance` does the work (named mutex and `WM_COPYDATA`).
 - The page runtime has `tpt.on(event, handler)`, which returns an unsubscribe function, and `tpt.caps` (engine `webview2` and its version).

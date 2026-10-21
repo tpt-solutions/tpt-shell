@@ -114,7 +114,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] `WebviewBackend` trait, M1 subset: load html, navigate (app:// only), eval, post message, set_message_handler (page to shell; the default returns `Unsupported`, so macOS and Linux stay honest until they implement it; Windows and the fake implement it)
 - [x] `WebviewBackend` crash callback and reload (verified by a renderer crash through DevTools), intercept (WebResourceRequested), nav policy hooks, doc-start script
 - [ ] `WebviewBackend` remaining: snapshot, devtools toggle, profile binding, a11y tree (devtools and context menu are set per window at creation, release off, debug on; no runtime toggle is exposed yet)
-- [ ] `Platform` trait (menus, tray, dialogs, clipboard, notifications, deep links, single instance, theme/accent, keystore) (clipboard text and colour scheme are in `tpt-shell-core::platform` with Windows and fake implementations; single instance is in `tpt-shell-platform-windows::single_instance` (Windows only, named mutex and `WM_COPYDATA`, tested in one process and across two processes); the notification-area icon with a context menu is `tpt-shell-platform-windows::tray` and `App::tray` (Windows only; a left click and a menu pick are tested, a right click is not, since it needs a user; the icon is the default application icon); the rest are not started)
+- [ ] `Platform` trait (menus, tray, dialogs, clipboard, notifications, deep links, single instance, theme/accent, keystore) (clipboard text and colour scheme are in `tpt-shell-core::platform` with Windows and fake implementations; single instance is in `tpt-shell-platform-windows::single_instance` (Windows only, named mutex and `WM_COPYDATA`, tested in one process and across two processes); the notification-area icon with a context menu is `tpt-shell-platform-windows::tray` and `App::tray` (Windows only; a left click and a menu pick are tested, a right click is not, since it needs a user; the icon is the default application icon; balloon notifications through `Running::notify`); DPAPI keystore, deep-link registration and window-state restore are on Windows too (see their items below); the rest are not started)
 - [x] `Clock` and `Rng` traits (system and fake/seeded implementations, unit tested)
 - [ ] Single UI thread model and `EventLoopProxy` (Send + Sync)
 - [x] Minimal built-in async executor and worker pool (no external runtime): `block_on`, `Executor` (`execute`, `spawn`), tested
@@ -272,7 +272,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Dialogs (open, save, message, folder) via IFileDialog (open, save and folder dialogs are built with hand-written vtables checked against the SDK header; they are never shown in tests, and multi-select and the message box are not built)
 - [x] App builder in the facade (`tpt_shell::App`): windows, grants and commands; each window's page messages go through the capability-checked router with that window's grants; a grant that needs consent asks in a native dialog owned by the window (default No); runtime tests run an app end to end, with the dialog answered Yes and No. Windows only, with `App::loader` set explicitly. Pages load from the app origin through `App::asset` (the old `Window::html` placed pages at a data: origin and is gone). Commands come from `#[command]` through `App::register`, and assets from `embed_dir!` through `App::assets`. Still missing: async handlers, jobs and streams, the worker pool, and `include_manifest!`
 - [x] Clipboard (text first): `tpt-shell-platform-windows::clipboard`, restores the user's clipboard in its test
-- [ ] Window state restore, fullscreen, multi-monitor
+- [ ] Window state restore, fullscreen, multi-monitor (`App::remember_window_state` saves each window's position, size and maximized state to a JSON file when the event loop ends and restores it at the next start; live test. Fullscreen existed already. Multi-monitor placement is not done)
 
 ### Early measurements
 - [ ] Time the three-command quickstart on a clean Windows machine
@@ -341,7 +341,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Tray (StatusNotifier over D-Bus; GtkStatusIcon fallback)
 - [ ] Freedesktop notifications over D-Bus
 - [ ] Single instance over UNIX socket
-- [ ] Deep link handling (desktop file registration)
+- [ ] Deep link handling (desktop file registration) (Windows: `App::deep_link(scheme)` registers the scheme under HKCU and a later link reaches the running app through single instance; registration is tested. Linux desktop file is not written)
 - [ ] Keystore (Secret Service)
 - [ ] AT-SPI accessibility dump
 - [ ] Global hotkeys X11-only (Partial tag)
@@ -523,7 +523,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### Audit completion (tpt-shell-audit)
 - [ ] Ed25519 checkpoints every N entries or T seconds (entry-count interval done in `tpt-shell-audit`; the time interval is not, and the key comes from the caller, not a keystore)
-- [ ] Keystore: DPAPI, Keychain, Secret Service
+- [ ] Keystore: DPAPI, Keychain, Secret Service (DPAPI on Windows: `tpt-shell-platform-windows::keystore` encrypts each secret for the current user and stores one file per name; tested. Keychain and Secret Service are not done, and the audit checkpoint key does not use the keystore yet)
 - [ ] HSM hook for key supply
 - [ ] External anchor hook: file on other volume, syslog, HTTP
 - [ ] Rotation and size limits
@@ -538,18 +538,18 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### Agent (tpt-shell-agent)
 - [ ] Cargo feature gate; off unless build and manifest enable an agent profile
-- [ ] Semantic tree from DOM + ARIA: roles, names, states, values, bounds, snapshot-scoped refs
-- [ ] Action API: click, type, select, scroll, focus, key, wait_for, read, invoke
+- [x] Semantic tree from DOM + ARIA: roles, names, states, values, bounds, snapshot-scoped refs (`js/agent/agent.js` and `tpt-shell-agent::page`; a live test snapshots a real page)
+- [ ] Action API: click, type, select, scroll, focus, key, wait_for, read, invoke (click, focus, type, select, key, scroll and read work on a real page, and a stale reference is refused. `wait_for` and `invoke` are not built. Key events are synthetic, so they do not trigger the browser's own key handling)
 - [x] No raw JavaScript evaluation (the agent crate has no evaluation path; tools are the only callable surface)
 - [ ] `[agent]` profiles: actions, routes, rate limits, confirm-required commands, max session length (rate limits, confirm-required commands and max session length are in `tpt-shell-agent::Policy`; there are no manifest profiles or route rules yet)
-- [ ] Redaction: password fields and `data-tpt-redact`
+- [x] Redaction: password fields and `data-tpt-redact` (a password value and a redacted block never reach the snapshot or a read; live test)
 - [ ] Native confirmation dialogs for sensitive actions
 - [ ] Kill switch (hotkey and API) (API: `Session::kill_switch`; no hotkey yet)
 - [x] MCP server over stdio (`tpt-shell-agent::serve`: initialize, tools/list, tools/call; no resources yet)
 - [ ] MCP server over localhost HTTP with token
-- [ ] Tools generated from agent-flagged commands plus UI tools (tools are passed in explicitly; there is no agent flag on commands and no UI tools yet)
-- [ ] Resources: semantic tree and audit tail
-- [ ] Prompt-injection hygiene: untrusted markers, allowlist navigation (not started; tool results are not yet marked untrusted)
+- [ ] Tools generated from agent-flagged commands plus UI tools (tools are passed in explicitly; there is no agent flag on commands and no UI tools yet; the page actions exist as scripts but are not offered as tools, because the session would have to run on the UI thread with the window)
+- [ ] Resources: semantic tree and audit tail (the snapshot exists; it is not yet an MCP resource, and the audit tail is not exposed)
+- [ ] Prompt-injection hygiene: untrusted markers, allowlist navigation (page text in a snapshot is wrapped in `<untrusted>` markers by `render`; that is a convention the model must follow, not a guarantee. Tool results are not yet marked, and navigation is not restricted for agents)
 - [ ] All agent actions audited and recordable to replay (every call is logged in the session; nothing writes it to the audit file or replay yet)
 - [ ] Policy tests: forbidden actions, rate limits, redaction, kill switch (forbidden actions, rate limits, confirmation, kill switch and session length are tested; redaction is not built)
 - [ ] Fuzz and security tests on control channel (R7)
