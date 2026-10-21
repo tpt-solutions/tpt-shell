@@ -130,6 +130,9 @@ pub trait WindowBackend {
     }
 }
 
+/// Receives a message the page posted, and returns the reply to post back, if there is one.
+pub type MessageHandler = Box<dyn FnMut(&str) -> Option<String>>;
+
 /// Webview inside a window.
 pub trait WebviewBackend: WindowBackend {
     /// Loads an HTML document into the window's webview.
@@ -140,4 +143,13 @@ pub trait WebviewBackend: WindowBackend {
     fn eval(&mut self, id: Self::Id, script: &str) -> Result<()>;
     /// Sends a message string to the page's `message` listener.
     fn post_message(&mut self, id: Self::Id, message: &str) -> Result<()>;
+    /// Sets the handler for messages the page posts to the shell. A reply the handler returns is
+    /// posted back to the page. Replaces any earlier handler. Backends that cannot receive page
+    /// messages yet return [`Error::Unsupported`].
+    fn set_message_handler(&mut self, id: Self::Id, handler: MessageHandler) -> Result<()> {
+        let _ = (id, handler);
+        Err(Error::Unsupported {
+            feature: "page messages",
+        })
+    }
 }

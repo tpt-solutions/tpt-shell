@@ -19,8 +19,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use tpt_shell_core::backend::{
-    Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, WebviewBackend, WindowBackend,
-    WindowSpec,
+    Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler, WebviewBackend,
+    WindowBackend, WindowSpec,
 };
 use tpt_shell_core::theme::{injection_script, Signals, Theme};
 use tpt_shell_core::{Error, LogicalSize, PhysicalSize, Result, ScaleFactor};
@@ -84,6 +84,8 @@ struct Entry {
     modal: bool,
     /// The `data:` URL of the document this backend loaded, the only `data:` navigation allowed.
     host_document: Rc<RefCell<Option<String>>>,
+    /// Receives messages the page posts. Set by `set_message_handler`; empty until then.
+    page_handler: Rc<RefCell<Option<MessageHandler>>>,
 }
 
 thread_local! {
@@ -576,6 +578,10 @@ impl WindowBackend for WindowsBackend {
 }
 
 impl WebviewBackend for WindowsBackend {
+    fn set_message_handler(&mut self, id: WindowId, handler: MessageHandler) -> Result<()> {
+        self.with_entry(id, |e| *e.page_handler.borrow_mut() = Some(handler))
+    }
+
     fn load_html(&mut self, id: WindowId, html: &str) -> Result<()> {
         self.with_entry(id, |e| {
             *e.host_document.borrow_mut() = Some(html_data_url(html));
@@ -680,6 +686,18 @@ impl WindowsBackend {
             .set_default_context_menus_enabled(page.context_menu)
             .map_err(|hr| hr_error("put_AreDefaultContextMenusEnabled", hr))?;
         let host_document = Rc::new(RefCell::new(None::<String>));
+        let page_handler = Rc::new(RefCell::new(None::<MessageHandler>));
+        let for_page = page_handler.clone();
+        web.on_web_message(move |sender, text| {
+            let reply = match for_page.borrow_mut().as_mut() {
+                Some(handler) => handler(text),
+                None => None,
+            };
+            if let Some(reply) = reply {
+                let _ = sender.post_web_message(&reply);
+            }
+        })
+        .map_err(|hr| hr_error("add_WebMessageReceived", hr))?;
         let for_top = host_document.clone();
         let allow_top = allow_navigation.to_vec();
         web.set_navigation_policy(move |url| {
@@ -710,6 +728,7 @@ impl WindowsBackend {
             owner: None,
             modal: false,
             host_document,
+            page_handler,
         })
     }
 }
@@ -1045,6 +1064,112 @@ mod tests {
             let dir = data_dir(name);
             let backend = WindowsBackend::new(Path::new(&loader), &dir).expect("backend");
             Some((backend, dir))
+        }
+
+        /// A page that asks for a file in scope, then one out of scope, and shows each reply in
+        /// its title. The handler is the app's glue: a router, a grant and a consent prompt.
+        const SCOPE_PAGE: &str = r#"<!doctype html><title>start</title><script>
+        var IN_SCOPE = '{"v":1,"id":1,"cmd":"read","args":{"path":"C:/data/notes.txt"}}';
+        var OUT_OF_SCOPE = '{"v":1,"id":2,"cmd":"read","args":{"path":"C:/secrets/key"}}';
+        var answers = 0;
+        window.chrome.webview.addEventListener('message', function (e) {
+          answers++;
+          document.title = (answers === 1 ? '' : document.title + ' | ') + e.data;
+          if (answers === 1) { window.chrome.webview.postMessage(OUT_OF_SCOPE); }
+        });
+        window.chrome.webview.postMessage(IN_SCOPE);
+        </script>"#;
+
+        /// Answers consent prompts with no. The test grant needs none.
+        struct Decline;
+
+        impl tpt_shell_capabilities::ConsentPrompt for Decline {
+            fn ask(&mut self, _window: &str, _capability: &str) -> bool {
+                false
+            }
+        }
+
+        #[test]
+        fn page_messages_reach_the_capability_checked_router_and_the_reply_comes_back() {
+            use std::cell::Cell;
+            use std::rc::Rc;
+            use tpt_shell_capabilities::{Engine, Grant, Scope};
+            use tpt_shell_ipc::{Caller, Limits, Router, Target};
+
+            let Some((mut b, dir)) = start("messages") else {
+                return;
+            };
+            let reads = Rc::new(Cell::new(0u32));
+            let counted = reads.clone();
+            let mut router = Router::new();
+            router.register_guarded(
+                "read",
+                "fs.read",
+                |args| match args["path"].as_str() {
+                    Some(path) => Target::Path(path.to_string()),
+                    None => Target::None,
+                },
+                move |_| {
+                    counted.set(counted.get() + 1);
+                    Ok(tpt_shell_ipc::Value::String("contents".into()))
+                },
+            );
+            let mut engine = Engine::new();
+            engine
+                .add_grant(Grant {
+                    capability: "fs.read".into(),
+                    window: "main".into(),
+                    origin: APP_ORIGIN.into(),
+                    scope: Scope::Paths(vec!["C:/data".into()]),
+                    consent: false,
+                })
+                .expect("grant");
+            let caller = Caller {
+                window: "main".into(),
+                origin: APP_ORIGIN.into(),
+            };
+            let mut prompt = Decline;
+
+            let id = b.create(&spec("main")).expect("create");
+            b.show(id).expect("show");
+            b.set_message_handler(
+                id,
+                Box::new(move |text| {
+                    Some(router.handle_authorized(
+                        &caller,
+                        &mut engine,
+                        &mut prompt,
+                        text.as_bytes(),
+                        &Limits::default(),
+                    ))
+                }),
+            )
+            .expect("set_message_handler");
+            b.load_html(id, SCOPE_PAGE).expect("load_html");
+
+            let mut title = String::new();
+            let got = pump_until(Duration::from_secs(30), || {
+                title = b.document_title(id).unwrap_or_default();
+                title.contains("CAP_OUT_OF_SCOPE")
+            });
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(got, "the second reply never arrived; title was {title:?}");
+            let (first, second) = title.split_once(" | ").expect("two replies");
+            assert!(first.contains(r#""ok":true"#), "in-scope call: {first}");
+            assert!(
+                first.contains(r#""data":"contents""#),
+                "in-scope call: {first}"
+            );
+            assert!(
+                second.contains(r#""code":"CAP_OUT_OF_SCOPE""#),
+                "out of scope: {second}"
+            );
+            assert_eq!(
+                reads.get(),
+                1,
+                "the handler runs for the in-scope call only"
+            );
         }
 
         #[test]

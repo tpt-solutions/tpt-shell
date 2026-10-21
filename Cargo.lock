@@ -722,6 +722,7 @@ dependencies = [
 name = "tpt-shell-platform-windows"
 version = "0.0.0"
 dependencies = [
+ "tpt-shell-capabilities",
  "tpt-shell-core",
  "tpt-shell-ipc",
  "tpt-shell-macros",

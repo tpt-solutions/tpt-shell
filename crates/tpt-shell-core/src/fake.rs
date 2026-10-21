@@ -3,12 +3,12 @@
 
 //! In-memory backend for unit tests (spec §5.2). No OS calls. Every call is recorded in `log`.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use crate::backend::{
-    Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, WebviewBackend, WindowBackend,
-    WindowSpec,
+    Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler, WebviewBackend,
+    WindowBackend, WindowSpec,
 };
 use crate::error::{Error, Result};
 use crate::geometry::{LogicalRect, LogicalSize};
@@ -62,6 +62,8 @@ impl EventLoopProxy for FakeProxy {
 #[derive(Default)]
 pub struct FakeBackend {
     windows: Vec<FakeWindow>,
+    /// Page message handlers, by window index.
+    page_handlers: HashMap<u64, MessageHandler>,
     proxy: FakeProxy,
     pub quit_requested: bool,
     pub log: Vec<String>,
@@ -284,6 +286,28 @@ impl WebviewBackend for FakeBackend {
         self.window_mut(id)?.messages.push(message.to_string());
         Ok(())
     }
+
+    fn set_message_handler(&mut self, id: FakeId, handler: MessageHandler) -> Result<()> {
+        self.window(id)?;
+        self.page_handlers.insert(id.0, handler);
+        Ok(())
+    }
+}
+
+impl FakeBackend {
+    /// Simulates the page posting `text` to the shell. The window's handler runs, and its reply
+    /// (if any) is recorded as a message to the page, as the real backend would post it.
+    pub fn page_sends(&mut self, id: FakeId, text: &str) -> Result<Option<String>> {
+        self.window(id)?;
+        let reply = match self.page_handlers.get_mut(&id.0) {
+            Some(handler) => handler(text),
+            None => return Ok(None),
+        };
+        if let Some(reply) = &reply {
+            self.post_message(id, reply)?;
+        }
+        Ok(reply)
+    }
 }
 
 #[cfg(test)]
@@ -480,5 +504,68 @@ mod tests {
                 feature: "close handling"
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod page_message_tests {
+    use super::*;
+
+    fn spec() -> WindowSpec {
+        WindowSpec {
+            name: "main".into(),
+            title: "t".into(),
+            size: LogicalSize {
+                width: 800.0,
+                height: 600.0,
+            },
+            allow_navigation: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_handlers_reply_is_posted_back_to_the_page() {
+        let mut b = FakeBackend::new();
+        let id = b.create(&spec()).unwrap();
+        b.set_message_handler(id, Box::new(|text| Some(format!("re:{text}"))))
+            .unwrap();
+        assert_eq!(b.page_sends(id, "hi").unwrap(), Some("re:hi".to_string()));
+        assert_eq!(b.window(id).unwrap().messages, ["re:hi"]);
+    }
+
+    #[test]
+    fn a_handler_that_declines_to_reply_posts_nothing() {
+        let mut b = FakeBackend::new();
+        let id = b.create(&spec()).unwrap();
+        b.set_message_handler(id, Box::new(|_| None)).unwrap();
+        assert_eq!(b.page_sends(id, "hi").unwrap(), None);
+        assert!(b.window(id).unwrap().messages.is_empty());
+    }
+
+    #[test]
+    fn a_window_without_a_handler_ignores_page_messages() {
+        let mut b = FakeBackend::new();
+        let id = b.create(&spec()).unwrap();
+        assert_eq!(b.page_sends(id, "hi").unwrap(), None);
+    }
+
+    #[test]
+    fn a_later_handler_replaces_the_earlier_one() {
+        let mut b = FakeBackend::new();
+        let id = b.create(&spec()).unwrap();
+        b.set_message_handler(id, Box::new(|_| Some("first".into())))
+            .unwrap();
+        b.set_message_handler(id, Box::new(|_| Some("second".into())))
+            .unwrap();
+        assert_eq!(b.page_sends(id, "x").unwrap(), Some("second".to_string()));
+    }
+
+    #[test]
+    fn an_unknown_window_is_refused() {
+        let mut b = FakeBackend::new();
+        assert!(b
+            .set_message_handler(FakeId(9), Box::new(|_| None))
+            .is_err());
+        assert!(b.page_sends(FakeId(9), "x").is_err());
     }
 }
