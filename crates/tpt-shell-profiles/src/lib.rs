@@ -12,14 +12,17 @@
 //!   old copies; the documentation says so.
 //! - [`usage`] and [`enforce_quota`]: the size of a profile and a cap on it.
 //!
-//! Not here yet: encrypted export (needs a crypto dependency that has not been approved) and
-//! the WebView2 and macOS and Linux mappings, which live with the backends.
+//! - [`export`]: encrypted export of a profile folder (ChaCha20-Poly1305, key from PBKDF2).
+//!
+//! Not here: the WebView2 and macOS and Linux mappings, which live with the backends.
 
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+
+pub mod export;
 
 /// Which storage a window uses.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,6 +82,8 @@ pub fn profile_dir(base: &Path, kind: &Kind) -> Result<PathBuf, NameError> {
     }
 }
 
+const ACTIVE_FILE: &str = "active.txt";
+
 /// Named profiles under one base folder.
 pub struct ProfileStore {
     base: PathBuf,
@@ -124,12 +129,92 @@ impl ProfileStore {
         Ok(names)
     }
 
+    /// The profile chosen with [`ProfileStore::switch`], or `None` for the default profile.
+    /// The choice is kept in a file in the store, so it survives a restart.
+    pub fn active(&self) -> io::Result<Option<String>> {
+        match fs::read_to_string(self.base.join(ACTIVE_FILE)) {
+            Ok(text) => {
+                let name = text.trim();
+                if name.is_empty() {
+                    Ok(None)
+                } else {
+                    check_name(name)
+                        .map(|_| Some(name.to_string()))
+                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.0))
+                }
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Makes `name` the active profile, or the default profile when `name` is `None`. The
+    /// profile must exist. A running app keeps the folder it started with; the new choice is
+    /// used by the next start, which reads it through [`ProfileStore::active`].
+    pub fn switch(&self, name: Option<&str>) -> io::Result<Kind> {
+        let kind = match name {
+            None => Kind::Default,
+            Some(name) => {
+                let dir = profile_dir(&self.base, &Kind::Named(name.into()))
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.0))?;
+                if !dir.is_dir() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("profile `{name}` does not exist"),
+                    ));
+                }
+                Kind::Named(name.into())
+            }
+        };
+        fs::create_dir_all(&self.base)?;
+        let path = self.base.join(ACTIVE_FILE);
+        let tmp = self.base.join(format!("{ACTIVE_FILE}.tmp"));
+        let text = match &kind {
+            Kind::Named(name) => name.as_str(),
+            _ => "",
+        };
+        fs::write(&tmp, text)?;
+        fs::rename(&tmp, &path)?;
+        Ok(kind)
+    }
+
+    /// Size of a named profile, in bytes.
+    pub fn usage(&self, name: &str) -> io::Result<u64> {
+        let dir = profile_dir(&self.base, &Kind::Named(name.into()))
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.0))?;
+        usage(&dir)
+    }
+
+    /// Fails when the named profile is over `limit_bytes`.
+    pub fn enforce_quota(&self, name: &str, limit_bytes: u64) -> io::Result<()> {
+        let dir = profile_dir(&self.base, &Kind::Named(name.into()))
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.0))?;
+        enforce_quota(&dir, limit_bytes)
+    }
+
+    /// Writes the named profile to `out` as an encrypted file (see [`export`]).
+    pub fn export(&self, name: &str, out: &Path, passphrase: &str) -> io::Result<()> {
+        let dir = profile_dir(&self.base, &Kind::Named(name.into()))
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.0))?;
+        if !dir.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("profile `{name}` does not exist"),
+            ));
+        }
+        export::export_dir(&dir, out, passphrase)
+    }
+
     /// Deletes a named profile, overwriting its files first. Refuses names that do not pass
     /// [`check_name`], so the call cannot reach outside the store.
     pub fn delete(&self, name: &str) -> io::Result<()> {
         let dir = profile_dir(&self.base, &Kind::Named(name.into()))
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.0))?;
-        wipe_dir(&dir)
+        wipe_dir(&dir)?;
+        if self.active()?.as_deref() == Some(name) {
+            fs::remove_file(self.base.join(ACTIVE_FILE))?;
+        }
+        Ok(())
     }
 }
 
@@ -311,6 +396,44 @@ mod tests {
         store.delete("home").unwrap();
         assert_eq!(store.list().unwrap(), vec!["work"]);
         assert!(store.delete("../work").is_err());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn switch_records_the_active_profile_and_delete_clears_it() {
+        let base = scratch("switch");
+        let store = ProfileStore::new(&base);
+        assert_eq!(store.active().unwrap(), None);
+        assert!(store.switch(Some("work")).is_err(), "a missing profile");
+        store.create("work").unwrap();
+        assert_eq!(
+            store.switch(Some("work")).unwrap(),
+            Kind::Named("work".into())
+        );
+        assert_eq!(store.active().unwrap().as_deref(), Some("work"));
+        // A new store over the same folder reads the same choice, as a restart would.
+        assert_eq!(
+            ProfileStore::new(&base).active().unwrap().as_deref(),
+            Some("work")
+        );
+        assert_eq!(store.switch(None).unwrap(), Kind::Default);
+        assert_eq!(store.active().unwrap(), None);
+        store.switch(Some("work")).unwrap();
+        store.delete("work").unwrap();
+        assert_eq!(store.active().unwrap(), None);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_store_quota_applies_to_one_named_profile() {
+        let base = scratch("store-quota");
+        let store = ProfileStore::new(&base);
+        let dir = store.create("big").unwrap();
+        fs::write(dir.join("cache.bin"), vec![0u8; 2048]).unwrap();
+        assert_eq!(store.usage("big").unwrap(), 2048);
+        assert!(store.enforce_quota("big", 4096).is_ok());
+        assert!(store.enforce_quota("big", 1024).is_err());
+        assert!(store.usage("../big").is_err());
         let _ = fs::remove_dir_all(&base);
     }
 

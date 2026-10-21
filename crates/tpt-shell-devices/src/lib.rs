@@ -8,9 +8,18 @@
 //! Text is ASCII. A code page is not chosen for the device, so non-ASCII text is refused
 //! rather than printed as the wrong glyphs.
 
+pub mod display;
 pub mod escpos;
+pub mod hotplug;
 pub mod hub;
 pub mod id;
+pub mod jobs;
+pub mod net;
+pub mod platform;
+pub mod scale;
+pub mod scanner;
+pub mod serial;
+pub mod spool;
 pub mod transport;
 pub mod virtual_devices;
 pub mod zpl;

@@ -11,4 +11,9 @@ authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+[features]
+# Raw TCP and UDP sockets to network devices (spec §10.2). Off by default: no socket is opened
+# unless this is enabled.
+net-devices = []
+
 [dependencies]

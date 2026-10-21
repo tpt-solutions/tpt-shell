@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 pub mod alert;
 pub mod heartbeat;
+pub mod install;
 pub mod log;
 pub mod process;
 

@@ -100,6 +100,8 @@ fn check_port(port: &str) -> Result<(), ParseError> {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '/'))
         && !port.contains("..")
+        && !port.contains("//")
+        && !port.ends_with('/')
         && (!port.contains('/') || port.starts_with("/dev/"));
     if ok {
         Ok(())
@@ -249,6 +251,11 @@ mod tests {
             "serial:",
             "serial:COM3/../x",
             "serial:../etc",
+            "serial:/etc/passwd",
+            "serial:/dev//tty",
+            "serial:/dev/tty/",
+            "serial:/dev/serial/../../etc/shadow",
+            "serial:COM3\\..\\x",
             "serial:COM3 extra",
             "hid:123:4567",
             "hid:zzzz:0001",

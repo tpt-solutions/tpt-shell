@@ -50,4 +50,26 @@ pub trait Transport: Send {
 
     /// Returns up to `max` bytes the device has sent. An empty result means nothing is waiting.
     fn read(&mut self, max: usize) -> Result<Vec<u8>, DeviceError>;
+
+    /// Runs a USB-style control transfer and returns the data stage. Byte-stream devices do not
+    /// have control transfers, so the default refuses.
+    fn control(&mut self, request: &ControlRequest) -> Result<Vec<u8>, DeviceError> {
+        let _ = request;
+        Err(DeviceError::NotSupported("control transfers"))
+    }
+}
+
+/// A control transfer (USB setup packet).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ControlRequest {
+    /// True for device-to-host (the data stage is read).
+    pub direction_in: bool,
+    pub request_type: u8,
+    pub request: u8,
+    pub value: u16,
+    pub index: u16,
+    /// The data stage for host-to-device transfers. Empty for device-to-host.
+    pub data: Vec<u8>,
+    /// The most bytes the caller accepts for device-to-host transfers.
+    pub max_in: u16,
 }
