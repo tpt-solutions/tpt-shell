@@ -169,7 +169,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ## Phase M2 â€” Typed contract, macros, codegen, manifest, capabilities, audit (basic chain)
 
 ### tpt-shell-macros
-- [ ] `#[command]` with name, capability, kind (sync/async/job/stream), flags (ui, agent) (name, capability and kind = "sync" are done; a command with a capability registers behind its grant, with target `None`, so only an unrestricted grant allows it; a command that acts on a path, device or URL is registered by hand with a target; async, job, stream and the ui and agent flags are not)
+- [ ] `#[command]` with name, capability, kind (sync/async/job/stream), flags (ui, agent) (name, capability and kind = "sync" are done; a command with a capability registers behind its grant; `target(path = "arg")` (or device, url, bytes) names the argument the scope checks, and without it only an unrestricted grant allows the call; `target` without a capability is a compile error; async, job, stream and the ui and agent flags are not)
 - [x] `commands![]` (and `register_commands!`, which registers the handlers on a router)
 - [ ] `embed_dir!` (final) and `include_manifest!` (`embed_dir!` output reaches the app through `App::assets` and is served from the app origin; the directory is still read at compile time and does not rebuild on new files; `include_manifest!` is not built)
 - [ ] `Contract` derive macro
