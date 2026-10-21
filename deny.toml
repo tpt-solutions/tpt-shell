@@ -21,6 +21,14 @@ allow = [
     # syn/quote proc-macro toolchain used by tpt-shell-macros, is licensed Unicode-3.0 in an AND
     # expression with MIT OR Apache-2.0. Its MIT branch is used.
     "Unicode-3.0",
+    # Permissive extra (spec §4, todo O4 candidate list). Justification: ed25519-dalek and its
+    # curve25519-dalek and subtle dependencies are BSD-3-Clause. They sign audit checkpoints
+    # (M9). The BSD-3-Clause terms are permissive and are compatible with MIT OR Apache-2.0.
+    "BSD-3-Clause",
+    # Permissive extra (todo O-list candidate). Justification: libloading, which the Linux
+    # backend uses to open GTK and WebKitGTK at run time, is ISC. ISC is a short permissive
+    # licence equivalent to MIT, and its terms are compatible with MIT OR Apache-2.0.
+    "ISC",
 ]
 confidence-threshold = 0.93
 

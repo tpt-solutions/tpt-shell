@@ -2,10 +2,18 @@
 resolver = "2"
 members = [
     "crates/tpt-shell",
+    "crates/tpt-shell-audit",
+    "crates/tpt-shell-capabilities",
     "crates/tpt-shell-core",
+    "crates/tpt-shell-devices",
+    "crates/tpt-shell-errors",
     "crates/tpt-shell-ipc",
     "crates/tpt-shell-macros",
+    "crates/tpt-shell-manifest",
     "crates/tpt-shell-platform-windows",
+    "crates/tpt-shell-profiles",
+    "crates/tpt-shell-replay",
+    "crates/tpt-shell-supervisor",
 ]
 
 [workspace.package]

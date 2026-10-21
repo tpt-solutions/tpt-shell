@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tpt-solutions.example/tpt-shell/tpt-shell.manifest.schema.json",
+  "title": "tpt-shell.toml",
+  "description": "Manifest for a tpt-shell app. Sections for later phases are accepted as free-form tables until those phases define them.",
+  "type": "object",
+  "required": ["app"],
+  "additionalProperties": false,
+  "properties": {
+    "app": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "version": { "type": "string" }
+      }
+    },
+    "windows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "width", "height"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "title": { "type": "string" },
+          "width": { "type": "number", "exclusiveMinimum": 0 },
+          "height": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "grant": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z_]*(\\.[a-z][a-z_]*)*$"
+          }
+        }
+      }
+    },
+    "kiosk": { "type": "object" },
+    "devices": { "type": "object" },
+    "audit": { "type": "object" },
+    "agent": { "type": "object" },
+    "replay": { "type": "object" },
+    "test": { "type": "object" },
+    "profiles": { "type": "object" },
+    "compliance": { "type": "object" }
+  }
+}

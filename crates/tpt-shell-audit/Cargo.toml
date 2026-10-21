@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+
+[package]
+name = "tpt-shell-audit"
+description = "Append-only, hash-chained audit log for tpt-shell (basic chain; signatures come in M9)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json = "1"
+sha2 = "0.10"
+ed25519-dalek = "2"
