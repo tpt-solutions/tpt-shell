@@ -13,6 +13,8 @@ members = [
     "crates/tpt-shell-ipc",
     "crates/tpt-shell-macros",
     "crates/tpt-shell-manifest",
+    "crates/tpt-shell-platform-linux",
+    "crates/tpt-shell-platform-macos",
     "crates/tpt-shell-platform-windows",
     "crates/tpt-shell-profiles",
     "crates/tpt-shell-replay",
