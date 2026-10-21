@@ -12,12 +12,10 @@ publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+tpt-shell-capabilities = { path = "../tpt-shell-capabilities", version = "0.0.0" }
 tpt-shell-core = { path = "../tpt-shell-core", version = "0.0.0" }
 tpt-shell-ipc = { path = "../tpt-shell-ipc", version = "0.0.0" }
 tpt-shell-macros = { path = "../tpt-shell-macros", version = "0.0.0" }
-
-[dev-dependencies]
-tpt-shell-capabilities = { path = "../tpt-shell-capabilities", version = "0.0.0" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

@@ -130,6 +130,13 @@ pub fn interactive_desktop_available() -> bool {
 /// some timed out.
 static RUNTIME_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// The lock that keeps runtime tests apart, for tests that need the desktop but not WebView2.
+pub fn runtime_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    RUNTIME_SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Loader path for tests that need a real WebView2 runtime, and the lock that keeps the other
 /// runtime tests out while the caller holds it. Returns `None`, after saying why, when
 /// `TPT_WEBVIEW2_LOADER` is unset or there is no interactive desktop (RFC 0001, question 3).

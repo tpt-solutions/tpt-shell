@@ -13,6 +13,8 @@ pub mod clipboard;
 #[cfg(windows)]
 pub mod com;
 #[cfg(windows)]
+pub mod consent;
+#[cfg(windows)]
 pub mod dialogs;
 #[cfg(windows)]
 pub mod event_handler;
