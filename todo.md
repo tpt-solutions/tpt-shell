@@ -111,7 +111,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] `EventLoopBackend` trait: proxy, quit (M1 subset; `run` comes with the Windows event loop)
 - [x] `WindowBackend` trait, M1 subset: create, show/hide, title, size, fullscreen, close
 - [ ] `WindowBackend` remaining: frameless, always-on-top, transparency, backdrop, drag regions, close handling (trait methods, fake backend and Windows backend done for frameless, always-on-top, backdrop and close action; transparency and drag regions still return `Unsupported` on Windows)
-- [x] `WebviewBackend` trait, M1 subset: load html, navigate (app:// only), eval, post message
+- [x] `WebviewBackend` trait, M1 subset: load html, navigate (app:// only), eval, post message, set_message_handler (page to shell; the default returns `Unsupported`, so macOS and Linux stay honest until they implement it; Windows and the fake implement it)
 - [x] `WebviewBackend` crash callback and reload (verified by a renderer crash through DevTools), intercept (WebResourceRequested), nav policy hooks, doc-start script
 - [ ] `WebviewBackend` remaining: snapshot, devtools toggle, profile binding, a11y tree (devtools and context menu are set per window at creation, release off, debug on; no runtime toggle is exposed yet)
 - [ ] `Platform` trait (menus, tray, dialogs, clipboard, notifications, deep links, single instance, theme/accent, keystore) (clipboard text and colour scheme are in `tpt-shell-core::platform` with Windows and fake implementations; the rest are not started)
@@ -139,7 +139,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] COM init on STA thread (`WindowsBackend::new`, balanced in `Drop`)
 - [x] WebView2 Environment + Controller creation (verified against the installed runtime)
 - [x] Navigate, navigate to string and execute script (`eval`; script errors are not reported yet)
-- [x] Post web message / WebMessageReceived (page to Rust and Rust to page, verified)
+- [x] Post web message / WebMessageReceived (page to Rust and Rust to page, verified; the backend exposes page messages through `set_message_handler`, and a runtime test runs a guarded command through it)
 - [x] Add script on document created (`add_document_start_script`, verified by the shim test)
 - [x] NavigationStarting policy: top-level navigations outside the app origin are cancelled, fail closed (verified). Frame navigations covered by set_frame_navigation_policy (verified with an iframe to a foreign origin)
 - [x] WebResourceRequested + filters: works for a virtual https origin. DEVIATION: `app://` is not routed to WebResourceRequested on WebView2 (verified); pages use `https://tpt-app.localhost` on Windows. Decided: the virtual origin is accepted (RFC 0001 decision). Spec ยง5.4 and ยง9 wording not yet updated
@@ -179,7 +179,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ### Contract and validation (tpt-shell-ipc)
 - [ ] Schema model: primitives with bounds, strings with max length/pattern, enums, structs, Option, Vec, string-key maps (all except regex patterns: strings use an allowed-character set instead)
 - [ ] Scoped types: `ScopedPath`, `DeviceId`
-- [x] Validator: unknown fields rejected, bounds checked, scope checked before handler runs (`Router::register_guarded` names a capability and a target; `Router::handle_authorized` checks the window's grant before the handler, and the unauthorized entry points refuse guarded commands. Platform transports do not call `handle_authorized` yet)
+- [x] Validator: unknown fields rejected, bounds checked, scope checked before handler runs (`Router::register_guarded` names a capability and a target; `Router::handle_authorized` checks the window's grant before the handler, and the unauthorized entry points refuse guarded commands. On Windows, page messages reach a handler set with `set_message_handler`, and a runtime test runs a guarded command through `handle_authorized`. No app-level wiring yet: nothing installs a router, grants and consent prompt on a window by default, and macOS and Linux do not receive page messages)
 - [x] `CmdError` with stable code, message, details (`CommandError::with_details` sends `error.details`; invalid args report the offending `path`)
 - [ ] Blob channel `app://__tpt/blob/<id>` (store, quota, id check and route parsing are in `tpt-shell-ipc::blob`; the platform does not serve the route yet)
 - [x] Stream channel with credit-based backpressure (`tpt-shell-ipc::stream`; not yet carried by a platform transport)
