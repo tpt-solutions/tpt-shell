@@ -39,13 +39,13 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetMessageW,
-    GetWindowLongPtrW, GetWindowPlacement, PeekMessageW, PostMessageW, PostQuitMessage,
-    RegisterClassExW, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, SetWindowTextW,
-    ShowWindow, TranslateMessage, CW_USEDEFAULT, GWL_STYLE, HWND_MESSAGE, HWND_NOTOPMOST, HWND_TOP,
-    HWND_TOPMOST, MSG, PM_REMOVE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, SW_HIDE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNORMAL, WINDOWPLACEMENT, WM_APP,
-    WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_SETTINGCHANGE, WM_SIZE, WNDCLASSEXW, WS_CAPTION,
-    WS_OVERLAPPEDWINDOW, WS_POPUP,
+    GetWindowLongPtrW, GetWindowPlacement, KillTimer, PeekMessageW, PostMessageW, PostQuitMessage,
+    RegisterClassExW, SetTimer, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos,
+    SetWindowTextW, ShowWindow, TranslateMessage, CW_USEDEFAULT, GWL_STYLE, HWND_MESSAGE,
+    HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, MSG, PM_REMOVE, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNORMAL,
+    WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_SETTINGCHANGE, WM_SIZE,
+    WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_OVERLAPPEDWINDOW, WS_POPUP,
 };
 
 use crate::com::{wide, HRESULT};
@@ -107,10 +107,42 @@ struct Entry {
 
 thread_local! {
     static WINDOWS: RefCell<HashMap<isize, Entry>> = RefCell::new(HashMap::new());
+    static TIMERS: RefCell<TimerTable> = RefCell::new(TimerTable::default());
 }
+
+/// A repeating timer's callback. Shared so the tick can run while the table is not borrowed.
+type Tick = Rc<RefCell<Box<dyn FnMut()>>>;
+
+#[derive(Default)]
+struct TimerTable {
+    last: usize,
+    ticks: HashMap<usize, Tick>,
+}
+
+/// A timer made with [`WindowsBackend::every`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimerId(usize);
 
 /// Whether `url` is the app origin or a path, query or fragment under it. A plain prefix
 /// test would accept `https://tpt-app.localhost.example.com/`.
+/// Navigates window `id` from code on the UI thread, such as a timer tick, which cannot hold the
+/// backend. Only app URLs are allowed, as with [`WindowsBackend`]'s own navigation.
+pub fn navigate_window(id: WindowId, url: &str) -> Result<()> {
+    if !is_app_url(url) {
+        return Err(Error::Backend(format!("navigation blocked: {url}")));
+    }
+    WINDOWS.with(|w| {
+        let windows = w.borrow();
+        let entry = windows
+            .get(&id.0)
+            .ok_or(Error::UnknownWindow(id.0 as u64))?;
+        entry
+            .web
+            .navigate(url)
+            .map_err(|hr| hr_error("navigate", hr))
+    })
+}
+
 pub fn is_app_url(url: &str) -> bool {
     match url.strip_prefix(APP_ORIGIN) {
         Some(rest) => rest.is_empty() || rest.starts_with(['/', '?', '#']),
@@ -390,6 +422,38 @@ impl WindowsBackend {
         Ok(())
     }
 
+    /// Calls `tick` on the UI thread every `interval`, from the message loop, until it is
+    /// cancelled or the backend is dropped. Use it for work that must run while the app is idle.
+    pub fn every(&mut self, interval: Duration, tick: impl FnMut() + 'static) -> Result<TimerId> {
+        self.check_thread()?;
+        let ms = u32::try_from(interval.as_millis())
+            .ok()
+            .filter(|ms| *ms > 0)
+            .ok_or_else(|| Error::Backend("a timer interval must be at least 1 ms".into()))?;
+        let id = TIMERS.with(|t| {
+            let mut t = t.borrow_mut();
+            t.last += 1;
+            let id = t.last;
+            t.ticks.insert(id, Rc::new(RefCell::new(Box::new(tick))));
+            id
+        });
+        // SAFETY: the message window is alive while the backend is; a null callback makes the
+        // timer post WM_TIMER to that window, which runs the tick.
+        if unsafe { SetTimer(self.message_hwnd, id, ms, None) } == 0 {
+            TIMERS.with(|t| t.borrow_mut().ticks.remove(&id));
+            return Err(Error::Backend("SetTimer failed".into()));
+        }
+        Ok(TimerId(id))
+    }
+
+    /// Stops a timer made with [`WindowsBackend::every`]. Stopping one that already stopped does
+    /// nothing.
+    pub fn cancel(&mut self, timer: TimerId) {
+        // SAFETY: as in `every`; KillTimer on a timer that does not exist is harmless.
+        unsafe { KillTimer(self.message_hwnd, timer.0) };
+        TIMERS.with(|t| t.borrow_mut().ticks.remove(&timer.0));
+    }
+
     /// Title of the window's loaded document, or an empty string when none is loaded.
     pub fn document_title(&self, id: WindowId) -> Result<String> {
         self.with_web(id, |w| w.document_title())?
@@ -432,6 +496,8 @@ impl WindowsBackend {
 
 impl Drop for WindowsBackend {
     fn drop(&mut self) {
+        // The timers belong to this backend's message window, which goes away with it.
+        TIMERS.with(|t| t.borrow_mut().ticks.clear());
         // Destroying a window sends WM_DESTROY, which closes its controller.
         let ids: Vec<isize> = WINDOWS.with(|w| w.borrow().keys().copied().collect());
         for id in ids {
@@ -976,6 +1042,15 @@ unsafe extern "system" fn wnd_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match msg {
+        WM_TIMER => {
+            // Clone the callback out of the table first, so a tick may start or stop timers.
+            let tick = TIMERS.with(|t| t.borrow().ticks.get(&wparam).cloned());
+            if let Some(tick) = tick {
+                // A panic must not unwind across this extern function.
+                let _ = catch_unwind(AssertUnwindSafe(|| (tick.borrow_mut())()));
+            }
+            0
+        }
         WM_TASK => {
             // SAFETY: WinProxy::post queued this pointer from Box::into_raw, once.
             let task: Box<Task> = Box::from_raw(lparam as *mut Task);
@@ -1616,6 +1691,32 @@ document.title = 'ready';
 
             drop(b);
             let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_timer_ticks_on_the_ui_thread_until_it_is_cancelled() {
+            let Some((mut b, dir, _serial)) = start("timer") else {
+                return;
+            };
+            let ticks = std::rc::Rc::new(std::cell::Cell::new(0u32));
+            let count = ticks.clone();
+            let timer = b
+                .every(Duration::from_millis(20), move || {
+                    count.set(count.get() + 1)
+                })
+                .expect("timer");
+            let ticked = pump_until(Duration::from_secs(10), || ticks.get() >= 3);
+            b.cancel(timer);
+            let at_cancel = ticks.get();
+            pump_until(Duration::from_millis(200), || false);
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(ticked, "the timer never ticked");
+            assert_eq!(
+                ticks.get(),
+                at_cancel,
+                "the timer kept ticking after it was cancelled"
+            );
         }
 
         #[test]
