@@ -133,13 +133,20 @@ impl Router {
         schema: Schema,
         handler: impl Fn(&Value) -> Result<Value, CommandError> + 'static,
     ) {
-        self.register(cmd, move |args| {
-            validate(&schema, args, "args").map_err(|e| {
-                CommandError::new(schema::INVALID_ARGS, &e.to_string())
-                    .with_details(json!({ "path": e.path }))
-            })?;
-            handler(args)
-        });
+        self.register(cmd, checked(schema, handler));
+    }
+
+    /// Registers `handler` for `cmd`, behind `capability`, with its arguments checked against
+    /// `schema`. The grant is checked first, then the arguments, then the handler runs.
+    pub fn register_guarded_validated(
+        &mut self,
+        cmd: &str,
+        capability: &str,
+        schema: Schema,
+        target_of: impl Fn(&Value) -> Target + 'static,
+        handler: impl Fn(&Value) -> Result<Value, CommandError> + 'static,
+    ) {
+        self.register_guarded(cmd, capability, target_of, checked(schema, handler));
     }
 
     /// Handles one raw message from the page and returns the response text to send back.
@@ -270,6 +277,21 @@ fn error_response(id: u64, err: &CommandError) -> Value {
         response["error"]["details"] = details.clone();
     }
     response
+}
+
+/// Wraps `handler` so that its arguments are checked against `schema` first. A bad value is
+/// answered with `IPC_INVALID_ARGS` and the handler never runs.
+fn checked(
+    schema: Schema,
+    handler: impl Fn(&Value) -> Result<Value, CommandError> + 'static,
+) -> impl Fn(&Value) -> Result<Value, CommandError> + 'static {
+    move |args| {
+        validate(&schema, args, "args").map_err(|e| {
+            CommandError::new(schema::INVALID_ARGS, &e.to_string())
+                .with_details(json!({ "path": e.path }))
+        })?;
+        handler(args)
+    }
 }
 
 /// Serializes a response value to the text sent over the wire.
