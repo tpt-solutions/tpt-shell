@@ -12,6 +12,11 @@
 
 use std::time::{Duration, Instant};
 
+pub mod alert;
+pub mod heartbeat;
+pub mod log;
+pub mod process;
+
 /// Exponential backoff: `initial`, then `initial * factor`, and so on, never above `max`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Backoff {
@@ -125,8 +130,14 @@ impl Scheduled {
 /// How one run of the app ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Exit {
+    /// Exited with success. The loop stops.
     Clean,
+    /// Exited with a failure, or could not be started. Counts as a crash.
     Crashed,
+    /// Still running, but its heartbeat stopped. It was stopped. Counts as a crash.
+    Hung,
+    /// Stopped for the daily restart. Does not count as a crash.
+    ScheduledRestart,
 }
 
 /// Starts the app and reports how it ended. Platforms implement this with real processes.
@@ -135,42 +146,46 @@ pub trait Spawner {
 }
 
 /// Runs the app until it exits cleanly or the guard gives up. Every restart and the give-up
-/// are logged, and `alert` is called once when the loop gives up. `sleep` waits for the backoff.
-/// Returns the number of runs.
+/// are passed to `log` as they happen, and `alert` is called once when the loop gives up.
+/// `sleep` waits for the backoff. Returns the number of runs.
 pub fn supervise(
     spawner: &mut dyn Spawner,
     guard: &mut CrashLoopGuard,
     mut clock: impl FnMut() -> Instant,
     mut sleep: impl FnMut(Duration),
-    log: &mut Vec<String>,
+    log: &mut dyn FnMut(String),
     alert: &mut dyn FnMut(&str),
 ) -> u32 {
     let mut runs = 0;
     loop {
         runs += 1;
-        match spawner.run_once() {
+        let reason = match spawner.run_once() {
             Exit::Clean => {
-                log.push(format!("run {runs} exited cleanly"));
+                log(format!("run {runs} exited cleanly"));
                 return runs;
             }
-            Exit::Crashed => {
-                let now = clock();
-                match guard.record_crash(now) {
-                    Decision::Restart(delay) => {
-                        log.push(format!("run {runs} crashed; restarting after {delay:?}"));
-                        sleep(delay);
-                    }
-                    Decision::GiveUp => {
-                        let message = format!(
-                            "crash loop: {} crashes within {:?}; giving up",
-                            guard.max_crashes + 1,
-                            guard.window
-                        );
-                        log.push(message.clone());
-                        alert(&message);
-                        return runs;
-                    }
-                }
+            Exit::ScheduledRestart => {
+                log(format!("run {runs} stopped for the scheduled restart"));
+                continue;
+            }
+            Exit::Crashed => "crashed",
+            Exit::Hung => "stopped responding",
+        };
+        let now = clock();
+        match guard.record_crash(now) {
+            Decision::Restart(delay) => {
+                log(format!("run {runs} {reason}; restarting after {delay:?}"));
+                sleep(delay);
+            }
+            Decision::GiveUp => {
+                let message = format!(
+                    "crash loop: {} crashes within {:?}; giving up",
+                    guard.max_crashes + 1,
+                    guard.window
+                );
+                log(message.clone());
+                alert(&message);
+                return runs;
             }
         }
     }
@@ -266,7 +281,7 @@ mod tests {
             &mut guard,
             Instant::now,
             |d| waits.push(d),
-            &mut log,
+            &mut |line| log.push(line),
             &mut |m| alerts.push(m.to_string()),
         );
         assert_eq!(runs, 2);
@@ -285,7 +300,7 @@ mod tests {
             &mut guard,
             Instant::now,
             |_| {},
-            &mut log,
+            &mut |line| log.push(line),
             &mut |m| alerts.push(m.to_string()),
         );
         assert_eq!(runs, 3, "two restarts, then the third crash gives up");
