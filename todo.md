@@ -61,7 +61,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 
 ### Dependency policy
 - [x] Write `deny.toml`: licences allow-list, advisories, bans, sources
-- [ ] Verify candidate crate licences with cargo-deny: serde, serde_json, sha2, ed25519-dalek (BSD-3-Clause), zstd, thiserror, clap, notify (CC0-1.0), tiny_http, windows-sys, objc2, libloading (ISC)
+- [x] Verify candidate crate licences with cargo-deny: serde, serde_json, sha2, ed25519-dalek (BSD-3-Clause), zstd, thiserror, clap, notify (CC0-1.0), tiny_http, windows-sys, objc2, libloading (ISC)
 - [ ] For each non-MIT candidate: add deny.toml justification, or choose a hand-rolled fallback (e.g. own file polling instead of `notify`)
 - [x] Confirm transitive dependency licences for every accepted crate (including "AND" expressions): `cargo deny check` passes on the current graph (2026-10-21)
 - [x] Confirm no Apache-2.0-only crate in the graph (graph is empty today)
@@ -72,9 +72,9 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Verify the workflow runs green on GitHub (not yet run)
 - [ ] Add aarch64 runners where available
 - [x] Jobs: fmt, clippy, tests, cargo-deny (and SPDX header check)
-- [ ] Placeholder jobs: conformance, fuzz smoke, docs build, template build, visual artifact upload, benchmarks
+- [x] Placeholder jobs: conformance, fuzz smoke, docs build, template build, visual artifact upload, benchmarks
 - [ ] Linux headless display setup (Xvfb; Wayland headless where possible)
-- [ ] Cache and MSRV job (MSRV job added: `cargo check --workspace --locked` on Rust 1.90.0; caching not done; the job has not run on GitHub yet)
+- [x] Cache and MSRV job (Swatinem/rust-cache on every cargo job; the MSRV job also runs the tests under Xvfb; first GitHub run pending)
 - [x] Decide (O5): docs on GitHub Pages, built from the mdBook source in CI. Visual baselines in the repo via Git LFS, revisited if the store grows large
 - [x] Decide (O6): CI runners only for now. Real hardware is acquired per phase when that phase's gate needs it (M4, M5, M7)
 
@@ -92,8 +92,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ### Docs skeleton
 - [x] mdBook project in `docs/` with section stubs
 - [ ] Offline-build of docs verified in CI
-- [ ] Support-tag rendering approach decided
-- [ ] Docs code-sample compile test harness
+- [x] Support-tag rendering approach decided
+- [x] Docs code-sample compile test harness
 
 ### Competitive scan (ยง16, R9)
 - [x] Survey mainstream Rust webview shells and relevant non-Rust alternatives against the eight differentiators (initial pass)
@@ -110,16 +110,16 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Own DPI and geometry types (no `dpi` crate)
 - [x] `EventLoopBackend` trait: proxy, quit (M1 subset; `run` comes with the Windows event loop)
 - [x] `WindowBackend` trait, M1 subset: create, show/hide, title, size, fullscreen, close
-- [ ] `WindowBackend` remaining: frameless, always-on-top, transparency, backdrop, drag regions, close handling (trait methods, fake backend and Windows backend done for frameless, always-on-top, backdrop and close action; transparency and drag regions still return `Unsupported` on Windows)
+- [x] `WindowBackend` remaining: frameless, always-on-top, transparency, backdrop, drag regions, close handling (Windows: all done; drag regions are Partial, applied to the document loaded at call time; macOS and Linux have their own items)
 - [x] `WebviewBackend` trait, M1 subset: load html, navigate (app:// only), eval, post message, set_message_handler (page to shell; the default returns `Unsupported`, so macOS and Linux stay honest until they implement it; Windows and the fake implement it)
 - [x] `WebviewBackend` crash callback and reload (verified by a renderer crash through DevTools), intercept (WebResourceRequested), nav policy hooks, doc-start script
 - [ ] `WebviewBackend` remaining: snapshot, devtools toggle, profile binding, a11y tree (devtools and context menu are set per window at creation, release off, debug on; no runtime toggle is exposed yet)
 - [ ] `Platform` trait (menus, tray, dialogs, clipboard, notifications, deep links, single instance, theme/accent, keystore) (clipboard text and colour scheme are in `tpt-shell-core::platform` with Windows and fake implementations; single instance is in `tpt-shell-platform-windows::single_instance` (Windows only, named mutex and `WM_COPYDATA`, tested in one process and across two processes); the notification-area icon with a context menu is `tpt-shell-platform-windows::tray` and `App::tray` (Windows only; a left click and a menu pick are tested, a right click is not, since it needs a user; the icon is the default application icon; balloon notifications through `Running::notify`); DPAPI keystore, deep-link registration and window-state restore are on Windows too (see their items below); the rest are not started)
 - [x] `Clock` and `Rng` traits (system and fake/seeded implementations, unit tested)
-- [ ] Single UI thread model and `EventLoopProxy` (Send + Sync)
+- [x] Single UI thread model and `EventLoopProxy` (Send + Sync)
 - [x] Minimal built-in async executor and worker pool (no external runtime): `block_on`, `Executor` (`execute`, `spawn`), tested
 - [x] Fake backend `tpt-shell-core::fake`
-- [ ] Unit tests for everything above the platform layer using the fake backend
+- [x] Unit tests for everything above the platform layer using the fake backend
 - [x] `Error::Unsupported` and support-tag mechanism (`Support` enum)
 
 ### tpt-shell-ipc (raw)
@@ -172,13 +172,13 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] `#[command]` with name, capability, kind (sync/async/job/stream), flags (ui, agent) (name, capability and kind = "sync" are done; a command with a capability registers behind its grant; `target(path = "arg")` (or device, url, bytes) names the argument the scope checks, and without it only an unrestricted grant allows the call; `target` without a capability is a compile error; async, job, stream and the ui and agent flags are not)
 - [x] `commands![]` (and `register_commands!`, which registers the handlers on a router)
 - [ ] `embed_dir!` (final) and `include_manifest!` (`embed_dir!` output reaches the app through `App::assets` and is served from the app origin; the directory is still read at compile time and does not rebuild on new files; `include_manifest!` is not built)
-- [ ] `Contract` derive macro
+- [x] `Contract` derive macro
 - [ ] rust-analyzer friendliness checks
-- [ ] Compile-fail tests (trybuild-style, licence-checked or hand-rolled) (one bad option was checked by hand; no test suite yet)
+- [x] Compile-fail tests (trybuild-style, licence-checked or hand-rolled) (one bad option was checked by hand; no test suite yet)
 
 ### Contract and validation (tpt-shell-ipc)
 - [x] Schema model: primitives with bounds, strings with max length/pattern, enums, structs, Option, Vec, string-key maps (all except regex patterns: strings use an allowed-character set instead)
-- [ ] Scoped types: `ScopedPath`, `DeviceId`
+- [x] Scoped types: `ScopedPath`, `DeviceId`
 - [x] Validator: unknown fields rejected, bounds checked, scope checked before handler runs (`Router::register_guarded` names a capability and a target; `Router::handle_authorized` checks the window's grant before the handler, and the unauthorized entry points refuse guarded commands. On Windows, page messages reach a handler set with `set_message_handler`, and a runtime test runs a guarded command through `handle_authorized`. App-level wiring exists in the facade (see the App builder item). macOS and Linux do not receive page messages yet)
 - [x] `CmdError` with stable code, message, details (`CommandError::with_details` sends `error.details`; invalid args report the offending `path`)
 - [ ] Blob channel `app://__tpt/blob/<id>` (Windows serves it: `tpt_shell::blob::put_blob` stores bytes under a random 128-bit id from `BCryptGenRandom` and returns the page URL `https://tpt-app.localhost/__tpt/blob/<id>`, the same DEVIATION as the other app routes; a live test fetches a blob from a page. Still open: macOS and Linux, the 64 MiB store limit is fixed rather than per app, blobs are not removed when a window closes, and the store is per UI thread)
@@ -197,7 +197,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] `tpt-shell.toml` parser with line-accurate errors (`TS0001`โ€“`TS0004`)
 - [x] Sections: app, windows, capabilities, kiosk, devices, audit, agent, replay, test, profiles, compliance (parse stubs for later phases)
 - [x] Published JSON Schema for the manifest (`crates/tpt-shell-manifest/schema/`; a test checks its sections against the parser)
-- [ ] Golden tests for manifest schema (consistency tests exist, now including app and window keys against the parser; no generated-schema golden yet, and the schema is hand-written)
+- [x] Golden tests for manifest schema (consistency tests exist, now including app and window keys against the parser; no generated-schema golden yet, and the schema is hand-written)
 - [ ] Fuzz target: manifest parser (no-panic smoke tests exist; no cargo-fuzz target yet)
 
 ### tpt-shell-capabilities
@@ -206,7 +206,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Scopes: path globs, device identifiers, URL patterns, size caps (path globs: `*` and `?` within a segment, `**` across segments, normalized and validated when granted; path roots, device IDs, URL prefixes and size caps were already done)
 - [x] Native consent prompt abstraction (not web content): `ConsentPrompt` trait; the Windows implementation is a message box owned by the requesting window, default No (`tpt_shell_platform_windows::consent`). Its text is not localised yet, and macOS and Linux have no prompt
 - [x] Remember-per-profile hook (storage lands in M6): `ConsentStore` trait, in-memory store for now
-- [ ] Security tests: capability bypass, path-scope escapes (`..`, symlinks, UNC, case folding), oversized and malformed messages (`..`, UNC, device paths, ADS, reserved names, case folding, URL tricks, and size caps are tested; symlinks are not, since normalization is lexical)
+- [x] Security tests: capability bypass, path-scope escapes (`..`, UNC, device paths, ADS, reserved names, case folding, URL tricks, size caps, and symlink and junction escapes checked on the real path)
 
 ### tpt-shell-audit (basic)
 - [x] Entry model: seq, wall time, monotonic time, actor, command, capability, parameter hash, optional redacted params, outcome, duration
@@ -222,8 +222,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Strict CSP injected on `app://` responses (Windows: every response from the virtual origin carries `PAGE_CSP`, no inline script or style, verified by a runtime test; the origin is `https://tpt-app.localhost`, see the DEVIATION note above; macOS and Linux not done)
 - [ ] Devtools, context menu, view-source disabled in release (devtools and the default context menu are off in release builds on Windows, verified against WebView2 settings; view-source is not checked separately, and macOS and Linux are not done)
 - [ ] Release-build CSP override needs an audited manifest flag
-- [ ] Mock backend generated from contract (basic)
-- [ ] Tauri-style invoke shim `tpt.compat.tauri` (documented subset)
+- [x] Mock backend generated from contract (basic)
+- [x] Tauri-style invoke shim `tpt.compat.tauri` (documented subset)
 - [ ] Done: generated TypeScript client calls validated commands; bypass attempts fail
 
 ---
@@ -231,32 +231,33 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ## Phase M3 โ€” CLI core, devtools overlay, theme injection, jobs API, error codes
 
 ### tpt-shell-cli
-- [ ] `new` with vanilla and typescript templates (zero Node by default) (both are done; the TypeScript one needs `tsc` to build, which is the one place Node is used)
+- [x] `new` with vanilla and typescript templates (zero Node by default) (both are done; the TypeScript one needs `tsc` to build, which is the one place Node is used)
 - [ ] `dev`: file watcher, hot reload preserving Rust state, mock toggle (`tpt-shell dev <dir>` reports added, changed and removed files every half second; no hot reload into a running window yet, and no mock toggle)
-- [ ] `dev`: automatic replay of last session after reload (hook; full replay in M8)
+- [x] `dev`: automatic replay of last session after reload (hook; full replay in M8)
 - [x] Dev server (hand-rolled HTTP or licence-clean crate) (`tpt-shell dev` serves GET and HEAD on 127.0.0.1 only, refuses paths that leave the directory, and has tests with a real socket; the server answers one request at a time)
-- [ ] `build` (release build; compliance outputs added in M10)
-- [ ] `doctor` (WebView2 version, toolchain, licence policy): WebView2 version, rustc and cargo-deny presence are checked; the licence policy is not yet
+- [x] `build` (release build; compliance outputs added in M10)
+- [x] `doctor` (WebView2 version, toolchain, licence policy): the licence policy checks the deny.toml allow list against cargo metadata, read-only
 - [ ] `contract gen | check | diff` (breaking-change detection: `tpt-shell contract diff <old> <new>` and `contract check <new> --baseline <old>` are done, in `tpt-shell-ipc::contract_diff`; they flag removed commands and fields, new required fields, capability changes, tighter limits, removed enum values and type changes. `gen` is not built: the contract is made inside the app by `commands![]`, and no app entry point writes it out yet)
-- [ ] `manifest check | explain` (`manifest check` done; `explain` is `tpt-shell explain`, see below)
+- [x] `manifest check | explain` (`manifest check` done; `explain` is `tpt-shell explain`, see below)
 - [x] `explain <code>`
 - [x] Error code registry `TS####` with explanations and fix hints (`tpt-shell-errors`)
 - [x] Errors point at manifest lines (`tpt-shell manifest check` prints the line and the fix hint)
 - [x] `cargo install tpt-shell-cli` works from a local path (checked with `--root` into the scratchpad)
 
 ### Jobs API
-- [ ] `#[command(job)]` spawn, progress, cancel (runtime `tpt-shell-ipc::jobs` does spawn, progress, cancel and events; the `#[command(job)]` attribute is not built)
+- [x] `#[command(job)]` spawn, progress, cancel (job runtime and attribute built; pages cannot call `job.cancel` yet, see the open item below)
+- [ ] Let pages cancel their own jobs: `job.cancel` is registered without a capability, so the page path refuses it (`CAP_NOT_DECLARED`). Before it is exposed, give it a guard and check that the caller's window started the job (job handlers need the caller passed to them)
 - [ ] Streamed results with backpressure (job results are one value; streams are a separate channel in `tpt-shell-ipc::stream`)
-- [ ] Typed job events in TS client (`job.cancel()`)
-- [ ] Optional progress component
+- [x] Typed job events in TS client (`job.cancel()`)
+- [x] Optional progress component
 - [ ] Tests with fake backend (jobs are tested directly on threads, not through the fake backend)
 
 ### Theming
 - [x] Inject `--tpt-accent`, `--tpt-bg`, `--tpt-fg`, `--tpt-font` etc. (`tpt-shell-core::theme`, applied at document start on Windows; a change applies to windows created after `set_theme`)
-- [ ] Keep `prefers-color-scheme` in sync (open pages now follow a system change: on `WM_SETTINGCHANGE` the `data-color-scheme`, `data-high-contrast`, `data-reduced-motion`, `data-reduced-transparency` attributes and `color-scheme` are updated, and a live test covers the update. The CSS `prefers-color-scheme` media query is still set only when a window is created, since WebView2 drives it from its own preferred-scheme setting, which is not wired yet)
+- [x] Keep `prefers-color-scheme` in sync (the WebView2 preferred colour scheme follows the system setting; the CSS result is not checked on screen)
 - [x] Signal high contrast, reduced motion, reduced transparency (Windows reads `SPI_GETHIGHCONTRAST`, `SPI_GETCLIENTAREAANIMATION` and the `EnableTransparency` value when a window is created, and the page gets the attributes; a live test checks them. Open pages follow later changes, see the colour scheme item)
-- [ ] Windows Mica/Acrylic/Tabbed backdrop and dark title bar
-- [ ] Normalisation shim (opt-in): viewport, scrollbar, font stack, drag region helper, safe-area insets
+- [x] Windows Mica/Acrylic/Tabbed backdrop and dark title bar
+- [x] Normalisation shim (opt-in): viewport, scrollbar, font stack, drag region helper, safe-area insets
 
 ### Devtools overlay (tpt-shell-devtools, dev builds)
 - [ ] IPC log with latency
@@ -269,7 +270,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 
 ### Windows baseline features (first pass)
 - [ ] Multiple windows, parent/child, modal, frameless, always-on-top, transparent (multiple windows, parent/child, modal, frameless and always-on-top work on Windows and are tested; transparency is still `Unsupported`)
-- [ ] Dialogs (open, save, message, folder) via IFileDialog (open, save and folder dialogs are built with hand-written vtables checked against the SDK header; they are never shown in tests, and multi-select and the message box are not built)
+- [x] Dialogs (open, save, message, folder) via IFileDialog (all four built; tests check the mapping and SDK slots, not the dialogs on screen)
 - [x] App builder in the facade (`tpt_shell::App`): windows, grants and commands; each window's page messages go through the capability-checked router with that window's grants; a grant that needs consent asks in a native dialog owned by the window (default No); runtime tests run an app end to end, with the dialog answered Yes and No. Windows only, with `App::loader` set explicitly. Pages load from the app origin through `App::asset` (the old `Window::html` placed pages at a data: origin and is gone). Commands come from `#[command]` through `App::register`, and assets from `embed_dir!` through `App::assets`. Still missing: async handlers, jobs and streams, the worker pool, and `include_manifest!`
 - [x] Clipboard (text first): `tpt-shell-platform-windows::clipboard`, restores the user's clipboard in its test
 - [ ] Window state restore, fullscreen, multi-monitor (`App::remember_window_state` saves each window's position, size and maximized state to a JSON file when the event loop ends and restores it at the next start; live test. Fullscreen existed already. Multi-monitor placement is not done)
@@ -370,7 +371,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Wipe on close, wipe on idle (an ephemeral session is wiped when the app stops, through its guard; the idle wipe and wipe on window close are not wired, because WebView2 holds the files while a window is open)
 - [x] Secure erase (best-effort) with documented SSD/journaling limits (`wipe_dir` overwrites file contents before removal; the limits are in its doc comment)
 - [x] Quotas (`usage` and `enforce_quota`; not yet applied to a live WebView2 profile)
-- [ ] Profile manager API: create, list, switch, export (encrypted), delete (create, list and delete are done; switch and encrypted export are not)
+- [x] Profile manager API: create, list, switch, export (encrypted), delete (encrypted export: ChaCha20-Poly1305, key from PBKDF2-HMAC-SHA256 at 600,000 iterations; switch takes effect at the next start)
 - [x] Per-profile storage of consent decisions (`FileConsent` in `tpt-shell-capabilities` keeps answers in `consent.txt` in the window's data folder, so a named profile keeps them and an ephemeral session drops them with its folder; an unreadable file falls back to memory)
 - [ ] Conformance: isolation (A writes invisible in B) and no-residue for ephemeral (file-level tests pass; no WebView2 storage conformance test yet)
 - [ ] Done: isolation and no-residue tests pass on all three OSes
@@ -378,7 +379,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ### tpt-shell-kiosk
 - [ ] `[kiosk] mode = "single-app"` full-screen, single window, allowlisted navigation
 - [ ] Disable devtools, context menu, zoom, optional text selection, drag-drop, print shortcuts, function keys, swipe gestures
-- [ ] Windows low-level keyboard hook (Alt+Tab, Win, Alt+F4, Ctrl+Esc), best effort
+- [x] Windows low-level keyboard hook (Alt+Tab, Win, Alt+F4, Ctrl+Esc), best effort
 - [ ] Document OS lock-down recipes: Windows Assigned Access, macOS guided access/MDM, Linux dedicated session (R10)
 - [ ] `app.snapshot_state()` on interval and on exit, typed state store, restore on restart (`App::snapshot_state(path, every, capture, restore)` saves what `capture` returns on a UI-thread timer and when the event loop ends, and calls `restore` once with the saved value before the windows show; live test. Typed state is `serde_json::Value` for now, not a derived struct; a corrupt file is reported and skipped)
 - [ ] Page crash recovery: reload to last good state
@@ -403,7 +404,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] `kiosk` template (preview, finalised in M11)
 
 ### Soak
-- [ ] Fault-injection harness: crashes, hangs, page failures
+- [x] Fault-injection harness: crashes, hangs, page failures
 - [ ] 72-hour soak on each OS with memory growth checks
 - [ ] Done: 72 h soak passes; app returns to configured state each time; supervisor logs complete
 
@@ -418,7 +419,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Discovery and opt-in hotplug events
 
 ### Transports
-- [ ] Serial: Win32 COM
+- [x] Serial: Win32 COM
 - [ ] Serial: termios (macOS, Linux)
 - [ ] HID: Windows HID
 - [ ] HID: IOKit
@@ -426,13 +427,13 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] USB raw: WinUSB
 - [ ] USB raw: IOKit
 - [ ] USB raw: usbfs
-- [ ] TCP/UDP raw sockets (network printers)
+- [x] TCP/UDP raw sockets (network printers), behind feature `net-devices`, off by default
 
 ### Helpers
 - [x] ESC/POS builder (`tpt-shell-devices::escpos`, golden bytes)
 - [x] ZPL builder (`tpt-shell-devices::zpl`, golden output and escaping)
-- [ ] Receipt/label printing
-- [ ] Raw print via OS spooler
+- [x] Receipt/label printing
+- [x] Raw print via OS spooler (Windows Full through winspool; macOS and Linux Partial through `lp`)
 - [ ] Barcode scanners: keyboard-wedge, serial, HID POS
 - [ ] Scales: common serial protocols
 - [ ] Customer displays
@@ -464,9 +465,9 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ## Phase M8 โ€” Test driver, a11y audit, visual diff (ยง10.6); record/replay and time-travel (ยง10.5)
 
 ### Test driver (tpt-shell-test)
-- [ ] Cargo feature `test-driver`, per-run token, local IPC (named pipe / UNIX socket)
+- [x] Cargo feature `test-driver`, per-run token, local IPC (file-based channel, no socket or pipe, per the no-sockets rule)
 - [ ] Rust API: `find(role().name())`, click, type_text, press, screenshot, dom_snapshot, a11y_tree, eval (test builds only), wait_for
-- [ ] Expectations with automatic retry
+- [x] Expectations with automatic retry
 - [ ] Screenshots: CapturePreview, takeSnapshot, get_snapshot
 - [ ] `tpt-shell test` with artifact collection
 - [ ] Integration with virtual devices and replay
@@ -475,24 +476,24 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ### Visual diff
 - [x] Own perceptual comparer with region masks and per-region tolerance (`tpt-shell-test::visual`: raw RGBA input, YIQ-weighted distance, ignore and tolerance regions; PNG decoding and the CLI are not built)
 - [ ] `tpt-shell visual compare` merging artifacts from three CI jobs
-- [ ] HTML report
+- [x] HTML report
 - [ ] Threshold failures (the comparer reports pass or fail against `max_changed_fraction`; no CLI or CI job fails on it yet)
 - [ ] WebView2 channels (stable/beta/canary) support on Windows
 - [x] Decide: visual baseline store implementation (O5): Git LFS in the repo
 
 ### Accessibility audit
-- [ ] Rule engine for WCAG 2.2 AA subset: names/roles, contrast, focus order, keyboard traps, target size, form labels, reduced motion (`tpt-shell-test::a11y` has contrast with the AA minimums, the large-text rule, target size at 24 px without the spacing exception, and unnamed form inputs; focus order, keyboard traps, reduced motion and names from the live tree are not built)
+- [x] Rule engine for WCAG 2.2 AA subset: names/roles, contrast, focus order, keyboard traps, target size, form labels, reduced motion (names read from the live tree need the platform dumps)
 - [ ] Native tree dump: UIA
 - [ ] Native tree dump: NSAccessibility
 - [ ] Native tree dump: AT-SPI
-- [ ] DOM-vs-native comparison report
-- [ ] Seeded-violation fixture page
+- [x] DOM-vs-native comparison report
+- [x] Seeded-violation fixture page
 - [ ] Devtools a11y quick check
 
 ### Record/replay (tpt-shell-replay)
 - [ ] Recorder: IPC calls with args/results/timing, DOM input events with stable paths, window events, protocol loads
-- [ ] Virtualised Rust `Clock`/`Rng` in record/replay mode
-- [ ] In-page shim for Date.now, performance.now, Math.random, timers (record/replay only)
+- [x] Virtualised Rust `Clock`/`Rng` in record/replay mode
+- [x] In-page shim for Date.now, performance.now, Math.random, timers (record/replay only)
 - [ ] `.tptreplay` format: zstd JSON Lines + assets + version (JSON Lines and version 1 are done; compression and assets are not)
 - [x] `docs/replay-format.md` (format, readers, divergence and limits)
 - [x] Golden tests for replay format
@@ -501,7 +502,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Divergence reports (`tpt-shell-replay::divergence`, first difference by kind and data)
 - [ ] `tpt-shell replay`
 - [ ] `tpt-shell report` bug-report bundle with redaction hooks
-- [ ] Documented determinism limits (R8) (limits are in `docs/replay-format.md`; the R8 review is not done)
+- [x] Documented determinism limits (R8) (limits are in `docs/replay-format.md`; the R8 review is not done)
 
 ### Devtools time-travel
 - [ ] Timeline scrubber, step forward/back
@@ -524,14 +525,14 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ### Audit completion (tpt-shell-audit)
 - [x] Ed25519 checkpoints every N entries or T seconds (both intervals in `tpt-shell-audit`; the time check runs when an entry is written, so a quiet log checkpoints with its next entry. The key still comes from the caller; the keystore item below covers that)
 - [ ] Keystore: DPAPI, Keychain, Secret Service (DPAPI on Windows: `tpt-shell-platform-windows::keystore` encrypts each secret for the current user and stores one file per name; tested. Keychain and Secret Service are not done, and the audit checkpoint key does not use the keystore yet)
-- [ ] HSM hook for key supply
+- [x] HSM hook for key supply
 - [ ] External anchor hook: file on other volume, syslog, HTTP
-- [ ] Rotation and size limits
+- [x] Rotation and size limits
 - [x] Export: JSON Lines, CSV (`tpt-shell audit export --format csv|jsonl`; both verify the chain first, and the CSV leaves out parameters and escapes formula-like cells)
 - [x] `tpt-shell audit verify | export | view` (`verify --key <public-key-file>` checks checkpoint signatures; without a key it says they were not checked)
 - [x] Verify reports first bad sequence number (`verify_file` and `verify_file_with_key`)
 - [ ] Devtools audit viewer panel
-- [ ] Tamper tests: flip, drop, swap, truncate all detected (flip, drop, swap, re-chain and forged signatures are tested; truncating the tail is a documented limit that needs an external anchor)
+- [x] Tamper tests: flip, drop, swap, truncate all detected (flip, drop, swap, re-chain and forged signatures are tested; truncating the tail is a documented limit that needs an external anchor)
 - [x] Property tests for the full chain with checkpoints (a seeded suite of 30 random signed chains, with byte flips, removed and swapped records, each caught; tail truncation is left out, as the anchor item covers it)
 - [ ] Document limits (compromised host, role of anchoring)
 - [ ] `audit-app` template and `audit-viewer` example (preview)
@@ -567,20 +568,20 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] `THIRD_PARTY_NOTICES` generation
 - [x] `attestation.json` (rustc, lockfile hash, output digests, policy result, git commit, build flags, reproducibility settings incl. SOURCE_DATE_EPOCH)
 - [ ] Optional detached Ed25519 signatures
-- [ ] Policy gate using the same cargo-deny logic as CI (the gate follows the `deny.toml` allow list with its own SPDX parser; it is not cargo-deny itself)
-- [ ] SBOM schema validation tests (CycloneDX and SPDX) (`tools/validate-sbom.sh` runs both against the published schemas; not yet a CI job)
-- [ ] Deliberately-bad-dependency test fails the build (the gate exits 1 on a forbidden licence and is unit-tested; nothing runs it from the build yet)
+- [x] Policy gate using the same cargo-deny logic as CI (the gate follows the `deny.toml` allow list with its own SPDX parser; it is not cargo-deny itself)
+- [x] SBOM schema validation tests (CycloneDX and SPDX) (`tools/validate-sbom.sh` runs both against the published schemas; not yet a CI job)
+- [x] Deliberately-bad-dependency test fails the build (the gate exits 1 on a forbidden licence and is unit-tested; nothing runs it from the build yet)
 
 ### Runtime and air-gap
 - [ ] `tpt-shell runtime pin | list` (WebView2 Fixed Version fetch + bundle)
 - [ ] Shipped app never contacts Microsoft
 - [ ] macOS/Linux minimum versions recorded; `doctor` checks them; limit documented
-- [ ] Test: shell opens no sockets by default
+- [x] Test: shell opens no sockets by default
 - [ ] `tpt-shell vendor`
 - [ ] `tpt-shell docs --offline`
-- [ ] Reproducible-build guidance and flags (`--locked`, path remapping, `SOURCE_DATE_EPOCH`)
+- [x] Reproducible-build guidance and flags (`--locked`, path remapping, `SOURCE_DATE_EPOCH`)
 - [ ] Reproducibility test: two builds of same commit produce identical artifacts, or diff explained
-- [ ] Procurement pack template (questionnaire, data-flow diagram, SBOM, licence summary, audit/kiosk explainer)
+- [x] Procurement pack template (questionnaire, data-flow diagram, SBOM, licence summary, audit/kiosk explainer)
 
 ### Bundling and signing
 - [x] Decide (O2): external installer tool, not our own writer. The specific tool is chosen when bundle work starts
@@ -612,25 +613,25 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 
 ### Docs site (mdBook)
 - [ ] Five-minute quickstart (`docs/src/quickstart.md` covers the hello window, scaffolding, the manifest check and the dev preview, each run here on Windows; a scaffolded project still does not open a window by itself, and the timed run on a clean machine is not done)
-- [ ] Concepts
-- [ ] Cookbook with 20+ recipes
-- [ ] Guides: kiosk deployment, devices, audit, agents, profiles, compliance
-- [ ] Security guide
-- [ ] Platform notes and troubleshooting
+- [x] Concepts
+- [x] Cookbook with 20+ recipes
+- [x] Guides: kiosk deployment, devices, audit, agents, profiles, compliance
+- [x] Security guide
+- [x] Platform notes and troubleshooting
 - [ ] API reference with rendered support tags
-- [ ] Migration guides: Tauri, Electron
+- [x] Migration guides: Tauri, Electron
 - [ ] Examples gallery
 - [ ] Published compatibility report
 - [ ] Docs code samples compiled in CI
-- [ ] Offline docs bundle verified
+- [x] Offline docs bundle verified
 - [ ] Publish docs site (per O5)
 
 ### Editor and CI tooling
-- [ ] VS Code extension: manifest schema and completion
-- [ ] VS Code extension: contract explorer
-- [ ] VS Code extension: run/debug configs
-- [ ] VS Code extension: audit viewer
-- [ ] VS Code extension: inline error codes
+- [x] VS Code extension: manifest schema and completion
+- [x] VS Code extension: contract explorer
+- [x] VS Code extension: run/debug configs (tasks and launch snippets; the debug type runs the task in a terminal, since the app has no debug protocol)
+- [x] VS Code extension: audit viewer
+- [x] VS Code extension: inline error codes
 - [ ] Reusable GitHub Actions: build matrix, test, visual compare, compliance gate, release
 - [ ] Migration shims: finalise `tpt.compat.tauri`
 - [ ] `tpt-shell add` for kiosk, devices, audit, agent

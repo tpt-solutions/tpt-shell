@@ -50,3 +50,8 @@ cargo deny check
 - Use the PR template. Keep a PR to one logical change.
 - Update [CHANGELOG.md](CHANGELOG.md) under "Unreleased" for user-visible changes.
 - Tick the matching item in [todo.md](todo.md) when a task is finished.
+
+## Support tags and conformance
+
+- Every public API item states its support in its doc comment with a line that starts `Support:` and names `Full`, `Partial` (say what is missing) or `Unsupported` (returns `Error::Unsupported`). The docs build renders these tags from the source.
+- The conformance suite lives in `conformance/`, which is its own Cargo workspace. Run it with `cargo test --manifest-path conformance/Cargo.toml`. Checks that need a platform backend that is not built yet report as pending and do not fail. Set `TPT_CONFORMANCE_REQUIRE_PASS=1` to make pending checks fail.

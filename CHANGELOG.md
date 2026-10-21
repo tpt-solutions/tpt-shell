@@ -57,3 +57,28 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 - CLI: `tpt-shell dev` prints the served folder without the Windows `\?\` prefix.
 - `tpt-shell-test::a11y`: contrast ratio with the WCAG AA minimums and the large-text rule, a 24 px target-size check, and unnamed form inputs.
 - Audit: a seeded property test over signed chains with checkpoints. Byte flips, removed records and swapped records are all caught.
+- CI: conformance (Windows, macOS, Linux, with Xvfb), fuzz smoke, docs build with an offline check, template build, visual artifacts, benchmarks, and an optional aarch64 runner set (`ENABLE_ARM_RUNNERS`). The MSRV job runs the tests. Caching on every cargo job.
+- Conformance suite (`conformance/`, its own workspace): ten checks and fixture pages, with a compatibility report binary.
+- Docs tooling: a support-tag preprocessor (`tools/support-tags.py`) and a compile check for `rust,compile-check` code samples (`tools/doc-samples.py`).
+- CLI: `tpt-shell new` (vanilla and typescript templates), `tpt-shell build` (release build), `tpt-shell doctor` checks the deny.toml licence allow list, `tpt-shell add` writes `kiosk`, `devices`, `audit` or `agent` sections into the manifest and refuses a result that does not parse. `tpt-shell dev` reloads pages on change.
+- Devtools: the new `tpt-shell-devtools` crate, an overlay (Ctrl+Shift+D, debug builds only) with the IPC log, jobs, capabilities, audit tail, contract explorer and engine information.
+- Contract: `#[command]` supports async and job kinds, the `ui` and `agent` flags, and the `Contract` derive. Compile-fail tests cover misuse. Scoped `ScopedPath` and `DeviceId` types. `include_manifest!`.
+- Jobs: `#[command(job)]` with progress, cancel and typed TypeScript events.
+- JS runtime: opt-in normalisation shim (`tpt.normalize`), `tpt.compat.tauri` shim, `tpt.caps.apis`, and a generated mock backend.
+- Windows: transparent windows, drag regions (Partial), dark title bar, Mica, Acrylic and Tabbed backdrops, DevTools toggle (refused in release builds), colour scheme driven through WebView2, message box, multi-select open dialog, off-screen window restore, and profile folder mapping.
+- Profiles: `switch` and encrypted `export` (ChaCha20-Poly1305, PBKDF2-HMAC-SHA256 with 600,000 iterations). Quotas and a file-level isolation test.
+- Kiosk: single-app policy, a Windows low-level keyboard hook, crash-recovery decisions, optional admin and health endpoints (features `admin-endpoint` and `health-endpoint`, off by default).
+- Supervisor: fault-injection tests, and `install` functions for LaunchAgent, systemd user units and Task Scheduler.
+- Devices: control transfers on the transport trait. Serial on Windows (COM), a TCP and UDP transport (feature `net-devices`, off by default), receipt and label printing, raw spooler printing (Windows through winspool; macOS and Linux through `lp`), and scanner, scale and customer-display parsers.
+- Test driver (feature `test-driver`), a file-based control channel with a per-run token. A PNG decoder for visual comparison. The accessibility rule engine adds focus order, keyboard traps, reduced motion and seeded fixtures.
+- Replay: format version 2 with assets and clock and random-number kinds, the in-page shim for time and randomness, a player, and a bug-report bundle with redaction. Version 1 files still read.
+- Audit: keys (checkpoint signer and key supplier traits), file anchors and syslog-style anchors, size-based rotation with chain continuity, and truncation detection when anchors are set.
+- Agent: `[agent]` profile parsing, invoke gated by profile, MCP over localhost HTTP with a token (feature `mcp-http`, off by default), and resources for the semantic tree and the audit tail.
+- Compliance: the licence gate reads `deny.toml`, `licenses.html` and THIRD_PARTY_NOTICES generators, detached Ed25519 signatures, and a test that the shell's dependency graph contains no network crate.
+- Error codes registered: TS0100 to TS0122 (audit, agent, licence gate), TS0301 to TS0305 (test driver).
+- macOS (not run on a Mac yet): WKWebView window, scheme handler for `app://`, script message bridge, frameless and transparent windows. The rest of the macOS backend is open.
+- Linux (not run on Linux yet): GTK3 and WebKit2GTK 4.1 loaded at run time, notifications, Secret Service keystore, AT-SPI dump, and X11 hotkeys, the D-Bus features behind feature `dbus` (off by default). Single instance uses a lock file instead of a socket.
+
+### Changed
+- Linux single instance uses an advisory lock file and a message drop instead of a UNIX socket. No socket is opened.
+- Test driver and replay crates pin their path dependency versions, so `cargo deny` bans pass.

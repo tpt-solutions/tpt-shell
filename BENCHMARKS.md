@@ -40,3 +40,5 @@ Method: start `tpt-shell-supervisor -- supervisor-child beat` (release builds), 
 - Blob channel throughput (budget ≥ 50 MB/s).
 - Idle shell memory (budget ≤ 25 MB) and supervisor idle memory (budget ≤ 5 MB).
 - macOS and Linux builds.
+
+The benchmark run is scripted in `tools/run-benchmarks.sh`. Use it so every result follows the same method.
