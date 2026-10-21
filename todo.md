@@ -270,6 +270,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ### Windows baseline features (first pass)
 - [ ] Multiple windows, parent/child, modal, frameless, always-on-top, transparent (multiple windows, parent/child, modal, frameless and always-on-top work on Windows and are tested; transparency is still `Unsupported`)
 - [ ] Dialogs (open, save, message, folder) via IFileDialog (open, save and folder dialogs are built with hand-written vtables checked against the SDK header; they are never shown in tests, and multi-select and the message box are not built)
+- [x] App builder in the facade (`tpt_shell::App`): windows, grants and commands; each window's page messages go through the capability-checked router with that window's grants; consent is refused until the native dialog exists; a runtime test runs an app end to end. Windows only, with `App::loader` set explicitly. Still missing: `#[command]`, `commands![]`, `embed_dir!` (serving app assets), async handlers and the worker pool, and the app-origin serving that gives pages the virtual origin
 - [x] Clipboard (text first): `tpt-shell-platform-windows::clipboard`, restores the user's clipboard in its test
 - [ ] Window state restore, fullscreen, multi-monitor
 
