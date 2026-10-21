@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
+use tpt_shell_manifest::AuditSettings;
 
 /// `prev` of the first record.
 pub const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -55,6 +56,17 @@ pub struct Policy {
     pub store_params: bool,
     /// Object keys whose values are replaced with [`REDACTED`], at any depth.
     pub redact_keys: Vec<String>,
+}
+
+/// The `[audit]` section of the manifest decides what the writer keeps, so its settings map
+/// one-to-one onto a [`Policy`]. Both default to keeping only the hash.
+impl From<&AuditSettings> for Policy {
+    fn from(settings: &AuditSettings) -> Self {
+        Policy {
+            store_params: settings.store_params,
+            redact_keys: settings.redact.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -697,6 +709,22 @@ mod tests {
         let record: Value = serde_json::from_str(text.trim()).unwrap();
         let expected = sha256_hex(canonical(&entry(1).params).as_bytes());
         assert_eq!(record["params_sha256"], Value::String(expected));
+    }
+
+    #[test]
+    fn manifest_audit_settings_map_onto_the_policy() {
+        assert_eq!(Policy::from(&AuditSettings::default()), Policy::default());
+        let settings = AuditSettings {
+            store_params: true,
+            redact: vec!["password".into()],
+        };
+        assert_eq!(
+            Policy::from(&settings),
+            Policy {
+                store_params: true,
+                redact_keys: vec!["password".into()],
+            }
+        );
     }
 
     #[test]
