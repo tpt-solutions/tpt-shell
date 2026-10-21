@@ -11,7 +11,7 @@
 
 use serde_json::{json, Map};
 
-pub use router::{encode, CommandError, Router};
+pub use router::{encode, Caller, CommandError, Router, Target};
 pub use serde_json::Value;
 
 pub mod blob;

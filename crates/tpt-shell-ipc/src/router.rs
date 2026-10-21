@@ -10,6 +10,8 @@ use std::time::Duration;
 
 use serde_json::json;
 
+use tpt_shell_capabilities::{ConsentPrompt, Decision, Engine};
+
 use crate::rate_limit::RateLimiter;
 use crate::schema::{self, validate, Schema};
 use crate::{
@@ -47,6 +49,45 @@ type Handler = Box<dyn Fn(&Value) -> Result<Value, CommandError>>;
 #[derive(Default)]
 pub struct Router {
     handlers: HashMap<String, Handler>,
+    guards: HashMap<String, Guard>,
+}
+
+/// What a guarded command acts on, read from its arguments and checked against the caller's
+/// grant. [`Target::None`] matches only an unrestricted grant.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    None,
+    Path(String),
+    Device(String),
+    Url(String),
+    Bytes(u64),
+}
+
+impl Target {
+    fn as_request(&self) -> tpt_shell_capabilities::Request<'_> {
+        use tpt_shell_capabilities::Request;
+        match self {
+            Target::None => Request::None,
+            Target::Path(path) => Request::Path(path),
+            Target::Device(device) => Request::Device(device),
+            Target::Url(url) => Request::Url(url),
+            Target::Bytes(n) => Request::Bytes(*n),
+        }
+    }
+}
+
+/// Who sent a message. Grants are per window and per origin, so both are needed to check one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Caller {
+    pub window: String,
+    pub origin: String,
+}
+
+type TargetOf = Box<dyn Fn(&Value) -> Target>;
+
+struct Guard {
+    capability: String,
+    target_of: TargetOf,
 }
 
 impl Router {
@@ -60,7 +101,28 @@ impl Router {
         cmd: &str,
         handler: impl Fn(&Value) -> Result<Value, CommandError> + 'static,
     ) {
+        self.guards.remove(cmd);
         self.handlers.insert(cmd.to_string(), Box::new(handler));
+    }
+
+    /// Registers `handler` for `cmd`, behind `capability`. `target_of` reads what the call acts
+    /// on from its arguments. Only [`Router::handle_authorized`] runs a guarded command; the
+    /// unauthorized entry points refuse it.
+    pub fn register_guarded(
+        &mut self,
+        cmd: &str,
+        capability: &str,
+        target_of: impl Fn(&Value) -> Target + 'static,
+        handler: impl Fn(&Value) -> Result<Value, CommandError> + 'static,
+    ) {
+        self.handlers.insert(cmd.to_string(), Box::new(handler));
+        self.guards.insert(
+            cmd.to_string(),
+            Guard {
+                capability: capability.to_string(),
+                target_of: Box::new(target_of),
+            },
+        );
     }
 
     /// Registers `handler` for `cmd`, guarded by `schema`. The arguments are checked first; a
@@ -112,7 +174,35 @@ impl Router {
         encode(&value)
     }
 
+    /// Like [`Router::handle`], but the message comes from `caller` and every command is
+    /// capability-checked: the grant for `caller` must allow the call before its handler runs.
+    /// A `consent` grant asks `prompt` the first time and then remembers the answer.
+    pub fn handle_authorized(
+        &self,
+        caller: &Caller,
+        engine: &mut Engine,
+        prompt: &mut dyn ConsentPrompt,
+        bytes: &[u8],
+        limits: &Limits,
+    ) -> String {
+        let value = match parse_request(bytes, limits) {
+            Ok(request) => self.dispatch_authorized(&request, caller, engine, prompt),
+            Err(err) => parse_error_response(&err),
+        };
+        encode(&value)
+    }
+
     fn dispatch(&self, request: &Request) -> Value {
+        if self.guards.contains_key(&request.cmd) {
+            return err_response(
+                request.id,
+                "CAP_NO_GRANT",
+                &format!(
+                    "`{}` needs a window and origin; it cannot run without them",
+                    request.cmd
+                ),
+            );
+        }
         match self.handlers.get(&request.cmd) {
             None => err_response(
                 request.id,
@@ -121,16 +211,65 @@ impl Router {
             ),
             Some(handler) => match handler(&request.args) {
                 Ok(data) => ok_response(request.id, data),
-                Err(err) => {
-                    let mut response = err_response(request.id, &err.code, &err.message);
-                    if let Some(details) = err.details {
-                        response["error"]["details"] = details;
-                    }
-                    response
-                }
+                Err(err) => error_response(request.id, &err),
             },
         }
     }
+
+    fn dispatch_authorized(
+        &self,
+        request: &Request,
+        caller: &Caller,
+        engine: &mut Engine,
+        prompt: &mut dyn ConsentPrompt,
+    ) -> Value {
+        let Some(handler) = self.handlers.get(&request.cmd) else {
+            return err_response(
+                request.id,
+                "IPC_UNKNOWN_COMMAND",
+                &format!("no command named `{}`", request.cmd),
+            );
+        };
+        let Some(guard) = self.guards.get(&request.cmd) else {
+            return err_response(
+                request.id,
+                "CAP_NOT_DECLARED",
+                &format!(
+                    "`{}` declares no capability, so a page cannot call it",
+                    request.cmd
+                ),
+            );
+        };
+        let target = (guard.target_of)(&request.args);
+        let decision = engine.authorize(
+            prompt,
+            &caller.window,
+            &caller.origin,
+            &guard.capability,
+            target.as_request(),
+        );
+        match decision {
+            Decision::Allow => match handler(&request.args) {
+                Ok(data) => ok_response(request.id, data),
+                Err(err) => error_response(request.id, &err),
+            },
+            Decision::Deny(denial) => err_response(request.id, denial.code, &denial.message),
+            Decision::NeedsConsent => err_response(
+                request.id,
+                "CAP_CONSENT_DECLINED",
+                "the user has not answered the consent prompt",
+            ),
+        }
+    }
+}
+
+/// The error response for a failed command, with its details when it has some.
+fn error_response(id: u64, err: &CommandError) -> Value {
+    let mut response = err_response(id, &err.code, &err.message);
+    if let Some(details) = &err.details {
+        response["error"]["details"] = details.clone();
+    }
+    response
 }
 
 /// Serializes a response value to the text sent over the wire.
@@ -309,5 +448,283 @@ mod tests {
         r.register("x", |_| Ok(json!(1)));
         r.register("x", |_| Ok(json!(2)));
         assert_eq!(reply(&r, r#"{"v":1,"id":1,"cmd":"x"}"#)["data"], 2);
+    }
+}
+
+#[cfg(test)]
+mod authorized_tests {
+    use super::*;
+    use serde_json::json;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use tpt_shell_capabilities::{Grant, Scope};
+
+    /// Answers consent prompts with `answer` and counts how many times it was asked.
+    struct Ask {
+        answer: bool,
+        asked: usize,
+    }
+
+    impl ConsentPrompt for Ask {
+        fn ask(&mut self, _window: &str, _capability: &str) -> bool {
+            self.asked += 1;
+            self.answer
+        }
+    }
+
+    fn caller(window: &str) -> Caller {
+        Caller {
+            window: window.into(),
+            origin: "https://tpt-app.localhost".into(),
+        }
+    }
+
+    fn grant(window: &str, scope: Scope, consent: bool) -> Grant {
+        Grant {
+            capability: "fs.read".into(),
+            window: window.into(),
+            origin: "https://tpt-app.localhost".into(),
+            scope,
+            consent,
+        }
+    }
+
+    /// A router with one guarded command, `read`, that counts its calls.
+    fn router(calls: Rc<Cell<u32>>) -> Router {
+        let mut r = Router::new();
+        r.register_guarded(
+            "read",
+            "fs.read",
+            |args| match args["path"].as_str() {
+                Some(path) => Target::Path(path.to_string()),
+                None => Target::None,
+            },
+            move |_| {
+                calls.set(calls.get() + 1);
+                Ok(json!("contents"))
+            },
+        );
+        r.register("unguarded", |_| Ok(json!(null)));
+        r
+    }
+
+    fn send(r: &Router, engine: &mut Engine, prompt: &mut Ask, window: &str, msg: &str) -> Value {
+        let text = r.handle_authorized(
+            &caller(window),
+            engine,
+            prompt,
+            msg.as_bytes(),
+            &Limits::default(),
+        );
+        serde_json::from_str(&text).unwrap()
+    }
+
+    const READ_IN_SCOPE: &str =
+        r#"{"v":1,"id":1,"cmd":"read","args":{"path":"C:/data/notes.txt"}}"#;
+
+    #[test]
+    fn an_in_scope_call_runs_the_handler() {
+        let calls = Rc::new(Cell::new(0));
+        let r = router(calls.clone());
+        let mut engine = Engine::new();
+        engine
+            .add_grant(grant("main", Scope::Paths(vec!["C:/data".into()]), false))
+            .unwrap();
+        let v = send(
+            &r,
+            &mut engine,
+            &mut Ask {
+                answer: true,
+                asked: 0,
+            },
+            "main",
+            READ_IN_SCOPE,
+        );
+        assert_eq!(v["ok"], true);
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn an_out_of_scope_call_is_refused_before_the_handler() {
+        let calls = Rc::new(Cell::new(0));
+        let r = router(calls.clone());
+        let mut engine = Engine::new();
+        engine
+            .add_grant(grant("main", Scope::Paths(vec!["C:/data".into()]), false))
+            .unwrap();
+        let msg = r#"{"v":1,"id":2,"cmd":"read","args":{"path":"C:/secrets/key"}}"#;
+        let v = send(
+            &r,
+            &mut engine,
+            &mut Ask {
+                answer: true,
+                asked: 0,
+            },
+            "main",
+            msg,
+        );
+        assert_eq!(v["error"]["code"], "CAP_OUT_OF_SCOPE");
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn a_grant_belongs_to_one_window() {
+        let calls = Rc::new(Cell::new(0));
+        let r = router(calls.clone());
+        let mut engine = Engine::new();
+        engine
+            .add_grant(grant("main", Scope::Unrestricted, false))
+            .unwrap();
+        let v = send(
+            &r,
+            &mut engine,
+            &mut Ask {
+                answer: true,
+                asked: 0,
+            },
+            "other",
+            READ_IN_SCOPE,
+        );
+        assert_eq!(v["error"]["code"], "CAP_NO_GRANT");
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn a_call_without_a_target_needs_an_unrestricted_grant() {
+        let calls = Rc::new(Cell::new(0));
+        let r = router(calls.clone());
+        let mut engine = Engine::new();
+        engine
+            .add_grant(grant("main", Scope::Paths(vec!["C:/data".into()]), false))
+            .unwrap();
+        let msg = r#"{"v":1,"id":3,"cmd":"read","args":{}}"#;
+        let v = send(
+            &r,
+            &mut engine,
+            &mut Ask {
+                answer: true,
+                asked: 0,
+            },
+            "main",
+            msg,
+        );
+        assert_eq!(v["error"]["code"], "CAP_BAD_REQUEST");
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn a_guarded_command_cannot_run_through_the_unauthorized_entry_point() {
+        let calls = Rc::new(Cell::new(0));
+        let r = router(calls.clone());
+        let v: Value =
+            serde_json::from_str(&r.handle(READ_IN_SCOPE.as_bytes(), &Limits::default())).unwrap();
+        assert_eq!(v["error"]["code"], "CAP_NO_GRANT");
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn a_command_without_a_capability_is_refused_on_the_authorized_path() {
+        let calls = Rc::new(Cell::new(0));
+        let r = router(calls);
+        let mut engine = Engine::new();
+        let msg = r#"{"v":1,"id":4,"cmd":"unguarded"}"#;
+        let v = send(
+            &r,
+            &mut engine,
+            &mut Ask {
+                answer: true,
+                asked: 0,
+            },
+            "main",
+            msg,
+        );
+        assert_eq!(v["error"]["code"], "CAP_NOT_DECLARED");
+    }
+
+    #[test]
+    fn a_consent_grant_asks_once_and_then_remembers_the_answer() {
+        let calls = Rc::new(Cell::new(0));
+        let r = router(calls.clone());
+        let mut engine = Engine::new();
+        engine
+            .add_grant(grant("main", Scope::Unrestricted, true))
+            .unwrap();
+        let mut prompt = Ask {
+            answer: true,
+            asked: 0,
+        };
+        assert_eq!(
+            send(&r, &mut engine, &mut prompt, "main", READ_IN_SCOPE)["ok"],
+            true
+        );
+        assert_eq!(
+            send(&r, &mut engine, &mut prompt, "main", READ_IN_SCOPE)["ok"],
+            true
+        );
+        assert_eq!(prompt.asked, 1);
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn a_declined_consent_refuses_the_call() {
+        let calls = Rc::new(Cell::new(0));
+        let r = router(calls.clone());
+        let mut engine = Engine::new();
+        engine
+            .add_grant(grant("main", Scope::Unrestricted, true))
+            .unwrap();
+        let mut prompt = Ask {
+            answer: false,
+            asked: 0,
+        };
+        let v = send(&r, &mut engine, &mut prompt, "main", READ_IN_SCOPE);
+        assert_eq!(v["error"]["code"], "CAP_CONSENT_DECLINED");
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn handler_errors_keep_their_details_on_the_authorized_path() {
+        let mut r = Router::new();
+        r.register_guarded(
+            "quota",
+            "fs.read",
+            |_| Target::None,
+            |_| Err(CommandError::new("APP_QUOTA", "over").with_details(json!({ "used": 9 }))),
+        );
+        let mut engine = Engine::new();
+        engine
+            .add_grant(grant("main", Scope::Unrestricted, false))
+            .unwrap();
+        let msg = r#"{"v":1,"id":5,"cmd":"quota"}"#;
+        let v = send(
+            &r,
+            &mut engine,
+            &mut Ask {
+                answer: true,
+                asked: 0,
+            },
+            "main",
+            msg,
+        );
+        assert_eq!(v["error"]["details"], json!({ "used": 9 }));
+    }
+
+    #[test]
+    fn registering_a_command_again_without_a_capability_removes_its_guard() {
+        let calls = Rc::new(Cell::new(0));
+        let mut r = router(calls.clone());
+        r.register("read", |_| Ok(json!("open")));
+        let mut engine = Engine::new();
+        let v = send(
+            &r,
+            &mut engine,
+            &mut Ask {
+                answer: true,
+                asked: 0,
+            },
+            "main",
+            READ_IN_SCOPE,
+        );
+        assert_eq!(v["error"]["code"], "CAP_NOT_DECLARED");
     }
 }
