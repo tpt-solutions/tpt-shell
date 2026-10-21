@@ -967,7 +967,7 @@ mod runtime_tests {
     /// page posts "ping", Rust replies "pong", and the page sets its title to "got-pong".
     #[test]
     fn serves_virtual_host_and_round_trips_a_message() {
-        let Some(loader_path) = runtime_test_loader() else {
+        let Some((loader_path, _serial)) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -1057,7 +1057,7 @@ mod runtime_tests {
     /// Navigations outside the app origin are cancelled before they start, and the page stays put.
     #[test]
     fn blocks_navigation_outside_the_app_origin() {
-        let Some(loader_path) = runtime_test_loader() else {
+        let Some((loader_path, _serial)) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -1181,7 +1181,7 @@ mod runtime_tests {
     /// unknown command answers with a typed error. Both come back through the message channel.
     #[test]
     fn shim_invokes_a_rust_command_and_receives_a_typed_error() {
-        let Some(loader_path) = runtime_test_loader() else {
+        let Some((loader_path, _serial)) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -1299,7 +1299,7 @@ mod runtime_tests {
     /// `app.js`, sets the title, so the title proves the embedded file was fetched and run.
     #[test]
     fn serves_embedded_assets_from_the_app_origin() {
-        let Some(loader_path) = runtime_test_loader() else {
+        let Some((loader_path, _serial)) = runtime_test_loader() else {
             return;
         };
         assert!(
@@ -1399,7 +1399,7 @@ mod runtime_tests {
     /// return to their starting counts. This checks that the COM references balance (spec R3).
     #[test]
     fn controller_cycles_do_not_leak() {
-        let Some(loader_path) = runtime_test_loader() else {
+        let Some((loader_path, _serial)) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -1484,7 +1484,7 @@ mod runtime_tests {
     /// An iframe pointing outside the app origin is cancelled. The top-level app page still loads.
     #[test]
     fn blocks_frame_navigation_outside_the_app_origin() {
-        let Some(loader_path) = runtime_test_loader() else {
+        let Some((loader_path, _serial)) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -1607,7 +1607,7 @@ mod runtime_tests {
     /// failure, the callback reloads the page, and the page loads again.
     #[test]
     fn renderer_crash_is_reported_and_the_page_reloads() {
-        let Some(loader_path) = runtime_test_loader() else {
+        let Some((loader_path, _serial)) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -1743,7 +1743,7 @@ mod runtime_tests {
 
     #[test]
     fn page_csp_blocks_inline_script_and_allows_the_app_script() {
-        let Some(loader_path) = runtime_test_loader() else {
+        let Some((loader_path, _serial)) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -1837,7 +1837,7 @@ mod runtime_tests {
 
     #[test]
     fn devtools_and_context_menu_settings_round_trip() {
-        let Some(loader_path) = runtime_test_loader() else {
+        let Some((loader_path, _serial)) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
@@ -1863,7 +1863,7 @@ mod runtime_tests {
 
     #[test]
     fn renders_html_and_reads_title() {
-        let Some(loader_path) = runtime_test_loader() else {
+        let Some((loader_path, _serial)) = runtime_test_loader() else {
             return;
         };
         // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.

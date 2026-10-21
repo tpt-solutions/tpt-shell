@@ -26,7 +26,7 @@ const PAGE: &str = r#"<!doctype html><title>start</title><script>
 
 #[test]
 fn an_app_window_calls_a_guarded_command_and_gets_the_reply() {
-    let Some(loader) = runtime_test_loader() else {
+    let Some((loader, _serial)) = runtime_test_loader() else {
         return;
     };
     let dir = std::env::temp_dir().join(format!("tpt-app-runtime-{}", std::process::id()));

@@ -125,9 +125,18 @@ pub fn interactive_desktop_available() -> bool {
     true
 }
 
-/// Loader path for tests that need a real WebView2 runtime. Returns `None`, after saying why,
-/// when `TPT_WEBVIEW2_LOADER` is unset or there is no interactive desktop (RFC 0001, question 3).
-pub fn runtime_test_loader() -> Option<OsString> {
+/// One runtime test at a time per process. Each runtime test starts WebView2 on its own thread
+/// and pumps messages until a condition holds; run together, they competed for the runtime and
+/// some timed out.
+static RUNTIME_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Loader path for tests that need a real WebView2 runtime, and the lock that keeps the other
+/// runtime tests out while the caller holds it. Returns `None`, after saying why, when
+/// `TPT_WEBVIEW2_LOADER` is unset or there is no interactive desktop (RFC 0001, question 3).
+pub fn runtime_test_loader() -> Option<(OsString, std::sync::MutexGuard<'static, ()>)> {
+    let serial = RUNTIME_SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let Some(path) = std::env::var_os("TPT_WEBVIEW2_LOADER") else {
         eprintln!("skipped: set TPT_WEBVIEW2_LOADER to run this test");
         return None;
@@ -136,7 +145,7 @@ pub fn runtime_test_loader() -> Option<OsString> {
         eprintln!("skipped: no interactive desktop in this session");
         return None;
     }
-    Some(path)
+    Some((path, serial))
 }
 
 unsafe extern "system" fn wnd_proc(

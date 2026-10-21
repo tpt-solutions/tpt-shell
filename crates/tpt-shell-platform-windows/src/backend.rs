@@ -1059,11 +1059,17 @@ mod tests {
             unsafe { GetWindowLongPtrW(id.0 as HWND, GWL_STYLE) as u32 }
         }
 
-        fn start(name: &str) -> Option<(WindowsBackend, std::path::PathBuf)> {
-            let loader = runtime_test_loader()?;
+        fn start(
+            name: &str,
+        ) -> Option<(
+            WindowsBackend,
+            std::path::PathBuf,
+            std::sync::MutexGuard<'static, ()>,
+        )> {
+            let (loader, serial) = runtime_test_loader()?;
             let dir = data_dir(name);
             let backend = WindowsBackend::new(Path::new(&loader), &dir).expect("backend");
-            Some((backend, dir))
+            Some((backend, dir, serial))
         }
 
         /// A page that asks for a file in scope, then one out of scope, and shows each reply in
@@ -1096,7 +1102,7 @@ mod tests {
             use tpt_shell_capabilities::{Engine, Grant, Scope};
             use tpt_shell_ipc::{Caller, Limits, Router, Target};
 
-            let Some((mut b, dir)) = start("messages") else {
+            let Some((mut b, dir, _serial)) = start("messages") else {
                 return;
             };
             let reads = Rc::new(Cell::new(0u32));
@@ -1174,7 +1180,7 @@ mod tests {
 
         #[test]
         fn creates_a_window_and_renders_html() {
-            let Some((mut b, dir)) = start("render") else {
+            let Some((mut b, dir, _serial)) = start("render") else {
                 return;
             };
             let id = b.create(&spec("main")).expect("create");
@@ -1196,7 +1202,7 @@ mod tests {
 
         #[test]
         fn eval_runs_script_in_the_page() {
-            let Some((mut b, dir)) = start("eval") else {
+            let Some((mut b, dir, _serial)) = start("eval") else {
                 return;
             };
             let id = b.create(&spec("main")).expect("create");
@@ -1219,7 +1225,7 @@ mod tests {
 
         #[test]
         fn theme_is_applied_to_new_pages() {
-            let Some((mut b, dir)) = start("theme") else {
+            let Some((mut b, dir, _serial)) = start("theme") else {
                 return;
             };
             b.set_theme(Theme {
@@ -1250,7 +1256,7 @@ mod tests {
 
         #[test]
         fn an_invalid_theme_is_refused_and_the_old_one_stays() {
-            let Some((mut b, dir)) = start("bad-theme") else {
+            let Some((mut b, dir, _serial)) = start("bad-theme") else {
                 return;
             };
             let bad = Theme {
@@ -1265,7 +1271,7 @@ mod tests {
         #[test]
         fn modal_child_disables_its_owner_until_it_closes() {
             use windows_sys::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
-            let Some((mut b, dir)) = start("modal") else {
+            let Some((mut b, dir, _serial)) = start("modal") else {
                 return;
             };
             let main = b.create(&spec("main")).expect("main");
@@ -1314,7 +1320,7 @@ mod tests {
 
         #[test]
         fn navigation_outside_the_app_origin_is_refused() {
-            let Some((mut b, dir)) = start("nav") else {
+            let Some((mut b, dir, _serial)) = start("nav") else {
                 return;
             };
             let id = b.create(&spec("main")).expect("create");
@@ -1326,7 +1332,7 @@ mod tests {
 
         #[test]
         fn frameless_topmost_and_fullscreen_change_the_window_state() {
-            let Some((mut b, dir)) = start("chrome") else {
+            let Some((mut b, dir, _serial)) = start("chrome") else {
                 return;
             };
             let id = b.create(&spec("main")).expect("create");
@@ -1369,7 +1375,7 @@ mod tests {
 
         #[test]
         fn close_hide_keeps_the_window_and_default_close_destroys_it() {
-            let Some((mut b, dir)) = start("close") else {
+            let Some((mut b, dir, _serial)) = start("close") else {
                 return;
             };
             let kept = b.create(&spec("kept")).expect("create kept");
@@ -1401,7 +1407,7 @@ mod tests {
 
         #[test]
         fn proxy_tasks_run_on_the_ui_thread() {
-            let Some((b, dir)) = start("proxy") else {
+            let Some((b, dir, _serial)) = start("proxy") else {
                 return;
             };
             let ui = unsafe { GetCurrentThreadId() };
@@ -1429,7 +1435,7 @@ mod tests {
 
         #[test]
         fn quit_ends_the_message_loop() {
-            let Some((mut b, dir)) = start("quit") else {
+            let Some((mut b, dir, _serial)) = start("quit") else {
                 return;
             };
             let proxy = b.proxy();
