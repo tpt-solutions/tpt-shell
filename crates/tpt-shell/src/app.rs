@@ -183,6 +183,21 @@ impl App {
         self
     }
 
+    /// Writes command calls to the audit log at `log`, with the storage and redaction rules from
+    /// the `[audit]` section of the manifest at `manifest` (spec §10.3). A manifest without that
+    /// section keeps only the hashes. Fails when the manifest cannot be read or parsed.
+    pub fn manifest_audit(
+        mut self,
+        manifest: &std::path::Path,
+        log: impl Into<PathBuf>,
+    ) -> Result<Self> {
+        let text = std::fs::read_to_string(manifest)
+            .map_err(|e| Error::Backend(format!("cannot read {}: {e}", manifest.display())))?;
+        let parsed = tpt_shell_manifest::parse(&text).map_err(|e| Error::Backend(e.to_string()))?;
+        self.audit = Some((log.into(), Policy::from(&parsed.audit)));
+        Ok(self)
+    }
+
     /// Writes every command call from the app's pages to an audit log at `path` (spec §10.3).
     /// `policy` decides whether the parameters are kept; their hash is always kept.
     pub fn audit(mut self, path: impl Into<PathBuf>, policy: Policy) -> Self {
@@ -665,6 +680,41 @@ mod tests {
         );
         assert_eq!(denied.outcome, Outcome::Err("CAP_DENIED".into()));
         assert_eq!(denied.capability.as_deref(), Some("fs.read"));
+    }
+
+    #[test]
+    fn the_audit_section_of_the_manifest_sets_the_log_policy() {
+        let dir = std::env::temp_dir().join(format!("tpt-app-manifest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let manifest = dir.join("tpt-shell.toml");
+        std::fs::write(
+            &manifest,
+            "[app]\nname = \"demo\"\n[audit]\nstore_params = true\nredact = [\"password\"]\n",
+        )
+        .expect("write manifest");
+        let app = App::new()
+            .manifest_audit(&manifest, dir.join("audit.jsonl"))
+            .expect("manifest read");
+        assert_eq!(
+            app.audit,
+            Some((
+                dir.join("audit.jsonl"),
+                Policy {
+                    store_params: true,
+                    redact_keys: vec!["password".into()],
+                }
+            ))
+        );
+        let no_section = dir.join("plain.toml");
+        std::fs::write(&no_section, "[app]\nname = \"demo\"\n").expect("write");
+        let plain = App::new()
+            .manifest_audit(&no_section, "x.jsonl")
+            .expect("read");
+        assert_eq!(plain.audit.map(|(_, p)| p), Some(Policy::default()));
+        assert!(App::new()
+            .manifest_audit(&dir.join("missing.toml"), "x")
+            .is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(windows)]

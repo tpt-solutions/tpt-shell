@@ -623,6 +623,7 @@ dependencies = [
  "tpt-shell-core",
  "tpt-shell-ipc",
  "tpt-shell-macros",
+ "tpt-shell-manifest",
  "tpt-shell-platform-windows",
 ]
 
@@ -659,6 +660,7 @@ dependencies = [
  "tpt-shell-errors",
  "tpt-shell-ipc",
  "tpt-shell-manifest",
+ "tpt-shell-platform-windows",
 ]
 
 [[package]]
