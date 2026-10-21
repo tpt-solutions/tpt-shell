@@ -20,6 +20,7 @@ members = [
     "crates/tpt-shell-profiles",
     "crates/tpt-shell-replay",
     "crates/tpt-shell-supervisor",
+    "crates/tpt-shell-test",
 ]
 
 [workspace.package]

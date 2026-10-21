@@ -51,3 +51,5 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 - Capabilities: `FileConsent` keeps consent answers in a file, so a remembered answer survives a restart. It is not yet placed in the profile folder by the app.
 - Audit: `Signing::every_secs` writes a signed checkpoint after an entry once that many seconds have passed since the last checkpoint, alongside the entry-count interval.
 - CLI: `tpt-shell contract diff <old.json> <new.json>` lists each change as breaking or compatible for a caller built against the old contract. `contract check <new.json> --baseline <old.json>` lists only the breaking changes and exits 1 when there are any. The comparison is `tpt_shell_ipc::contract_diff`.
+- App: consent answers are kept in `consent.txt` in the window's data folder. A named profile keeps them, and an ephemeral session drops them when it ends.
+- `tpt-shell-test` (new crate): a screenshot comparer over raw RGBA, with a YIQ-weighted distance, ignore and per-region tolerance regions, and a changed-share threshold. PNG decoding and the CLI are not built.

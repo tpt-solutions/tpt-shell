@@ -206,6 +206,19 @@ fn resolve_data_dir(
     }
 }
 
+/// The consent answers for a window's data folder, kept in `consent.txt` there. Named profiles
+/// keep their answers; an ephemeral session drops them with its folder. If the file cannot be
+/// opened, the answers are kept in memory for this run, so the user is asked again next start.
+#[cfg(windows)]
+fn consent_store(data_dir: &Path) -> Box<dyn tpt_shell_capabilities::ConsentStore> {
+    use tpt_shell_capabilities::{FileConsent, MemoryConsent};
+    let _ = std::fs::create_dir_all(data_dir);
+    match FileConsent::open(data_dir.join("consent.txt")) {
+        Ok(store) => Box::new(store),
+        Err(_) => Box::new(MemoryConsent::default()),
+    }
+}
+
 /// The data folder for a profile under `local` (the user's local app data), and the guard for an
 /// ephemeral session. Named profiles live under `tpt-shell\<app>\profiles`.
 fn profile_data_dir(
@@ -573,7 +586,7 @@ impl App {
             None => None,
         };
 
-        let mut engine = Engine::new();
+        let mut engine = Engine::with_consent_store(consent_store(&data_dir));
         for grant in self.grants {
             engine.add_grant(grant).map_err(|e| Error::Backend(e.0))?;
         }
@@ -957,6 +970,21 @@ mod tests {
         drop(guard);
         assert!(!session.exists(), "the session folder was not wiped");
         let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn consent_answers_are_kept_in_the_profile_folder() {
+        let dir = std::env::temp_dir().join(format!("tpt-app-consent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        {
+            let mut store = consent_store(&dir);
+            store.set("main", "device.serial", true);
+        }
+        let reopened = consent_store(&dir);
+        assert_eq!(reopened.get("main", "device.serial"), Some(true));
+        assert!(dir.join("consent.txt").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

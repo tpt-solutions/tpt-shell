@@ -177,7 +177,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Compile-fail tests (trybuild-style, licence-checked or hand-rolled) (one bad option was checked by hand; no test suite yet)
 
 ### Contract and validation (tpt-shell-ipc)
-- [ ] Schema model: primitives with bounds, strings with max length/pattern, enums, structs, Option, Vec, string-key maps (all except regex patterns: strings use an allowed-character set instead)
+- [x] Schema model: primitives with bounds, strings with max length/pattern, enums, structs, Option, Vec, string-key maps (all except regex patterns: strings use an allowed-character set instead)
 - [ ] Scoped types: `ScopedPath`, `DeviceId`
 - [x] Validator: unknown fields rejected, bounds checked, scope checked before handler runs (`Router::register_guarded` names a capability and a target; `Router::handle_authorized` checks the window's grant before the handler, and the unauthorized entry points refuse guarded commands. On Windows, page messages reach a handler set with `set_message_handler`, and a runtime test runs a guarded command through `handle_authorized`. App-level wiring exists in the facade (see the App builder item). macOS and Linux do not receive page messages yet)
 - [x] `CmdError` with stable code, message, details (`CommandError::with_details` sends `error.details`; invalid args report the offending `path`)
@@ -371,7 +371,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] Secure erase (best-effort) with documented SSD/journaling limits (`wipe_dir` overwrites file contents before removal; the limits are in its doc comment)
 - [x] Quotas (`usage` and `enforce_quota`; not yet applied to a live WebView2 profile)
 - [ ] Profile manager API: create, list, switch, export (encrypted), delete (create, list and delete are done; switch and encrypted export are not)
-- [ ] Per-profile storage of consent decisions (`FileConsent` in `tpt-shell-capabilities` keeps answers in a file and survives a restart; the app still uses the in-memory store, so it does not yet put the file in the profile folder)
+- [x] Per-profile storage of consent decisions (`FileConsent` in `tpt-shell-capabilities` keeps answers in `consent.txt` in the window's data folder, so a named profile keeps them and an ephemeral session drops them with its folder; an unreadable file falls back to memory)
 - [ ] Conformance: isolation (A writes invisible in B) and no-residue for ephemeral (file-level tests pass; no WebView2 storage conformance test yet)
 - [ ] Done: isolation and no-residue tests pass on all three OSes
 
@@ -473,10 +473,10 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Fuzz and security tests on control channel (R7)
 
 ### Visual diff
-- [ ] Own perceptual comparer with region masks and per-region tolerance
+- [x] Own perceptual comparer with region masks and per-region tolerance (`tpt-shell-test::visual`: raw RGBA input, YIQ-weighted distance, ignore and tolerance regions; PNG decoding and the CLI are not built)
 - [ ] `tpt-shell visual compare` merging artifacts from three CI jobs
 - [ ] HTML report
-- [ ] Threshold failures
+- [ ] Threshold failures (the comparer reports pass or fail against `max_changed_fraction`; no CLI or CI job fails on it yet)
 - [ ] WebView2 channels (stable/beta/canary) support on Windows
 - [x] Decide: visual baseline store implementation (O5): Git LFS in the repo
 
