@@ -21,5 +21,6 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 - Windows: app pages are served from the app origin (`https://tpt-app.localhost`) from a window's asset source, so grants match the page's real origin. The `data:` page path is kept only for shell-internal use.
 - `#[command(capability = "fs.read", target(path = "file"))]`: the grant's scope checks the named argument (path, device, url or bytes).
 - `#[command]`, `commands!`, `register_commands!` and `embed_dir!` are re-exported from `tpt_shell`. A command with `capability = ...` registers behind its grant, so it cannot run through the unauthorized entry point.
-- `tpt_shell::App` (Windows): `App::new().loader(...).asset("index.html", "text/html", ...).window(Window::new("main")).grant(...).command(...).run()`. Pages call guarded commands through the checked router; consent is refused until the native dialog exists.
+- Windows: a grant that needs consent asks the user in a native message box owned by the requesting window. The default answer is No.
+- `tpt_shell::App` (Windows): `App::new().loader(...).asset("index.html", "text/html", ...).window(Window::new("main")).grant(...).command(...).run()`. Pages call guarded commands through the checked router; a grant that needs consent asks in a native dialog.
 - IPC: commands can be registered behind a capability (`register_guarded`). `handle_authorized` checks the caller's window and origin grant before the handler runs, and asks for consent when a grant needs it. Guarded commands are refused on the unauthorized entry points.

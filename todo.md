@@ -179,7 +179,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ### Contract and validation (tpt-shell-ipc)
 - [ ] Schema model: primitives with bounds, strings with max length/pattern, enums, structs, Option, Vec, string-key maps (all except regex patterns: strings use an allowed-character set instead)
 - [ ] Scoped types: `ScopedPath`, `DeviceId`
-- [x] Validator: unknown fields rejected, bounds checked, scope checked before handler runs (`Router::register_guarded` names a capability and a target; `Router::handle_authorized` checks the window's grant before the handler, and the unauthorized entry points refuse guarded commands. On Windows, page messages reach a handler set with `set_message_handler`, and a runtime test runs a guarded command through `handle_authorized`. No app-level wiring yet: nothing installs a router, grants and consent prompt on a window by default, and macOS and Linux do not receive page messages)
+- [x] Validator: unknown fields rejected, bounds checked, scope checked before handler runs (`Router::register_guarded` names a capability and a target; `Router::handle_authorized` checks the window's grant before the handler, and the unauthorized entry points refuse guarded commands. On Windows, page messages reach a handler set with `set_message_handler`, and a runtime test runs a guarded command through `handle_authorized`. App-level wiring exists in the facade (see the App builder item). macOS and Linux do not receive page messages yet)
 - [x] `CmdError` with stable code, message, details (`CommandError::with_details` sends `error.details`; invalid args report the offending `path`)
 - [ ] Blob channel `app://__tpt/blob/<id>` (store, quota, id check and route parsing are in `tpt-shell-ipc::blob`; the platform does not serve the route yet)
 - [x] Stream channel with credit-based backpressure (`tpt-shell-ipc::stream`; not yet carried by a platform transport)
@@ -204,7 +204,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] Permission engine, default deny (`tpt-shell-capabilities`)
 - [x] Per-window and per-origin capabilities
 - [ ] Scopes: path globs, device identifiers, URL patterns, size caps (path roots, device IDs, URL prefixes and size caps are done; path globs are not)
-- [x] Native consent prompt abstraction (not web content): `ConsentPrompt` trait
+- [x] Native consent prompt abstraction (not web content): `ConsentPrompt` trait; the Windows implementation is a message box owned by the requesting window, default No (`tpt_shell_platform_windows::consent`). Its text is not localised yet, and macOS and Linux have no prompt
 - [x] Remember-per-profile hook (storage lands in M6): `ConsentStore` trait, in-memory store for now
 - [ ] Security tests: capability bypass, path-scope escapes (`..`, symlinks, UNC, case folding), oversized and malformed messages (`..`, UNC, device paths, ADS, reserved names, case folding, URL tricks, and size caps are tested; symlinks are not, since normalization is lexical)
 
@@ -270,7 +270,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ### Windows baseline features (first pass)
 - [ ] Multiple windows, parent/child, modal, frameless, always-on-top, transparent (multiple windows, parent/child, modal, frameless and always-on-top work on Windows and are tested; transparency is still `Unsupported`)
 - [ ] Dialogs (open, save, message, folder) via IFileDialog (open, save and folder dialogs are built with hand-written vtables checked against the SDK header; they are never shown in tests, and multi-select and the message box are not built)
-- [x] App builder in the facade (`tpt_shell::App`): windows, grants and commands; each window's page messages go through the capability-checked router with that window's grants; consent is refused until the native dialog exists; a runtime test runs an app end to end. Windows only, with `App::loader` set explicitly. Pages load from the app origin through `App::asset` (the old `Window::html` placed pages at a data: origin and is gone). Commands come from `#[command]` through `App::register`, and assets from `embed_dir!` through `App::assets`. Still missing: async handlers, jobs and streams, the worker pool, and `include_manifest!`
+- [x] App builder in the facade (`tpt_shell::App`): windows, grants and commands; each window's page messages go through the capability-checked router with that window's grants; a grant that needs consent asks in a native dialog owned by the window (default No); runtime tests run an app end to end, with the dialog answered Yes and No. Windows only, with `App::loader` set explicitly. Pages load from the app origin through `App::asset` (the old `Window::html` placed pages at a data: origin and is gone). Commands come from `#[command]` through `App::register`, and assets from `embed_dir!` through `App::assets`. Still missing: async handlers, jobs and streams, the worker pool, and `include_manifest!`
 - [x] Clipboard (text first): `tpt-shell-platform-windows::clipboard`, restores the user's clipboard in its test
 - [ ] Window state restore, fullscreen, multi-monitor
 
