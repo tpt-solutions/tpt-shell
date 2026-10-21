@@ -212,7 +212,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Entry model: seq, wall time, monotonic time, actor, command, capability, parameter hash, optional redacted params, outcome, duration
 - [x] Canonical JSON for hashing
 - [x] SHA-256 hash chain
-- [ ] Redaction policy from manifest (`[audit] store_params` and `redact` parse into `AuditSettings`, validated with the schema; the mapping to `tpt_shell_audit::Policy` is done as `Policy::from(&AuditSettings)`; `App::audit(path, policy)` writes each page command call to a log with that policy, but the app does not load the manifest yet, so the `[audit]` section still has to be passed in by hand)
+- [ ] Redaction policy from manifest (`[audit] store_params` and `redact` parse into `AuditSettings`, validated with the schema; the mapping to `tpt_shell_audit::Policy` is done as `Policy::from(&AuditSettings)`; `App::manifest_audit(manifest, log)` reads the `[audit]` section of the manifest and writes each page command call with its policy; `App::audit(path, policy)` takes a policy directly. Tested. The item stays open because a running app does not yet read the manifest's windows or other sections, and the `[audit]` section is read at build time only)
 - [x] Append-only file writer
 - [ ] Property tests for chain integrity (randomized and exhaustive single-byte tests exist; not a proptest suite)
 - [x] Golden tests for audit format
@@ -398,7 +398,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Idle RAM โค 5 MB measured (measured 2026-10-22 on Windows: private memory 3.2 MB, working set 7.0 MB while supervising a healthy child. The budget is met on private memory; the working set is larger because it counts shared system DLL pages. Which measure ยง13 means is still open)
 
 ### Boot integration and CLI
-- [ ] `tpt-shell install-service`: Task Scheduler/Startup entry, LaunchAgent, systemd user unit
+- [ ] `tpt-shell install-service`: Task Scheduler/Startup entry, LaunchAgent, systemd user unit (Windows: `tpt-shell install-service <name> <program>` and `uninstall-service` write a per-user `Run` entry; tested. Task Scheduler, LaunchAgent and systemd are not done)
 - [ ] `tpt-shell add kiosk`
 - [ ] `kiosk` template (preview, finalised in M11)
 
@@ -412,9 +412,9 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ## Phase M7 โ€” Device bridge, virtual devices, printers and scanners (ยง10.2)
 
 ### tpt-shell-devices core
-- [ ] `Transport` trait
+- [x] `Transport` trait (`tpt-shell-devices::transport`: write, read, and an error type with `Busy` for backpressure; control transfers are not in the trait yet)
 - [x] Device ID and scope types (vendor/product, port globs, host:port): `tpt-shell-devices::id`
-- [ ] API: `devices.list(filter)`, `open(id, options)`, read/write streams with backpressure, control transfers
+- [ ] API: `devices.list(filter)`, `open(id, options)`, read/write streams with backpressure, control transfers (`DeviceHub::list` and `open` check the scope and each device opens once; the `options` argument and control transfers are not built; backpressure is `DeviceError::Busy` on the serial loopback, not a stream)
 - [ ] Discovery and opt-in hotplug events
 
 ### Transports
@@ -438,18 +438,18 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Customer displays
 
 ### Security and audit
-- [ ] Capabilities `device.serial`, `device.hid`, `device.usb`, `device.net`, `device.print` with scopes
+- [ ] Capabilities `device.serial`, `device.hid`, `device.usb`, `device.net`, `device.print` with scopes (the hub takes a `DeviceScope` for each open; the capability engine does not hand scopes to it yet)
 - [ ] Native consent dialog on first use, remembered per profile
-- [ ] Audit every open, close, write
-- [ ] Payload logging off by default; hash-only or bytes per manifest
-- [ ] Security tests: scope escapes, bad device IDs
+- [x] Audit every open, close, write (`DeviceHub` reports each to its audit sink with the byte count; reads are not audited)
+- [x] Payload logging off by default; hash-only or bytes per manifest (only byte counts are logged; the option to log bytes or hashes per manifest is not built)
+- [ ] Security tests: scope escapes, bad device IDs (a scope cannot open another kind of device or a device outside its glob; bad IDs are refused by the parser. Symlink and device-path escapes do not apply to the virtual devices yet)
 
 ### Virtual devices
-- [ ] VirtualSerial
-- [ ] VirtualHid
-- [ ] VirtualPrinter (ESC/POS receipt preview)
-- [ ] VirtualScanner (scripted scans)
-- [ ] Selection by manifest or env var
+- [x] VirtualSerial (a loopback port with a capacity limit)
+- [x] VirtualHid (input and output reports, through a handle)
+- [x] VirtualPrinter (ESC/POS receipt preview: bold, alignment, feeds and cuts)
+- [x] VirtualScanner (scripted scans, sent as the text and a carriage return)
+- [ ] Selection by manifest or env var (`virtual_devices::from_spec` parses `kind@id;...`, meant for `TPT_VIRTUAL_DEVICES`; the environment variable is not read by the app and the manifest does not name devices yet)
 
 ### Docs, tags, CLI
 - [ ] Per-OS support tags (Windows Full, Linux Full, macOS Partial for reserved USB classes)
