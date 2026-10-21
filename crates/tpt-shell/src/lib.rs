@@ -3,5 +3,14 @@
 
 //! tpt-shell: a webview app shell for Rust.
 //!
-//! This is the facade crate. It is empty until milestone M1, when the public
-//! API starts to re-export the core crates.
+//! This is the facade crate. [`App`] is the entry point: it gathers windows, grants and
+//! commands, then starts them. Running today is Windows only; see [`app`].
+
+pub mod app;
+
+#[cfg(windows)]
+pub use app::Running;
+pub use app::{App, CommandError, Scope, Window};
+pub use tpt_shell_capabilities::Grant;
+pub use tpt_shell_core::{Error, Result};
+pub use tpt_shell_ipc::{Caller, Target, Value};
