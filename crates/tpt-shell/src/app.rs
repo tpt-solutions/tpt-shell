@@ -14,8 +14,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use std::time::Duration;
 #[cfg(windows)]
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
 use crate::blob;
@@ -148,6 +149,7 @@ pub struct KioskSettings {
 }
 
 /// Periodic saving of app state, and its restore at the next start.
+#[cfg_attr(not(windows), allow(dead_code))]
 struct SnapshotPlan {
     path: PathBuf,
     every: Duration,
@@ -221,6 +223,7 @@ fn consent_store(data_dir: &Path) -> Box<dyn tpt_shell_capabilities::ConsentStor
 
 /// The data folder for a profile under `local` (the user's local app data), and the guard for an
 /// ephemeral session. Named profiles live under `tpt-shell\<app>\profiles`.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn profile_data_dir(
     local: &Path,
     app: &str,
@@ -304,10 +307,21 @@ fn load_window_state(
 }
 
 /// Receives the id of a tray click or menu pick.
+#[cfg_attr(not(windows), allow(dead_code))]
 type TrayHandler = Box<dyn FnMut(u32)>;
 
+/// One item in the tray icon's context menu. The menu is shown on Windows only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuItem {
+    pub id: u32,
+    pub label: String,
+}
+
+/// The id a left click on the tray icon reports. Same value as the Windows `ACTIVATE`.
+pub const TRAY_ACTIVATE: u32 = 0;
+
 #[cfg(windows)]
-pub use tpt_shell_platform_windows::tray::{MenuItem, ACTIVATE as TRAY_ACTIVATE};
+const _: () = assert!(TRAY_ACTIVATE == tpt_shell_platform_windows::tray::ACTIVATE);
 
 impl App {
     pub fn new() -> Self {
@@ -499,6 +513,7 @@ impl App {
     }
 
     /// Starts the app and runs it until its last window closes or the app quits.
+    #[cfg_attr(not(windows), allow(unused_mut))]
     pub fn run(mut self) -> Result<()> {
         #[cfg(windows)]
         {
@@ -579,10 +594,19 @@ impl App {
                 .map_err(Error::Backend)?;
         }
         let tray = match self.tray {
-            Some((tooltip, items, on_select)) => Some(
-                tpt_shell_platform_windows::tray::Tray::new(&tooltip, items, on_select)
-                    .map_err(Error::Backend)?,
-            ),
+            Some((tooltip, items, on_select)) => {
+                let items = items
+                    .into_iter()
+                    .map(|item| tpt_shell_platform_windows::tray::MenuItem {
+                        id: item.id,
+                        label: item.label,
+                    })
+                    .collect();
+                Some(
+                    tpt_shell_platform_windows::tray::Tray::new(&tooltip, items, on_select)
+                        .map_err(Error::Backend)?,
+                )
+            }
             None => None,
         };
 
@@ -783,7 +807,8 @@ pub struct Running {
 }
 
 /// The capture function, shared by the periodic save and the save at exit.
-type SnapshotCapture = Rc<RefCell<Box<dyn FnMut() -> serde_json::Value>>>;
+#[cfg_attr(not(windows), allow(dead_code))]
+type SnapshotCapture =Rc<RefCell<Box<dyn FnMut() -> serde_json::Value>>>;
 
 /// How a launch relates to a single-instance app.
 #[cfg(windows)]

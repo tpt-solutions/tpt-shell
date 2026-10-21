@@ -281,14 +281,15 @@ mod tests {
         };
         let path = std::env::temp_dir().join(format!("tpt-dialog-{}.txt", std::process::id()));
         std::fs::write(&path, "x").unwrap();
+        // The temp dir may use an 8.3 short name (`RUNNER~1`) while the shell returns the long
+        // form, so compare against the canonical path with its `\\?\` prefix dropped.
+        let canonical = std::fs::canonicalize(&path).unwrap();
+        let expected = canonical.to_string_lossy().trim_start_matches(r"\\?\").to_lowercase();
         let back = path_round_trip(&path).expect("shell item round trip");
         let _ = std::fs::remove_file(&path);
         // SAFETY: balances the successful CoInitializeEx above.
         unsafe { windows_sys::Win32::System::Com::CoUninitialize() };
-        assert_eq!(
-            back.to_string_lossy().to_lowercase(),
-            path.to_string_lossy().to_lowercase()
-        );
+        assert_eq!(back.to_string_lossy().to_lowercase(), expected);
     }
 
     /// Method names of the interface declared with `decl`, in vtable order, including the

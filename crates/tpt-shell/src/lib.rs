@@ -13,7 +13,6 @@ pub mod blob;
 #[cfg(windows)]
 pub use app::Running;
 pub use app::{App, CommandError, Scope, Window};
-#[cfg(windows)]
 pub use app::{MenuItem, TRAY_ACTIVATE};
 pub use tpt_shell_capabilities::{ConsentPrompt, Engine, Grant};
 pub use tpt_shell_core::{Error, Result};
