@@ -53,7 +53,7 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 - CLI: `tpt-shell contract diff <old.json> <new.json>` lists each change as breaking or compatible for a caller built against the old contract. `contract check <new.json> --baseline <old.json>` lists only the breaking changes and exits 1 when there are any. The comparison is `tpt_shell_ipc::contract_diff`.
 - App: consent answers are kept in `consent.txt` in the window's data folder. A named profile keeps them, and an ephemeral session drops them when it ends.
 - `tpt-shell-test` (new crate): a screenshot comparer over raw RGBA, with a YIQ-weighted distance, ignore and per-region tolerance regions, and a changed-share threshold. PNG decoding and the CLI are not built.
-- Docs: the five-minute quickstart covers scaffolding, the manifest check and the dev preview. Each command was run. It stops before a native window, which needs an example that is not written yet.
+- Docs: the five-minute quickstart covers the hello window (`examples/hello`), scaffolding, the manifest check and the dev preview. Each command was run on Windows.
 - CLI: `tpt-shell dev` prints the served folder without the Windows `\?\` prefix.
 - `tpt-shell-test::a11y`: contrast ratio with the WCAG AA minimums and the large-text rule, a 24 px target-size check, and unnamed form inputs.
 - Audit: a seeded property test over signed chains with checkpoints. Byte flips, removed records and swapped records are all caught.

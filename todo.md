@@ -611,7 +611,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] rustvac port
 
 ### Docs site (mdBook)
-- [ ] Five-minute quickstart (`docs/src/quickstart.md` covers scaffolding, the manifest check and the dev preview, each run here; it stops before opening a window, which needs an App example that does not exist yet)
+- [ ] Five-minute quickstart (`docs/src/quickstart.md` covers the hello window, scaffolding, the manifest check and the dev preview, each run here on Windows; a scaffolded project still does not open a window by itself, and the timed run on a clean machine is not done)
 - [ ] Concepts
 - [ ] Cookbook with 20+ recipes
 - [ ] Guides: kiosk deployment, devices, audit, agents, profiles, compliance
