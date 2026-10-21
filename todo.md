@@ -218,7 +218,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Golden tests for audit format
 
 ### Security defaults (ยง9)
-- [ ] Only `app://` loaded; remote navigation blocked unless allowlisted per window
+- [ ] Only `app://` loaded; remote navigation blocked unless allowlisted per window (Windows enforces `[[windows]] allow_navigation` for top-level and frame navigations, with `https://` prefix matching at a host boundary, tested; the manifest value is parsed but no runtime reads it yet, since the shell does not create windows from the manifest; macOS and Linux not done)
 - [x] Strict CSP injected on `app://` responses (Windows: every response from the virtual origin carries `PAGE_CSP`, no inline script or style, verified by a runtime test; the origin is `https://tpt-app.localhost`, see the DEVIATION note above; macOS and Linux not done)
 - [ ] Devtools, context menu, view-source disabled in release (devtools and the default context menu are off in release builds on Windows, verified against WebView2 settings; view-source is not checked separately, and macOS and Linux are not done)
 - [ ] Release-build CSP override needs an audited manifest flag
