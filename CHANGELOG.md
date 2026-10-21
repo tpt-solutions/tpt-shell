@@ -12,6 +12,19 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 - CI skeleton: fmt, clippy, test on three operating systems, cargo-deny, SPDX header check.
 - `tpt-shell audit verify | export | view`: checks the hash chain (and checkpoint signatures with `--key`), exports verified logs as CSV or JSON Lines, and prints a short table.
 - `[audit]` manifest section: `store_params` and `redact`, validated against the published schema.
+- Windows: pages get `window.tpt` (the page runtime) in every window. Before this it was only added by tests.
+- Windows: the high contrast, reduced motion and reduced transparency settings reach the page as `data-` attributes. Open pages update them, and the colour scheme, when the user changes a setting.
+- `BENCHMARKS.md` with the method and the hello-world binary size (690 KiB, budget 4 MB).
+- `tpt-shell-kiosk` (new crate): a kiosk config that loads only with a valid Ed25519 signature, atomic state snapshots that restore on the next start, and an idle timer. The app does not use them yet.
+- `tpt-shell-supervisor`: runs the app as a child process with a heartbeat file, stops a run that stops beating or reaches its scheduled restart, restarts with backoff, gives up after a crash loop, and writes an alert (command or file) and a rotating log.
+- Windows: `App::tray(tooltip, items, on_select)` adds a notification-area icon. A left click reports `TRAY_ACTIVATE`, and a right-click menu pick reports the item's id.
+- Windows: `App::single_instance(id, on_forwarded)`. A later launch hands its arguments to the first instance and exits. `tpt_shell_platform_windows::single_instance` does the work (named mutex and `WM_COPYDATA`).
+- The page runtime has `tpt.on(event, handler)`, which returns an unsubscribe function, and `tpt.caps` (engine `webview2` and its version).
+- `App::audit(path, policy)` writes each command call from a page to a hash-chained audit log: window, command, capability, arguments (or only their hash), and outcome.
+- `tpt_shell::blob::put_blob(media_type, bytes)` (Windows): stores bytes and returns an app URL a page can `fetch`. Ids are random 128-bit values, and the store holds at most 64 MiB. `remove_blob` releases one.
+- `Router::capability_of(cmd)`: the capability a guarded command needs, used by the audit record.
+- `Running::emit(window, name, data)` sends an event to a window's page, which receives it through `tpt.on`. Events are not queued.
+- `[audit]` settings map onto the audit writer's policy (`Policy::from(&AuditSettings)`). No runtime writer uses the policy yet.
 - Command errors can carry structured `details`; invalid arguments report the offending path.
 - MSRV is Rust 1.90, set in the workspace manifest and measured on 1.90.0.
 - Windows: release builds turn off the developer tools and the right-click menu for each page window (debug builds keep them on).

@@ -114,7 +114,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] `WebviewBackend` trait, M1 subset: load html, navigate (app:// only), eval, post message, set_message_handler (page to shell; the default returns `Unsupported`, so macOS and Linux stay honest until they implement it; Windows and the fake implement it)
 - [x] `WebviewBackend` crash callback and reload (verified by a renderer crash through DevTools), intercept (WebResourceRequested), nav policy hooks, doc-start script
 - [ ] `WebviewBackend` remaining: snapshot, devtools toggle, profile binding, a11y tree (devtools and context menu are set per window at creation, release off, debug on; no runtime toggle is exposed yet)
-- [ ] `Platform` trait (menus, tray, dialogs, clipboard, notifications, deep links, single instance, theme/accent, keystore) (clipboard text and colour scheme are in `tpt-shell-core::platform` with Windows and fake implementations; the rest are not started)
+- [ ] `Platform` trait (menus, tray, dialogs, clipboard, notifications, deep links, single instance, theme/accent, keystore) (clipboard text and colour scheme are in `tpt-shell-core::platform` with Windows and fake implementations; single instance is in `tpt-shell-platform-windows::single_instance` (Windows only, named mutex and `WM_COPYDATA`, tested in one process and across two processes); the notification-area icon with a context menu is `tpt-shell-platform-windows::tray` and `App::tray` (Windows only; a left click and a menu pick are tested, a right click is not, since it needs a user; the icon is the default application icon); the rest are not started)
 - [x] `Clock` and `Rng` traits (system and fake/seeded implementations, unit tested)
 - [ ] Single UI thread model and `EventLoopProxy` (Send + Sync)
 - [x] Minimal built-in async executor and worker pool (no external runtime): `block_on`, `Executor` (`execute`, `spawn`), tested
@@ -160,7 +160,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] JS runtime stub (`window.tpt.invoke`) injected at document start (`js/runtime/tpt-shell.js`, 661 bytes gzipped, verified end to end through the IPC router)
 
 ### Early baselines
-- [ ] First benchmark: binary size, cold start, IPC round trip
+- [ ] First benchmark: binary size, cold start, IPC round trip (binary size is in BENCHMARKS.md; cold start has partial numbers under M1; IPC round trip is not measured)
 - [ ] R1/R3 mitigations: strict trait boundary documented; leak test harness for COM objects
 - [ ] Done: a Windows hello-world serves embedded assets and round-trips a message. Criterion met on Windows (embedded serving, shim round trip). Other M1 bullets are still open, so the phase stays open until you confirm
 
@@ -181,7 +181,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Scoped types: `ScopedPath`, `DeviceId`
 - [x] Validator: unknown fields rejected, bounds checked, scope checked before handler runs (`Router::register_guarded` names a capability and a target; `Router::handle_authorized` checks the window's grant before the handler, and the unauthorized entry points refuse guarded commands. On Windows, page messages reach a handler set with `set_message_handler`, and a runtime test runs a guarded command through `handle_authorized`. App-level wiring exists in the facade (see the App builder item). macOS and Linux do not receive page messages yet)
 - [x] `CmdError` with stable code, message, details (`CommandError::with_details` sends `error.details`; invalid args report the offending `path`)
-- [ ] Blob channel `app://__tpt/blob/<id>` (store, quota, id check and route parsing are in `tpt-shell-ipc::blob`; the platform does not serve the route yet)
+- [ ] Blob channel `app://__tpt/blob/<id>` (Windows serves it: `tpt_shell::blob::put_blob` stores bytes under a random 128-bit id from `BCryptGenRandom` and returns the page URL `https://tpt-app.localhost/__tpt/blob/<id>`, the same DEVIATION as the other app routes; a live test fetches a blob from a page. Still open: macOS and Linux, the 64 MiB store limit is fixed rather than per app, blobs are not removed when a window closes, and the store is per UI thread)
 - [x] Stream channel with credit-based backpressure (`tpt-shell-ipc::stream`; not yet carried by a platform transport)
 - [ ] Fuzz target: validator (no-panic smoke tests exist; no cargo-fuzz target yet)
 
@@ -191,7 +191,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Deterministic output
 - [x] Golden tests for contract and TS generation (both have golden tests; the TS output also passes strict `tsc` in a one-off check)
 - [x] JS runtime in `js/runtime/` (plain JS, <4 KB gzipped, size check in CI: `tools/check-runtime-size.sh` runs in the `runtime-size` job; currently 648 bytes gzipped; the job has not run on GitHub yet)
-- [ ] `tpt.on()` events and `tpt.caps`
+- [x] `tpt.on()` events and `tpt.caps` (`js/runtime/tpt-shell.js` with Node tests in `js/test/`; `Running::emit` sends a Rust event to a window's page, and a live test shows it reaching `tpt.on`; `tpt.caps` reports `webview2` and its version from the user agent. Still open: `emit` is only called from the UI thread, so a background thread needs the event-loop proxy, and `tpt.caps` does not list supported APIs)
 
 ### tpt-shell-manifest
 - [x] `tpt-shell.toml` parser with line-accurate errors (`TS0001`โ€“`TS0004`)
@@ -212,7 +212,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Entry model: seq, wall time, monotonic time, actor, command, capability, parameter hash, optional redacted params, outcome, duration
 - [x] Canonical JSON for hashing
 - [x] SHA-256 hash chain
-- [ ] Redaction policy from manifest (`[audit] store_params` and `redact` parse into `AuditSettings`, validated with the schema; no runtime writer uses them yet, so the mapping to `tpt_shell_audit::Policy` is still to do)
+- [ ] Redaction policy from manifest (`[audit] store_params` and `redact` parse into `AuditSettings`, validated with the schema; the mapping to `tpt_shell_audit::Policy` is done as `Policy::from(&AuditSettings)`; `App::audit(path, policy)` writes each page command call to a log with that policy, but the app does not load the manifest yet, so the `[audit]` section still has to be passed in by hand)
 - [x] Append-only file writer
 - [ ] Property tests for chain integrity (randomized and exhaustive single-byte tests exist; not a proptest suite)
 - [x] Golden tests for audit format
@@ -253,8 +253,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 
 ### Theming
 - [x] Inject `--tpt-accent`, `--tpt-bg`, `--tpt-fg`, `--tpt-font` etc. (`tpt-shell-core::theme`, applied at document start on Windows; a change applies to windows created after `set_theme`)
-- [ ] Keep `prefers-color-scheme` in sync (colour scheme is read when a window is created; it does not follow later changes yet)
-- [ ] Signal high contrast, reduced motion, reduced transparency (the page has the attributes; Windows does not read the settings yet)
+- [ ] Keep `prefers-color-scheme` in sync (open pages now follow a system change: on `WM_SETTINGCHANGE` the `data-color-scheme`, `data-high-contrast`, `data-reduced-motion`, `data-reduced-transparency` attributes and `color-scheme` are updated, and a live test covers the update. The CSS `prefers-color-scheme` media query is still set only when a window is created, since WebView2 drives it from its own preferred-scheme setting, which is not wired yet)
+- [x] Signal high contrast, reduced motion, reduced transparency (Windows reads `SPI_GETHIGHCONTRAST`, `SPI_GETCLIENTAREAANIMATION` and the `EnableTransparency` value when a window is created, and the page gets the attributes; a live test checks them. Open pages follow later changes, see the colour scheme item)
 - [ ] Windows Mica/Acrylic/Tabbed backdrop and dark title bar
 - [ ] Normalisation shim (opt-in): viewport, scrollbar, font stack, drag region helper, safe-area insets
 
@@ -380,22 +380,22 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Disable devtools, context menu, zoom, optional text selection, drag-drop, print shortcuts, function keys, swipe gestures
 - [ ] Windows low-level keyboard hook (Alt+Tab, Win, Alt+F4, Ctrl+Esc), best effort
 - [ ] Document OS lock-down recipes: Windows Assigned Access, macOS guided access/MDM, Linux dedicated session (R10)
-- [ ] `app.snapshot_state()` on interval and on exit, typed state store, restore on restart
+- [ ] `app.snapshot_state()` on interval and on exit, typed state store, restore on restart (`tpt-shell-kiosk::state` saves atomically with a temporary file and restores with a typed `serde` value, and reports a corrupt snapshot instead of using it; not yet called by the app on an interval or at exit)
 - [ ] Page crash recovery: reload to last good state
-- [ ] Idle reset: home route, clear session, ephemeral integration
+- [ ] Idle reset: home route, clear session, ephemeral integration (`tpt-shell-kiosk::idle::IdleTimer` tracks time since input; the app does not yet reset to the home page or clear the session when it is due)
 - [ ] Multi-monitor placement, rotation, per-monitor kiosk windows
-- [ ] Signed local config (Ed25519)
+- [ ] Signed local config (Ed25519) (`tpt-shell-kiosk::config` verifies a detached Ed25519 signature over the exact config bytes before parsing, and refuses an edited or foreign-signed config; the app does not load it yet, and the signing tool is not written)
 - [ ] Local admin endpoint (off by default, token protected)
 - [ ] Heartbeat file and optional local HTTP health endpoint (off by default)
 
 ### tpt-shell-supervisor (separate binary)
-- [ ] Spawn app and watch heartbeat over local IPC
-- [ ] Restart on crash or hang (the crash decision and the hang check exist in `tpt-shell-supervisor`; no real process spawner or heartbeat channel yet)
+- [ ] Spawn app and watch heartbeat over local IPC (the app is spawned with `TPT_HEARTBEAT_FILE` and beats by rewriting that file, which the supervisor reads by age; this is local file IPC, not a pipe or socket, since the shell opens no sockets. A named-pipe transport is still open)
+- [x] Restart on crash or hang (`ProcessSpawner` runs the app, stops it after a missed heartbeat or at the scheduled time, and `tpt-shell-supervisor` restarts it with backoff; tested with real child processes)
 - [x] Exponential backoff with crash-loop cap (`Backoff`, `CrashLoopGuard`)
-- [ ] Alert hook (command or file) (a callback hook exists; command and file targets do not)
-- [x] Scheduled restart (e.g. 03:00) (`Scheduled::is_due`, across midnight too; nothing calls it yet)
-- [ ] Complete supervisor logs (`supervise` logs each restart and give-up; no file or rotation yet)
-- [ ] Idle RAM โค 5 MB measured
+- [x] Alert hook (command or file) (`--alert-command` and `--alert-file`; tested)
+- [x] Scheduled restart (e.g. 03:00) (`Scheduled::is_due`, across midnight too; `ProcessSpawner` stops the run at the time and the loop restarts it without counting a crash; `--restart-at HH:MM` uses local time on Windows and UTC elsewhere)
+- [x] Complete supervisor logs (`--log` appends a timestamped line for each run's end, restart, and give-up, and rotates to `.1` at 1 MiB)
+- [ ] Idle RAM โค 5 MB measured (measured 2026-10-22 on Windows: private memory 3.2 MB, working set 7.0 MB while supervising a healthy child. The budget is met on private memory; the working set is larger because it counts shared system DLL pages. Which measure ยง13 means is still open)
 
 ### Boot integration and CLI
 - [ ] `tpt-shell install-service`: Task Scheduler/Startup entry, LaunchAgent, systemd user unit
@@ -655,13 +655,13 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Sanitiser and Miri runs where possible
 
 ### Performance (ยง13)
-- [ ] Hello-world binary โค 4 MB stripped on Windows
+- [x] Hello-world binary โค 4 MB stripped on Windows (`examples/hello`: 706,048 bytes release on 2026-10-22; see BENCHMARKS.md)
 - [ ] Cold start to first paint โค 500 ms; shell overhead โค 50 ms
 - [ ] IPC round trip small payload p95 โค 5 ms
 - [ ] Blob channel โฅ 50 MB/s sustained
 - [ ] Idle shell memory overhead โค 25 MB
-- [ ] Supervisor โค 5 MB idle
-- [ ] `BENCHMARKS.md` with methodology and results
+- [ ] Supervisor โค 5 MB idle (see the M6 item: private memory 3.2 MB, working set 7.0 MB)
+- [ ] `BENCHMARKS.md` with methodology and results (created with the method and the binary-size result; cold start, IPC, blob, memory and the macOS and Linux numbers are still to add)
 - [ ] Document any budget gaps
 
 ### Risk review
