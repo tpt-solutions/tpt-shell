@@ -19,7 +19,9 @@ pub use tpt_shell_core::{Error, Result};
 /// Device support: the hub that opens devices under a grant, and the virtual devices.
 pub use tpt_shell_devices as devices;
 pub use tpt_shell_ipc::{Caller, Limits, Router, Target, Value};
-pub use tpt_shell_macros::{command, commands, embed_dir, register_commands};
+pub use tpt_shell_macros::{
+    command, commands, embed_dir, include_manifest, register_commands, Contract,
+};
 /// Where a window keeps its data: the default, a named profile, or an ephemeral session.
 pub use tpt_shell_profiles::Kind as ProfileKind;
 

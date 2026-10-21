@@ -3,7 +3,7 @@
 
 [package]
 name = "tpt-shell-compliance"
-description = "Compliance outputs: CycloneDX and SPDX SBOMs, attestation.json, and the licence gate (spec §10.8)."
+description = "Compliance outputs: CycloneDX and SPDX SBOMs, licenses.html and THIRD_PARTY_NOTICES, attestation.json, detached signatures, and the licence gate (spec §10.8)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,4 +13,8 @@ rust-version.workspace = true
 
 [dependencies]
 serde_json = "1"
+toml = "0.8"
 tpt-shell-audit = { path = "../tpt-shell-audit", version = "0.0.0" }
+
+[dev-dependencies]
+ed25519-dalek = "2"

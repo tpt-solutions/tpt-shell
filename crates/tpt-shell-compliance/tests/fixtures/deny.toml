@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+# Fixture for the gate tests: a small allow list in the same shape as the project's deny.toml.
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Unicode-3.0",
+]

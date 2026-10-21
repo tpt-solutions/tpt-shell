@@ -107,6 +107,8 @@ pub struct App {
     name: String,
     loader: Option<PathBuf>,
     data_dir: Option<PathBuf>,
+    /// The blob store limit, when the app sets one (see `blob_limit`).
+    blob_limit: Option<usize>,
     windows: Vec<Window>,
     grants: Vec<Grant>,
     commands: Vec<Register>,
@@ -146,6 +148,9 @@ pub struct KioskSettings {
     pub home: String,
     /// After this long with no page messages, the windows go back to `home`. `None` never resets.
     pub idle: Option<Duration>,
+    /// The whole policy from the config. The window placement and the lock-down features are
+    /// applied by the backends; the key-chord hook is installed here (Windows, best effort).
+    pub policy: tpt_shell_kiosk::policy::KioskPolicy,
 }
 
 /// Periodic saving of app state, and its restore at the next start.
@@ -248,31 +253,15 @@ fn profile_data_dir(
 
 /// Reads a kiosk config's settings. `home` must be a plain path under the app origin.
 fn kiosk_settings(config: &serde_json::Value) -> Result<KioskSettings> {
-    let home = match config.get("home") {
-        None => "index.html".to_string(),
-        Some(value) => value
-            .as_str()
-            .ok_or_else(|| Error::Backend("the kiosk home must be a path string".into()))?
-            .to_string(),
-    };
-    let plain = !home.is_empty()
-        && !home.starts_with('/')
-        && !home.contains("..")
-        && !home.contains(['\\', ':', '?', '#']);
-    if !plain {
-        return Err(Error::Backend(format!(
-            "{home:?} is not a plain path under the app"
-        )));
-    }
-    let idle = match config.get("idle_seconds") {
-        None => None,
-        Some(value) => Some(Duration::from_secs(
-            value.as_u64().filter(|s| *s > 0).ok_or_else(|| {
-                Error::Backend("idle_seconds must be a whole number above 0".into())
-            })?,
-        )),
-    };
-    Ok(KioskSettings { home, idle })
+    // The policy parser (tpt-shell-kiosk) checks every key. Only home and idle are applied
+    // here; the window placement and lock-down values are for the platform backends.
+    let policy =
+        tpt_shell_kiosk::policy::parse(config).map_err(|e| Error::Backend(e.to_string()))?;
+    Ok(KioskSettings {
+        home: policy.home.clone(),
+        idle: policy.idle,
+        policy,
+    })
 }
 
 /// Reads the window placements saved by [`Running::save_window_state`]. Entries that do not parse
@@ -414,6 +403,13 @@ impl App {
         self
     }
 
+    /// The most bytes of blobs (`blob::put_blob`) the app holds at once. Defaults to 64 MiB.
+    /// Support: Partial. Windows only; other platforms have no blob channel yet.
+    pub fn blob_limit(mut self, bytes: usize) -> Self {
+        self.blob_limit = Some(bytes);
+        self
+    }
+
     pub fn window(mut self, window: Window) -> Self {
         self.windows.push(window);
         self
@@ -536,6 +532,7 @@ impl App {
     /// Fails when another launch of a single-instance app already owns it.
     #[cfg(windows)]
     pub fn build(mut self) -> Result<Running> {
+        blob::set_limit(self.blob_limit.unwrap_or(blob::LIMIT));
         let guard = match self.claim_instance()? {
             Claimed::Forwarded => {
                 return Err(Error::Backend(
@@ -637,6 +634,19 @@ impl App {
         let assets = Rc::new(self.assets);
         let mut backend = WindowsBackend::new(&loader, &data_dir)?;
         let kiosk = self.kiosk;
+        // Single-app kiosks block the chords Alt+Tab, Win, Alt+F4 and Ctrl+Esc (best effort).
+        let keys = match &kiosk {
+            Some(settings)
+                if settings.policy.mode == tpt_shell_kiosk::policy::Mode::SingleApp
+                    && settings.policy.lockdown.key_chords =>
+            {
+                Some(
+                    tpt_shell_kiosk::hook_windows::install()
+                        .map_err(|e| Error::Backend(format!("cannot block the key chords: {e}")))?,
+                )
+            }
+            _ => None,
+        };
         let snapshot = self.snapshot;
         let state_file = self.state_file;
         // Any page message counts as activity for the idle reset.
@@ -720,6 +730,15 @@ impl App {
                 }
             })?;
         }
+        // Under the supervisor (TPT_HEARTBEAT_FILE is set), beat once a second. A UI thread that
+        // stops running stops the beats, and the supervisor then restarts the app.
+        if let Some(path) = tpt_shell_kiosk::heartbeat::from_env() {
+            backend.every(Duration::from_secs(1), move || {
+                if let Err(e) = tpt_shell_kiosk::heartbeat::beat(&path) {
+                    eprintln!("tpt-shell: cannot write the heartbeat: {e}");
+                }
+            })?;
+        }
         let snapshot_state = match snapshot {
             Some(plan) => Some(start_snapshots(&mut backend, plan)?),
             None => None,
@@ -732,6 +751,7 @@ impl App {
             state_file,
             snapshot_state,
             _ephemeral: ephemeral,
+            _keys: keys,
         })
     }
 }
@@ -802,6 +822,8 @@ pub struct Running {
     state_file: Option<PathBuf>,
     /// The session folder of an ephemeral profile. Dropping the app wipes it.
     _ephemeral: Option<tpt_shell_profiles::Ephemeral>,
+    /// The key-chord hook of a single-app kiosk. Dropping the app removes it.
+    _keys: Option<tpt_shell_kiosk::hook_windows::KeyboardHook>,
     /// The state file and the capture, for the save at the end of the event loop.
     snapshot_state: Option<(PathBuf, SnapshotCapture)>,
 }
@@ -952,12 +974,12 @@ mod tests {
         let app = App::new()
             .kiosk_config(&config, &sig, &public)
             .expect("config");
+        let settings = app.kiosk.as_ref().expect("kiosk settings");
+        assert_eq!(settings.home, "start.html");
+        assert_eq!(settings.idle, Some(Duration::from_secs(90)));
         assert_eq!(
-            app.kiosk,
-            Some(KioskSettings {
-                home: "start.html".into(),
-                idle: Some(Duration::from_secs(90)),
-            })
+            settings.policy.mode,
+            tpt_shell_kiosk::policy::Mode::SingleApp
         );
 
         // An edited config no longer matches its signature.

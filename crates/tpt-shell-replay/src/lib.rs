@@ -4,9 +4,10 @@
 //! `.tptreplay` format (spec §10.5, M8): a recording of what happened in an app run, as
 //! JSON Lines.
 //!
-//! Line 1 is the header: `{"format":"tptreplay","version":1,...}`. Every later line is one
-//! event: `{"seq":n,"t_ns":t,"kind":"...","data":{...}}`. `seq` counts from 0 and `t_ns` never
-//! goes back.
+//! Line 1 is the header: `{"format":"tptreplay","version":2,...}`. A line with an `asset` key
+//! carries a file the run used (version 2 only). Every other line is one event:
+//! `{"seq":n,"t_ns":t,"kind":"...","data":{...}}`. `seq` counts from 0 and `t_ns` never goes
+//! back.
 //!
 //! Two readers:
 //! - [`Mode::Strict`] refuses anything it does not understand: unknown kinds, malformed lines,
@@ -17,25 +18,47 @@
 //! [`divergence`] compares a recording with the events of a new run. It compares kind and
 //! data, and ignores timing, which varies between runs.
 //!
-//! Not yet: zstd compression (the todo names it; the dependency is not approved) and asset
-//! files. Determinism limits are in `docs/replay-format.md` (R8).
+//! Compression: none. A recording is raw JSON Lines. zstd would need a new dependency, and the
+//! files are small enough for CI and bug reports, so the format stays plain text (documented
+//! in `docs/replay-format.md`). Version 1 recordings still read; they have no assets.
+//!
+//! Modules: [`virtual_time`] makes the Clock and Rng traits replayable; [`player`] runs a
+//! recording against a target; [`timeline`] is the data model for time-travel; [`report`]
+//! builds the bug-report bundle with redaction.
+//!
+//! Support: Full for the format, readers, recorder and divergence. Partial: the capture hooks
+//! inside a running app and the hidden player window are routed to the facade and the
+//! platform crates.
 
 use std::fmt;
 
 use serde_json::{json, Map, Value};
 
-/// The only format version this crate writes and reads.
-pub const VERSION: u64 = 1;
+pub mod codec;
+pub mod player;
+pub mod report;
+pub mod timeline;
+pub mod virtual_time;
+
+/// The version this crate writes.
+pub const VERSION: u64 = 2;
+/// The versions this crate reads. Version 1 had no assets and no clock or rng events.
+pub const READABLE_VERSIONS: [u64; 2] = [1, 2];
 
 /// Event kinds this version defines.
-pub const KINDS: [&str; 6] = [
+pub const KINDS: [&str; 8] = [
     "ipc_request",
     "ipc_response",
     "ipc_event",
     "input",
     "window",
     "protocol_load",
+    "clock",
+    "rng",
 ];
+
+/// The largest asset the reader accepts, in bytes.
+pub const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;
 
 /// The first line of a recording.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,10 +76,19 @@ pub struct Event {
     pub data: Value,
 }
 
+/// A file the run used, such as an image the page loaded. Stored inline as base64.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Asset {
+    pub name: String,
+    pub bytes: Vec<u8>,
+}
+
 /// A whole recording.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Replay {
+    pub version: u64,
     pub header: Header,
+    pub assets: Vec<Asset>,
     pub events: Vec<Event>,
     /// Lines skipped by a lenient read. Always 0 for a strict read.
     pub skipped: usize,
@@ -85,6 +117,19 @@ impl fmt::Display for ReadError {
 
 impl std::error::Error for ReadError {}
 
+/// Whether a name is safe as an asset name: 1 to 100 ASCII letters, digits, `-`, `_` or `.`,
+/// and not `.` or `..`. Names never carry a path, so an asset cannot be written outside its
+/// directory when a recording is unpacked.
+pub fn is_asset_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 100
+        && name != "."
+        && name != ".."
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+}
+
 /// Builds a recording. Events must be added in order, with time never going backwards.
 pub struct Recorder {
     header: Header,
@@ -94,6 +139,7 @@ pub struct Recorder {
 }
 
 impl Recorder {
+    /// Starts a recording. Support: Full.
     pub fn new(header: Header) -> Self {
         let line = json!({
             "format": "tptreplay",
@@ -111,12 +157,13 @@ impl Recorder {
         }
     }
 
+    /// The header this recording was started with. Support: Full.
     pub fn header(&self) -> &Header {
         &self.header
     }
 
     /// Records one event. `kind` must be one of [`KINDS`]; anything else is refused, so a
-    /// recording never contains a kind the strict reader would reject.
+    /// recording never contains a kind the strict reader would reject. Support: Full.
     pub fn record(&mut self, t_ns: u64, kind: &str, data: Value) -> Result<(), String> {
         if !KINDS.contains(&kind) {
             return Err(format!("`{kind}` is not a known event kind"));
@@ -132,21 +179,41 @@ impl Recorder {
         Ok(())
     }
 
-    /// The finished recording text.
+    /// Stores a file the run used. The name must pass [`is_asset_name`] and the bytes must be
+    /// at most [`MAX_ASSET_BYTES`]. Support: Full.
+    pub fn add_asset(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
+        if !is_asset_name(name) {
+            return Err(format!("`{name}` is not a valid asset name"));
+        }
+        if bytes.len() > MAX_ASSET_BYTES {
+            return Err(format!(
+                "asset `{name}` is larger than {MAX_ASSET_BYTES} bytes"
+            ));
+        }
+        let line = json!({
+            "asset": { "name": name, "len": bytes.len(), "data": codec::encode(bytes) }
+        });
+        self.out.push_str(&line.to_string());
+        self.out.push('\n');
+        Ok(())
+    }
+
+    /// The finished recording text. Support: Full.
     pub fn finish(self) -> String {
         self.out
     }
 }
 
-/// Reads a recording.
+/// Reads a recording. Support: Full.
 pub fn read(text: &str, mode: Mode) -> Result<Replay, ReadError> {
     let mut lines = text.lines().enumerate();
     let (_, first) = lines.next().ok_or(ReadError {
         line: 1,
         message: "empty recording".into(),
     })?;
-    let header = read_header(first)?;
+    let (header, version) = read_header(first)?;
 
+    let mut assets = Vec::new();
     let mut events = Vec::new();
     let mut skipped = 0;
     let mut expect_seq = 0u64;
@@ -160,7 +227,28 @@ pub fn read(text: &str, mode: Mode) -> Result<Replay, ReadError> {
             line: number,
             message,
         };
-        match parse_event(line) {
+        let value: Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(e) => {
+                if mode == Mode::Strict {
+                    return Err(fail(format!("not JSON: {e}")));
+                }
+                skipped += 1;
+                continue;
+            }
+        };
+        if value.get("asset").is_some() {
+            if version < 2 {
+                return Err(fail("assets need format version 2".into()));
+            }
+            match parse_asset(&value) {
+                Ok(asset) => assets.push(asset),
+                Err(message) if mode == Mode::Strict => return Err(fail(message)),
+                Err(_) => skipped += 1,
+            }
+            continue;
+        }
+        match parse_event(&value) {
             Ok(event) => {
                 if !KINDS.contains(&event.kind.as_str()) {
                     if mode == Mode::Strict {
@@ -199,13 +287,15 @@ pub fn read(text: &str, mode: Mode) -> Result<Replay, ReadError> {
         }
     }
     Ok(Replay {
+        version,
         header,
+        assets,
         events,
         skipped,
     })
 }
 
-fn read_header(line: &str) -> Result<Header, ReadError> {
+fn read_header(line: &str) -> Result<(Header, u64), ReadError> {
     let fail = |message: String| ReadError { line: 1, message };
     let value: Value =
         serde_json::from_str(line).map_err(|e| fail(format!("header is not JSON: {e}")))?;
@@ -216,12 +306,15 @@ fn read_header(line: &str) -> Result<Header, ReadError> {
         return Err(fail("not a tptreplay recording".into()));
     }
     let version = obj.get("version").and_then(Value::as_u64);
-    if version != Some(VERSION) {
-        return Err(fail(format!(
-            "version {version:?} is not supported; this reader understands {VERSION}"
-        )));
+    match version {
+        Some(v) if READABLE_VERSIONS.contains(&v) => {}
+        _ => {
+            return Err(fail(format!(
+            "version {version:?} is not supported; this reader understands {READABLE_VERSIONS:?}"
+        )))
+        }
     }
-    Ok(Header {
+    let header = Header {
         app: obj
             .get("app")
             .and_then(Value::as_str)
@@ -232,11 +325,11 @@ fn read_header(line: &str) -> Result<Header, ReadError> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
-    })
+    };
+    Ok((header, version.unwrap_or(0)))
 }
 
-fn parse_event(line: &str) -> Result<Event, String> {
-    let value: Value = serde_json::from_str(line).map_err(|e| format!("not JSON: {e}"))?;
+fn parse_event(value: &Value) -> Result<Event, String> {
     let obj: &Map<String, Value> = value.as_object().ok_or("event is not an object")?;
     let seq = obj
         .get("seq")
@@ -260,6 +353,44 @@ fn parse_event(line: &str) -> Result<Event, String> {
     })
 }
 
+fn parse_asset(value: &Value) -> Result<Asset, String> {
+    let asset = value
+        .get("asset")
+        .and_then(Value::as_object)
+        .ok_or("`asset` is not an object")?;
+    let name = asset
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or("asset has no `name`")?;
+    if !is_asset_name(name) {
+        return Err(format!("asset name `{name}` is not valid"));
+    }
+    let len = asset
+        .get("len")
+        .and_then(Value::as_u64)
+        .ok_or("asset has no `len`")?;
+    if len as usize > MAX_ASSET_BYTES {
+        return Err(format!(
+            "asset `{name}` is larger than {MAX_ASSET_BYTES} bytes"
+        ));
+    }
+    let data = asset
+        .get("data")
+        .and_then(Value::as_str)
+        .ok_or("asset has no `data`")?;
+    let bytes = codec::decode(data, MAX_ASSET_BYTES)?;
+    if bytes.len() as u64 != len {
+        return Err(format!(
+            "asset `{name}` holds {} bytes, not {len}",
+            bytes.len()
+        ));
+    }
+    Ok(Asset {
+        name: name.to_string(),
+        bytes,
+    })
+}
+
 /// Where a new run first stopped matching the recording.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Divergence {
@@ -271,6 +402,7 @@ pub struct Divergence {
 
 /// Compares the recorded events with a new run's events, by kind and data. Returns the first
 /// difference, or `None` when they match. A run that stops early or runs long also diverges.
+/// Support: Full.
 pub fn divergence(recorded: &[Event], replayed: &[Event]) -> Option<Divergence> {
     for (index, (want, got)) in recorded.iter().zip(replayed).enumerate() {
         if want.kind != got.kind {
@@ -342,7 +474,7 @@ mod tests {
         assert_eq!(
             sample(),
             concat!(
-                "{\"app\":\"demo\",\"format\":\"tptreplay\",\"platform\":\"windows\",\"version\":1}\n",
+                "{\"app\":\"demo\",\"format\":\"tptreplay\",\"platform\":\"windows\",\"version\":2}\n",
                 "{\"data\":{\"cmd\":\"ping\",\"id\":1},\"kind\":\"ipc_request\",\"seq\":0,\"t_ns\":0}\n",
                 "{\"data\":{\"data\":\"pong\",\"id\":1,\"ok\":true},\"kind\":\"ipc_response\",\"seq\":1,\"t_ns\":5}\n",
                 "{\"data\":{\"kind\":\"click\",\"x\":3,\"y\":4},\"kind\":\"input\",\"seq\":2,\"t_ns\":9}\n",
@@ -351,12 +483,75 @@ mod tests {
     }
 
     #[test]
+    fn golden_asset_line() {
+        let mut r = Recorder::new(header());
+        r.add_asset("logo.png", b"abc").unwrap();
+        assert_eq!(
+            r.finish().lines().nth(1).unwrap(),
+            "{\"asset\":{\"data\":\"YWJj\",\"len\":3,\"name\":\"logo.png\"}}"
+        );
+    }
+
+    #[test]
     fn a_recording_reads_back_exactly() {
         let replay = read(&sample(), Mode::Strict).unwrap();
         assert_eq!(replay.header, header());
+        assert_eq!(replay.version, 2);
         assert_eq!(replay.events.len(), 3);
         assert_eq!(replay.events[2].t_ns, 9);
         assert_eq!(replay.skipped, 0);
+    }
+
+    #[test]
+    fn assets_round_trip_with_their_bytes() {
+        let mut r = Recorder::new(header());
+        let png: Vec<u8> = (0..=255).collect();
+        r.add_asset("shot.png", &png).unwrap();
+        r.record(0, "window", json!({ "resize": [800, 600] }))
+            .unwrap();
+        let replay = read(&r.finish(), Mode::Strict).unwrap();
+        assert_eq!(
+            replay.assets,
+            vec![Asset {
+                name: "shot.png".into(),
+                bytes: png
+            }]
+        );
+        assert_eq!(replay.events.len(), 1);
+    }
+
+    #[test]
+    fn asset_names_cannot_carry_a_path() {
+        let mut r = Recorder::new(header());
+        for bad in ["../x.png", "a/b.png", "a\\b.png", "..", "", "x y.png"] {
+            assert!(r.add_asset(bad, b"x").is_err(), "{bad}");
+        }
+        let tampered = concat!(
+            "{\"format\":\"tptreplay\",\"version\":2,\"app\":\"a\",\"platform\":\"p\"}\n",
+            "{\"asset\":{\"data\":\"YWJj\",\"len\":3,\"name\":\"../evil\"}}\n",
+        );
+        assert!(read(tampered, Mode::Strict).is_err());
+        assert!(read(tampered, Mode::Lenient).unwrap().assets.is_empty());
+    }
+
+    #[test]
+    fn an_asset_whose_length_is_wrong_is_refused() {
+        let text = concat!(
+            "{\"format\":\"tptreplay\",\"version\":2,\"app\":\"a\",\"platform\":\"p\"}\n",
+            "{\"asset\":{\"data\":\"YWJj\",\"len\":5,\"name\":\"x.bin\"}}\n",
+        );
+        assert!(read(text, Mode::Strict).is_err());
+    }
+
+    #[test]
+    fn version_one_recordings_still_read_but_cannot_hold_assets() {
+        let v1 = sample().replacen("\"version\":2", "\"version\":1", 1);
+        assert_eq!(read(&v1, Mode::Strict).unwrap().version, 1);
+        let with_asset = format!(
+            "{}{{\"asset\":{{\"data\":\"YWJj\",\"len\":3,\"name\":\"x.bin\"}}}}\n",
+            v1
+        );
+        assert!(read(&with_asset, Mode::Strict).is_err());
     }
 
     #[test]
@@ -369,7 +564,7 @@ mod tests {
 
     #[test]
     fn a_newer_version_is_refused() {
-        let text = sample().replacen("\"version\":1", "\"version\":2", 1);
+        let text = sample().replacen("\"version\":2", "\"version\":3", 1);
         assert!(read(&text, Mode::Strict).is_err());
         assert!(read(&text, Mode::Lenient).is_err());
     }
@@ -409,6 +604,7 @@ mod tests {
         let text = format!("{}not json\n", sample());
         let err = read(&text, Mode::Strict).unwrap_err();
         assert_eq!(err.line, 5);
+        assert_eq!(read(&text, Mode::Lenient).unwrap().skipped, 1);
     }
 
     #[test]
@@ -443,5 +639,38 @@ mod tests {
         let extra = divergence(&recorded, &long).unwrap();
         assert_eq!(extra.index, 3);
         assert!(extra.expected.is_none());
+    }
+
+    /// A small deterministic generator for the mutation test below.
+    fn xorshift(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    #[test]
+    fn mutated_recordings_never_panic_the_reader() {
+        let mut r = Recorder::new(header());
+        r.add_asset("a.bin", &[1, 2, 3, 4, 5]).unwrap();
+        r.record(0, "clock", json!({ "op": "monotonic", "ns": 7 }))
+            .unwrap();
+        r.record(4, "rng", json!({ "value": 99 })).unwrap();
+        let good = r.finish().into_bytes();
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        for _ in 0..5000 {
+            let mut bytes = good.clone();
+            for _ in 0..=(xorshift(&mut state) % 6) {
+                let at = (xorshift(&mut state) as usize) % bytes.len();
+                bytes[at] = xorshift(&mut state) as u8;
+            }
+            if xorshift(&mut state).is_multiple_of(5) {
+                let cut = (xorshift(&mut state) as usize) % bytes.len();
+                bytes.truncate(cut);
+            }
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            let _ = read(&text, Mode::Strict);
+            let _ = read(&text, Mode::Lenient);
+        }
     }
 }

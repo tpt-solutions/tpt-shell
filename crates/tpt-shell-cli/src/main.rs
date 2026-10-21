@@ -11,12 +11,16 @@ use std::process::ExitCode;
 
 use tpt_shell_audit::AuditError;
 
+mod add;
 mod dev;
+mod licences;
 use tpt_shell_errors::lookup;
 
 const USAGE: &str = "usage:
   tpt-shell explain <TS####>
-  tpt-shell dev <directory> [--port <port>]   serve files on 127.0.0.1 and report changes
+  tpt-shell dev <directory> [--port <port>]   serve files on 127.0.0.1, reload pages on change
+  tpt-shell build [directory]                 release build (cargo build --release --locked)
+  tpt-shell add <kiosk|devices|audit|agent> [tpt-shell.toml]   add a manifest section
   tpt-shell manifest check <tpt-shell.toml>
   tpt-shell contract diff <old-contract.json> <new-contract.json>
   tpt-shell contract check <new-contract.json> --baseline <old-contract.json>
@@ -56,8 +60,13 @@ fn dev_server(dir: &Path, port: u16) -> Result<ExitCode, String> {
     let root =
         fs::canonicalize(dir).map_err(|e| format!("cannot resolve {}: {e}", dir.display()))?;
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    dev::watch(root.clone(), std::time::Duration::from_millis(500));
-    dev::serve(&root, addr, |bound| {
+    let reloads = std::sync::Arc::new(dev::Reloads::default());
+    dev::watch(
+        root.clone(),
+        std::time::Duration::from_millis(500),
+        std::sync::Arc::clone(&reloads),
+    );
+    dev::serve(&root, addr, &reloads, |bound| {
         println!(
             "serving {} at http://{bound}/ (Ctrl+C to stop)",
             without_verbatim_prefix(&root.display().to_string())
@@ -85,6 +94,10 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["new", "vanilla", dir] => new_vanilla(Path::new(dir)).map(|()| ExitCode::SUCCESS),
         ["new", "typescript", dir] => new_typescript(Path::new(dir)).map(|()| ExitCode::SUCCESS),
         ["doctor"] => Ok(doctor()),
+        ["build"] => build(Path::new(".")),
+        ["build", dir] => build(Path::new(dir)),
+        ["add", feature] => add::add(feature, Path::new("tpt-shell.toml")),
+        ["add", feature, manifest] => add::add(feature, Path::new(manifest)),
         ["compliance", dir] => compliance(Path::new(dir)),
         ["audit", "verify", path] => audit_verify(Path::new(path), None),
         ["audit", "verify", path, "--key", key] => {
@@ -295,39 +308,12 @@ fn manifest_check(path: &Path) -> Result<ExitCode, String> {
     }
 }
 
-/// The starter manifest for `new vanilla`.
-const VANILLA_MANIFEST: &str = r#"[app]
-name = "my-app"
-version = "0.1.0"
+/// The starter manifest for `new vanilla` (templates/vanilla/tpt-shell.toml).
+const VANILLA_MANIFEST: &str = include_str!("../../../templates/vanilla/tpt-shell.toml");
 
-[[windows]]
-name = "main"
-title = "My App"
-width = 960
-height = 640
-
-[capabilities]
-grant = []
-"#;
-
-/// The starter page for `new vanilla`. It has no external scripts or styles.
-const VANILLA_PAGE: &str = r#"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>My App</title>
-  <style>
-    :root { color-scheme: light dark; }
-    body { font-family: system-ui, sans-serif; margin: 2rem; }
-  </style>
-</head>
-<body>
-  <h1>My App</h1>
-  <p>Edit <code>index.html</code> to change this page.</p>
-</body>
-</html>
-"#;
+/// The starter page for `new vanilla` (templates/vanilla/index.html). It has no external scripts
+/// or styles.
+const VANILLA_PAGE: &str = include_str!("../../../templates/vanilla/index.html");
 
 fn new_vanilla(dir: &Path) -> Result<(), String> {
     if dir.exists() {
@@ -495,10 +481,68 @@ fn doctor() -> ExitCode {
             println!("WebView2 runtime: not found (install the Evergreen runtime from Microsoft)");
         }
     }
+    match licence_check() {
+        None => println!("licence policy: deny.toml not found here (run from the workspace root)"),
+        Some(Err(e)) => {
+            ok = false;
+            println!("licence policy: cannot check: {e}");
+        }
+        Some(Ok(problems)) if problems.is_empty() => println!("licence policy: pass"),
+        Some(Ok(problems)) => {
+            ok = false;
+            println!("licence policy: fail");
+            for problem in &problems {
+                println!("  {problem}");
+            }
+        }
+    }
     if ok {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
+    }
+}
+
+/// Checks the dependency licences against the allow list in `deny.toml` in the current
+/// directory. `None` when there is no `deny.toml` here. Read-only.
+fn licence_check() -> Option<Result<Vec<String>, String>> {
+    let text = fs::read_to_string("deny.toml").ok()?;
+    Some(check_licences(&text))
+}
+
+fn check_licences(deny: &str) -> Result<Vec<String>, String> {
+    let allowed = licences::allow_list(deny)?;
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--format-version", "1", "--locked"])
+        .output()
+        .map_err(|e| format!("cannot run cargo metadata: {e}"))?;
+    if !output.status.success() {
+        return Err("cargo metadata failed; is Cargo.lock up to date?".into());
+    }
+    let metadata = String::from_utf8_lossy(&output.stdout).to_string();
+    let components = tpt_shell_compliance::components_from_metadata(&metadata)?;
+    Ok(licences::violations(&components, &allowed))
+}
+
+/// Runs `cargo build --release --locked` in `dir`, which must hold a `Cargo.toml`. Compliance
+/// outputs (SBOM, attestation) come from `tpt-shell compliance`, added in M10.
+fn build(dir: &Path) -> Result<ExitCode, String> {
+    if !dir.join("Cargo.toml").is_file() {
+        return Err(format!(
+            "{} has no Cargo.toml; run `tpt-shell build` in the app's Rust project",
+            dir.display()
+        ));
+    }
+    let status = std::process::Command::new("cargo")
+        .args(["build", "--release", "--locked"])
+        .current_dir(dir)
+        .status()
+        .map_err(|e| format!("cannot run cargo: {e}"))?;
+    if status.success() {
+        println!("built release in {}", dir.display());
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::from(1))
     }
 }
 
@@ -666,55 +710,18 @@ fn compliance(out: &Path) -> Result<ExitCode, String> {
     }
 }
 
-/// Page for `new typescript`. It loads the compiled script and the page's own styles.
-const TS_PAGE: &str = r#"<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>My App</title>
-  <style>
-    :root { color-scheme: light dark; }
-    body { font-family: system-ui, sans-serif; margin: 2rem; }
-  </style>
-</head>
-<body>
-  <h1>My App</h1>
-  <p id="out">Starting…</p>
-  <script type="module" src="dist/main.js"></script>
-</body>
-</html>
-"#;
+/// Page for `new typescript` (templates/typescript/index.html).
+const TS_PAGE: &str = include_str!("../../../templates/typescript/index.html");
 
-/// Starter TypeScript. It calls the sample command through the generated client.
-const TS_MAIN: &str = r#"import { commands } from "./commands.js";
+/// Manifest for `new typescript` (templates/typescript/tpt-shell.toml).
+const TS_MANIFEST: &str = include_str!("../../../templates/typescript/tpt-shell.toml");
 
-const out = document.getElementById("out");
+/// Starter TypeScript (templates/typescript/src/main.ts). It calls the sample command through
+/// the generated client.
+const TS_MAIN: &str = include_str!("../../../templates/typescript/src/main.ts");
 
-commands
-  .greet({ name: "world" })
-  .then((reply) => {
-    if (out) out.textContent = String(reply);
-  })
-  .catch((error: { code: string; message: string }) => {
-    if (out) out.textContent = `${error.code}: ${error.message}`;
-  });
-"#;
-
-/// `tsconfig.json` for the starter. Strict; output goes to `dist/`, which `index.html` loads.
-const TS_CONFIG: &str = r#"{
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "ES2020",
-    "lib": ["ES2020", "DOM"],
-    "strict": true,
-    "noEmitOnError": true,
-    "outDir": "dist",
-    "rootDir": "src"
-  },
-  "include": ["src"]
-}
-"#;
+/// `tsconfig.json` for the starter (templates/typescript/tsconfig.json).
+const TS_CONFIG: &str = include_str!("../../../templates/typescript/tsconfig.json");
 
 /// The sample command behind the starter client: `greet(name)` returns a greeting.
 fn sample_contract() -> tpt_shell_ipc::contract::Contract {
@@ -741,7 +748,7 @@ fn sample_contract() -> tpt_shell_ipc::contract::Contract {
 
 fn new_typescript(dir: &Path) -> Result<(), String> {
     prepare_dir(dir)?;
-    write(&dir.join("tpt-shell.toml"), VANILLA_MANIFEST)?;
+    write(&dir.join("tpt-shell.toml"), TS_MANIFEST)?;
     write(&dir.join("index.html"), TS_PAGE)?;
     write(&dir.join("tsconfig.json"), TS_CONFIG)?;
     fs::create_dir_all(dir.join("src")).map_err(|e| format!("cannot create src: {e}"))?;
@@ -775,16 +782,8 @@ fn prepare_dir(dir: &Path) -> Result<(), String> {
     }
 }
 
-/// Declares the runtime object that `js/runtime/tpt-shell.js` adds before the page runs.
-const TS_RUNTIME_DECL: &str = r#"// The runtime object that tpt-shell adds at document start (js/runtime/tpt-shell.js).
-interface Window {
-  tpt: {
-    invoke(cmd: string, args?: unknown): Promise<unknown>;
-    on(event: string, handler: (data: unknown) => void): () => void;
-    readonly caps: { readonly engine: "webview2"; readonly version: string | null };
-  };
-}
-"#;
+/// The runtime object that tpt-shell adds at document start (js/runtime/tpt-shell.js).
+const TS_RUNTIME_DECL: &str = include_str!("../../../templates/typescript/src/tpt-shell.d.ts");
 
 #[cfg(test)]
 mod template_tests {

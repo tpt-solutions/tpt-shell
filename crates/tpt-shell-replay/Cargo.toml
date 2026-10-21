@@ -3,7 +3,7 @@
 
 [package]
 name = "tpt-shell-replay"
-description = "Record and replay format (.tptreplay): JSON Lines with a versioned header, strict and lenient readers, divergence reports (spec §10.5)."
+description = "Record and replay format (.tptreplay): JSON Lines with assets and a versioned header, strict and lenient readers, virtualised clock and rng, a player, a time-travel timeline and redacted bug reports (spec §10.5)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,3 +13,4 @@ rust-version.workspace = true
 
 [dependencies]
 serde_json = "1"
+tpt-shell-core = { path = "../tpt-shell-core", version = "0.0.0" }

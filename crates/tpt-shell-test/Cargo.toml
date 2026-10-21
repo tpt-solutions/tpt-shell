@@ -3,7 +3,7 @@
 
 [package]
 name = "tpt-shell-test"
-description = "Test support for tpt-shell apps: a visual comparer for screenshots with region masks and per-region tolerance (spec §10.6)."
+description = "Test support for tpt-shell apps: test driver over a file-based control channel with a per-run token, visual comparer and PNG decoder, accessibility rules and artifact collection (spec §10.6)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,4 +11,12 @@ authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+[features]
+# Enables the test driver and its control channel. Off in normal builds, so no channel code
+# is compiled into a shipped app (spec §10.6, R7).
+test-driver = []
+
 [dependencies]
+serde_json = "1"
+tpt-shell-core = { path = "../tpt-shell-core", version = "0.0.0" }
+tpt-shell-replay = { path = "../tpt-shell-replay", version = "0.0.0" }

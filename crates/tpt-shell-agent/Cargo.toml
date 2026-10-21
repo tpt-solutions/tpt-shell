@@ -3,7 +3,7 @@
 
 [package]
 name = "tpt-shell-agent"
-description = "Agent surface: an MCP-style JSON-RPC session over stdio with an explicit tool allow-list, rate limits, confirmation, a kill switch and an action log (spec §10.4)."
+description = "Agent surface: an MCP-style JSON-RPC session over stdio (and localhost HTTP with the mcp-http feature) with manifest profiles, route allow-lists, rate limits, confirmation, a kill switch and an audited action log (spec §10.4)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,14 @@ authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+[features]
+default = []
+# Serves MCP over 127.0.0.1 with a bearer token. Off by default: it opens a socket.
+mcp-http = []
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
+tpt-shell-audit = { path = "../tpt-shell-audit", version = "0.0.0" }
 tpt-shell-ipc = { path = "../tpt-shell-ipc", version = "0.0.0" }

@@ -1,0 +1,7 @@
+{
+  "packages": [
+    {"name": "tpt-fixture-app", "version": "0.1.0", "source": null, "license": "MIT", "repository": null, "manifest_path": "C:/fixture/app/Cargo.toml"},
+    {"name": "fixture-serde", "version": "1.0.200", "source": "registry+https://github.com/rust-lang/crates.io-index", "license": "MIT OR Apache-2.0", "repository": "https://github.com/serde-rs/serde", "manifest_path": "C:/fixture/serde/Cargo.toml"},
+    {"name": "fixture-unicode", "version": "1.0.12", "source": "registry+https://github.com/rust-lang/crates.io-index", "license": "(MIT OR Apache-2.0) AND Unicode-3.0", "repository": null, "manifest_path": "C:/fixture/unicode/Cargo.toml"}
+  ]
+}

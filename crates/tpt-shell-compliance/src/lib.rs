@@ -1,19 +1,33 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Compliance outputs (spec §10.8, M10): an SBOM in two formats, an attestation, and a licence
-//! gate. The input is the JSON from `cargo metadata --format-version 1 --locked`.
+//! Compliance outputs (spec §10.8, M10): SBOMs in two formats, licence notices, an attestation,
+//! detached signatures, and a licence gate. The input is the JSON from
+//! `cargo metadata --format-version 1 --locked`, the lock file, and `deny.toml`.
 //!
 //! Output is deterministic. Components are sorted by name and version, and there is no
 //! timestamp unless the caller passes one.
 //!
-//! The licence gate uses the same rule as `deny.toml`: an expression passes when one of its
-//! OR branches is entirely on the allow list, and an AND branch needs every licence on it.
+//! The licence gate uses the same rule as cargo-deny's allow list: an expression passes when
+//! one of its OR branches is entirely on the allow list, and an AND branch needs every licence
+//! on it. The allow list is read from `deny.toml` at run time ([`allow_list_from_deny_toml`]).
+//! The gate is this crate's own parser, not cargo-deny itself; CI still runs cargo-deny.
+
+pub mod lock;
+pub mod notices;
+pub mod schema;
 
 use serde_json::{json, Value};
 
-/// Licences the gate accepts. Keep in step with `deny.toml`.
-pub const ALLOWED_LICENSES: [&str; 3] = ["MIT", "Unicode-3.0", "BSD-3-Clause"];
+/// `deny.toml` could not be read, or has no licence allow list. Fix: check the file has a
+/// `[licenses] allow = [...]` array.
+pub const CODE_POLICY: &str = "TS0120";
+/// A generated SBOM does not match its published schema. Fix: the message names the path.
+pub const CODE_SCHEMA: &str = "TS0121";
+
+/// Licences the gate accepts when no `deny.toml` is given. Keep in step with `deny.toml`; the
+/// test `allow_list_matches_deny_toml` checks this.
+pub const ALLOWED_LICENSES: [&str; 4] = ["MIT", "Unicode-3.0", "BSD-3-Clause", "ISC"];
 
 /// A third-party crate from the lock file.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -187,20 +201,50 @@ fn purl(c: &Component) -> String {
     format!("pkg:cargo/{}@{}", c.name, c.version)
 }
 
-/// Whether one licence name is on the allow list.
-fn allowed_license(name: &str) -> bool {
-    ALLOWED_LICENSES.contains(&name)
+/// The allow list of the built-in policy, as owned strings.
+pub fn default_allow() -> Vec<String> {
+    ALLOWED_LICENSES.iter().map(|s| s.to_string()).collect()
 }
 
-/// Whether a licence expression is acceptable under the allow list.
+/// Reads the licence allow list from the text of a `deny.toml`. Fails when the file is not
+/// TOML or has no `[licenses] allow` array of strings.
+pub fn allow_list_from_deny_toml(deny_toml: &str) -> Result<Vec<String>, String> {
+    let table: toml::Table = deny_toml
+        .parse()
+        .map_err(|e| format!("{CODE_POLICY}: deny.toml is not valid TOML: {e}"))?;
+    let allow = table
+        .get("licenses")
+        .and_then(|l| l.get("allow"))
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| format!("{CODE_POLICY}: deny.toml has no [licenses] allow list"))?;
+    allow
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| format!("{CODE_POLICY}: a licence in deny.toml is not a string"))
+        })
+        .collect()
+}
+
+/// Whether a licence expression is acceptable under the built-in allow list.
 ///
 /// The grammar is SPDX-like: identifiers, `AND` (binds tighter), `OR`, parentheses, and
 /// `WITH` (an exception, which does not change the licence it is attached to). The older
 /// `/` form is read as `OR`. An expression with anything else in it is refused.
 pub fn license_allowed(expression: &str) -> bool {
+    license_allowed_with(expression, &default_allow())
+}
+
+/// Like [`license_allowed`], against the given allow list (for example from `deny.toml`).
+pub fn license_allowed_with(expression: &str, allow: &[String]) -> bool {
     match tokenize(expression) {
         Some(tokens) if !tokens.is_empty() => {
-            let mut parser = Parser { tokens, pos: 0 };
+            let mut parser = Parser {
+                tokens,
+                pos: 0,
+                allow,
+            };
             match parser.or_expr() {
                 Some(allowed) if parser.pos == parser.tokens.len() => allowed,
                 _ => false,
@@ -265,12 +309,13 @@ fn tokenize(text: &str) -> Option<Vec<Token>> {
 
 /// Recursive-descent evaluation of the expression against the allow list. Each function
 /// returns whether that part is allowed, or `None` when the tokens do not parse.
-struct Parser {
+struct Parser<'a> {
     tokens: Vec<Token>,
     pos: usize,
+    allow: &'a [String],
 }
 
-impl Parser {
+impl Parser<'_> {
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.pos)
     }
@@ -318,7 +363,7 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.pos += 1;
-                Some(allowed_license(&name))
+                Some(self.allow.contains(&name))
             }
             _ => None,
         }
@@ -328,11 +373,16 @@ impl Parser {
 /// Components whose licence the gate refuses, as `name version: reason`. An empty result
 /// means the gate passes.
 pub fn license_violations(components: &[Component]) -> Vec<String> {
+    license_violations_with(components, &default_allow())
+}
+
+/// Like [`license_violations`], against the given allow list.
+pub fn license_violations_with(components: &[Component], allow: &[String]) -> Vec<String> {
     components
         .iter()
         .filter_map(|c| match &c.license {
             None => Some(format!("{} {}: no licence declared", c.name, c.version)),
-            Some(expr) if !license_allowed(expr) => Some(format!(
+            Some(expr) if !license_allowed_with(expr, allow) => Some(format!(
                 "{} {}: licence `{expr}` is not on the allow list",
                 c.name, c.version
             )),
@@ -352,7 +402,8 @@ pub struct Reproducibility {
     pub cargo_flags: Vec<String>,
 }
 
-/// The attestation: what was built, from which lock file, and what the gate found.
+/// The attestation: what was built, from which lock file, and what the gate found. The policy
+/// section lists the built-in allow list. Use [`attestation_with_allow`] for `deny.toml`'s list.
 pub fn attestation(
     app: &App,
     rustc: &str,
@@ -361,6 +412,30 @@ pub fn attestation(
     violations: &[String],
     git_commit: Option<&str>,
     reproducibility: &Reproducibility,
+) -> Value {
+    attestation_with_allow(
+        app,
+        rustc,
+        lockfile_sha256,
+        outputs,
+        violations,
+        git_commit,
+        reproducibility,
+        &default_allow(),
+    )
+}
+
+/// [`attestation`], recording the allow list that the gate actually used.
+#[allow(clippy::too_many_arguments)]
+pub fn attestation_with_allow(
+    app: &App,
+    rustc: &str,
+    lockfile_sha256: &str,
+    outputs: &[(&str, String)],
+    violations: &[String],
+    git_commit: Option<&str>,
+    reproducibility: &Reproducibility,
+    allow: &[String],
 ) -> Value {
     let files: serde_json::Map<String, Value> = outputs
         .iter()
@@ -379,7 +454,7 @@ pub fn attestation(
         },
         "policy": {
             "name": "licence allow list",
-            "allowed": ALLOWED_LICENSES,
+            "allowed": allow,
             "result": if violations.is_empty() { "pass" } else { "fail" },
             "violations": violations,
         },
@@ -389,6 +464,74 @@ pub fn attestation(
 /// SHA-256 of `bytes`, as used for the attestation's digests.
 pub fn digest(bytes: &[u8]) -> String {
     tpt_shell_audit::sha256_hex(bytes)
+}
+
+/// The licence gate for a build: every component must pass the allow list, and every crate the
+/// lock file pins must be described by the metadata. Returns the violations; empty means pass.
+pub fn gate(
+    components: &[Component],
+    locked: &[lock::LockedPackage],
+    allow: &[String],
+) -> Vec<String> {
+    let mut violations = license_violations_with(components, allow);
+    violations.extend(lock::unknown_to_metadata(locked, components));
+    violations
+}
+
+/// The message for a failed gate, with its code. `violations` must not be empty.
+pub fn gate_failure(violations: &[String]) -> String {
+    format!(
+        "{CODE_GATE}: the licence gate refused {} item(s): {}",
+        violations.len(),
+        violations.join("; ")
+    )
+}
+
+/// `TS0122`: the licence gate refused a component. Fix: replace the crate, or add its licence to
+/// `deny.toml` with a justification line.
+pub const CODE_GATE: &str = "TS0122";
+
+/// Signs an artifact with the audit key (Ed25519 over the file's SHA-256). Returns the signature
+/// as 128 hex digits, to be written next to the artifact, for example `sbom.cdx.json.sig`.
+pub fn sign_artifact(
+    signer: &dyn tpt_shell_audit::keys::CheckpointSigner,
+    bytes: &[u8],
+) -> Result<String, String> {
+    tpt_shell_audit::keys::sign_detached(signer, bytes).map_err(|e| e.to_string())
+}
+
+/// Checks a signature made by [`sign_artifact`]. `public_key_hex` is the public key as 64 hex
+/// digits, as the audit tools write it.
+pub fn verify_artifact(
+    public_key_hex: &str,
+    bytes: &[u8],
+    signature_hex: &str,
+) -> Result<(), String> {
+    let key = tpt_shell_audit::verifying_key_from_hex(public_key_hex)
+        .ok_or("the public key is not 64 hex digits")?;
+    tpt_shell_audit::keys::verify_detached(&key, bytes, signature_hex).map_err(|e| e.to_string())
+}
+
+/// Formats Unix seconds as an ISO 8601 UTC timestamp, for example `2023-11-14T22:13:20Z`.
+pub fn iso8601_utc(epoch_seconds: u64) -> String {
+    let days = (epoch_seconds / 86_400) as i64;
+    let secs = epoch_seconds % 86_400;
+    // Civil date from a day count (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        secs / 3600,
+        (secs % 3600) / 60,
+        secs % 60
+    )
 }
 
 #[cfg(test)]
@@ -464,6 +607,7 @@ mod tests {
         assert!(license_allowed("MIT OR Apache-2.0"));
         assert!(license_allowed("Apache-2.0 OR MIT"));
         assert!(license_allowed("MIT"));
+        assert!(license_allowed("ISC"));
         assert!(license_allowed("Unicode-3.0 AND MIT"));
         assert!(license_allowed("MIT/Apache-2.0"), "the slash form is OR");
         assert!(license_allowed("(MIT OR Apache-2.0) AND Unicode-3.0"));
@@ -481,6 +625,27 @@ mod tests {
         assert!(!license_allowed("MIT (OR"));
         assert!(!license_allowed("MIT; GPL"));
         assert!(!license_allowed(""));
+    }
+
+    #[test]
+    fn the_gate_follows_the_allow_list_it_is_given() {
+        let only_zlib = vec!["Zlib".to_string()];
+        assert!(license_allowed_with("Zlib", &only_zlib));
+        assert!(!license_allowed_with("MIT", &only_zlib));
+        assert!(!license_allowed_with("MIT", &[]));
+    }
+
+    #[test]
+    fn the_allow_list_is_read_from_deny_toml() {
+        let list = allow_list_from_deny_toml(
+            "[licenses]\nallow = [\"MIT\", \"ISC\"]\n[bans]\nmultiple-versions = \"warn\"\n",
+        )
+        .unwrap();
+        assert_eq!(list, vec!["MIT", "ISC"]);
+        let err = allow_list_from_deny_toml("[bans]\n").unwrap_err();
+        assert!(err.starts_with(CODE_POLICY));
+        assert!(allow_list_from_deny_toml("[licenses]\nallow = [1]\n").is_err());
+        assert!(allow_list_from_deny_toml("not = [toml").is_err());
     }
 
     #[test]
@@ -533,28 +698,19 @@ mod tests {
             cyclonedx(&components, &app(), None).to_string()
         );
     }
-}
 
-/// Formats Unix seconds as an ISO 8601 UTC timestamp, for example `2023-11-14T22:13:20Z`.
-pub fn iso8601_utc(epoch_seconds: u64) -> String {
-    let days = (epoch_seconds / 86_400) as i64;
-    let secs = epoch_seconds % 86_400;
-    // Civil date from a day count (Howard Hinnant's algorithm).
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-        secs / 3600,
-        (secs % 3600) / 60,
-        secs % 60
-    )
+    #[test]
+    fn allow_list_matches_deny_toml() {
+        let deny = include_str!("../../../deny.toml");
+        let mut from_file = allow_list_from_deny_toml(deny).unwrap();
+        from_file.sort();
+        let mut built_in = default_allow();
+        built_in.sort();
+        assert_eq!(
+            from_file, built_in,
+            "ALLOWED_LICENSES must be kept in step with deny.toml"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -567,5 +723,60 @@ mod time_tests {
         assert_eq!(iso8601_utc(1_700_000_000), "2023-11-14T22:13:20Z");
         assert_eq!(iso8601_utc(951_782_400), "2000-02-29T00:00:00Z", "leap day");
         assert_eq!(iso8601_utc(1_709_251_199), "2024-02-29T23:59:59Z");
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+    use ed25519_dalek::SigningKey;
+
+    fn public_hex(key: &SigningKey) -> String {
+        key.verifying_key()
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    #[test]
+    fn signed_artifacts_verify_and_catch_edits() {
+        let key = SigningKey::from_bytes(&[11; 32]);
+        let sbom = b"{\"bomFormat\":\"CycloneDX\"}";
+        let sig = sign_artifact(&key, sbom).unwrap();
+        assert!(verify_artifact(&public_hex(&key), sbom, &sig).is_ok());
+        assert!(verify_artifact(&public_hex(&key), b"{}", &sig).is_err());
+        let other = SigningKey::from_bytes(&[12; 32]);
+        assert!(verify_artifact(&public_hex(&other), sbom, &sig).is_err());
+        assert!(verify_artifact("short", sbom, &sig).is_err());
+    }
+
+    #[test]
+    fn the_gate_combines_licence_and_lock_checks() {
+        let components = vec![
+            Component {
+                name: "ok".into(),
+                version: "1.0.0".into(),
+                license: Some("MIT".into()),
+                repository: None,
+            },
+            Component {
+                name: "copyleft".into(),
+                version: "2.0.0".into(),
+                license: Some("GPL-3.0-only".into()),
+                repository: None,
+            },
+        ];
+        let locked = vec![("ok".to_string(), "1.0.0".to_string())];
+        let violations = gate(&components, &locked, &default_allow());
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].contains("GPL-3.0-only"));
+        let failure = gate_failure(&violations);
+        assert!(failure.starts_with(CODE_GATE));
+
+        let unlisted = vec![("ghost".to_string(), "0.1.0".to_string())];
+        let violations = gate(&components[..1], &unlisted, &default_allow());
+        assert_eq!(violations.len(), 1, "a locked crate with no metadata fails");
+        assert!(gate(&components[..1], &[], &default_allow()).is_empty());
     }
 }

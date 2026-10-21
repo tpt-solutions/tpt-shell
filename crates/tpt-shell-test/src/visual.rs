@@ -12,6 +12,9 @@
 //!
 //! This is not CIEDE2000, and it has not been tuned against human judgement. The tolerance
 //! and the threshold are the knobs to set per screen.
+//!
+//! Support: Full for the comparison itself. Screenshots are read from PNG files by
+//! [`crate::png`], and [`crate::screens`] merges the files from several CI jobs.
 
 /// An RGBA image: 8 bits per channel, rows from the top, no padding.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,6 +47,11 @@ impl Image {
 
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    /// The pixels, 8 bits per channel, rows from the top.
+    pub fn rgba(&self) -> &[u8] {
+        &self.rgba
     }
 
     fn pixel(&self, x: u32, y: u32) -> [u8; 4] {

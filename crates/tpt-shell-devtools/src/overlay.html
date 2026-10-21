@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>tpt-shell devtools</title>
+  <style>
+    :root {
+      --tpt-dt-bg: #ffffff;
+      --tpt-dt-fg: #1b1f24;
+      --tpt-dt-muted: #5b6470;
+      --tpt-dt-line: #d0d7de;
+      --tpt-dt-accent: #0b5cad;
+      --tpt-dt-bad: #b42318;
+      --tpt-dt-good: #137333;
+      --tpt-dt-font: system-ui, -apple-system, "Segoe UI", sans-serif;
+      --tpt-dt-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --tpt-dt-bg: #14171c;
+        --tpt-dt-fg: #e6e9ee;
+        --tpt-dt-muted: #9aa4b2;
+        --tpt-dt-line: #2d333b;
+        --tpt-dt-accent: #6cb6ff;
+        --tpt-dt-bad: #ff8a80;
+        --tpt-dt-good: #7ee2a8;
+      }
+    }
+    :root[data-theme="dark"] {
+      --tpt-dt-bg: #14171c;
+      --tpt-dt-fg: #e6e9ee;
+      --tpt-dt-muted: #9aa4b2;
+      --tpt-dt-line: #2d333b;
+      --tpt-dt-accent: #6cb6ff;
+      --tpt-dt-bad: #ff8a80;
+      --tpt-dt-good: #7ee2a8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--tpt-dt-bg);
+      color: var(--tpt-dt-fg);
+      font: 13px/1.4 var(--tpt-dt-font);
+    }
+    [hidden] { display: none !important; }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--tpt-dt-line);
+      flex-wrap: wrap;
+    }
+    header h1 { font-size: 15px; margin: 0; }
+    header .muted { color: var(--tpt-dt-muted); }
+    nav { display: flex; gap: 4px; flex-wrap: wrap; padding: 8px 16px 0; }
+    nav button, button.action {
+      font: inherit;
+      color: var(--tpt-dt-fg);
+      background: transparent;
+      border: 1px solid var(--tpt-dt-line);
+      border-radius: 6px;
+      padding: 4px 10px;
+      cursor: pointer;
+      min-height: 28px;
+    }
+    nav button[aria-selected="true"] { border-color: var(--tpt-dt-accent); color: var(--tpt-dt-accent); }
+    button:focus-visible { outline: 2px solid var(--tpt-dt-accent); outline-offset: 2px; }
+    main { padding: 12px 16px 24px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      text-align: left;
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--tpt-dt-line);
+      vertical-align: top;
+    }
+    th { color: var(--tpt-dt-muted); font-weight: 600; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .mono { font-family: var(--tpt-dt-mono); word-break: break-all; }
+    .ok { color: var(--tpt-dt-good); }
+    .bad { color: var(--tpt-dt-bad); }
+    .muted { color: var(--tpt-dt-muted); }
+    .summary { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+    .summary div { min-width: 120px; }
+    .summary strong { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+    .bar { height: 6px; background: var(--tpt-dt-line); border-radius: 3px; overflow: hidden; min-width: 80px; }
+    .bar > span { display: block; height: 100%; background: var(--tpt-dt-accent); }
+    .explorer { display: grid; gap: 8px; grid-template-columns: minmax(140px, 1fr) minmax(200px, 2fr); }
+    .explorer ul { list-style: none; margin: 0; padding: 0; }
+    .explorer li { margin-bottom: 2px; }
+    .explorer li button { width: 100%; text-align: left; border: none; }
+    textarea {
+      width: 100%;
+      min-height: 96px;
+      font: 12px/1.4 var(--tpt-dt-mono);
+      color: var(--tpt-dt-fg);
+      background: var(--tpt-dt-bg);
+      border: 1px solid var(--tpt-dt-line);
+      border-radius: 6px;
+      padding: 6px;
+    }
+    pre {
+      margin: 8px 0 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font: 12px/1.4 var(--tpt-dt-mono);
+      color: var(--tpt-dt-fg);
+    }
+    .empty { color: var(--tpt-dt-muted); padding: 12px 0; }
+    @media (max-width: 640px) {
+      .explorer { grid-template-columns: 1fr; }
+      th, td { padding: 4px 4px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>tpt-shell devtools</h1>
+    <span class="muted" id="engine-line"></span>
+    <span class="muted">Ctrl+Shift+D shows or hides this panel</span>
+  </header>
+  <nav role="tablist" aria-label="Devtools panels">
+    <button role="tab" type="button" data-panel="ipc" aria-selected="true">IPC log</button>
+    <button role="tab" type="button" data-panel="jobs" aria-selected="false">Jobs</button>
+    <button role="tab" type="button" data-panel="caps" aria-selected="false">Capabilities</button>
+    <button role="tab" type="button" data-panel="audit" aria-selected="false">Audit tail</button>
+    <button role="tab" type="button" data-panel="contract" aria-selected="false">Contract</button>
+    <button role="tab" type="button" data-panel="engine" aria-selected="false">Engine</button>
+  </nav>
+  <main id="panels">
+    <section id="ipc" data-panel="ipc"></section>
+    <section id="jobs" data-panel="jobs" hidden></section>
+    <section id="caps" data-panel="caps" hidden></section>
+    <section id="audit" data-panel="audit" hidden></section>
+    <section id="contract" data-panel="contract" hidden></section>
+    <section id="engine" data-panel="engine" hidden></section>
+  </main>
+  <script type="application/json" id="tpt-devtools-data">__TPT_DEVTOOLS_DATA__</script>
+  <script>
+    (function () {
+      "use strict";
+
+      var data = JSON.parse(document.getElementById("tpt-devtools-data").textContent);
+
+      function el(tag, text, className) {
+        var node = document.createElement(tag);
+        if (text !== undefined && text !== null) node.textContent = String(text);
+        if (className) node.className = className;
+        return node;
+      }
+
+      function cell(text, className) {
+        var td = el("td", text, className);
+        return td;
+      }
+
+      function table(headers, rows, numericColumns) {
+        var wrap = document.createElement("div");
+        var t = el("table");
+        var head = el("tr");
+        headers.forEach(function (h, i) {
+          head.appendChild(el("th", h, numericColumns.indexOf(i) >= 0 ? "num" : ""));
+        });
+        t.appendChild(head);
+        rows.forEach(function (row) {
+          var tr = el("tr");
+          row.forEach(function (value, i) {
+            var td = value instanceof Node ? el("td") : cell(value, numericColumns.indexOf(i) >= 0 ? "num" : "");
+            if (value instanceof Node) td.appendChild(value);
+            tr.appendChild(td);
+          });
+          t.appendChild(tr);
+        });
+        wrap.appendChild(t);
+        return wrap;
+      }
+
+      function empty(panel, text) {
+        panel.appendChild(el("p", text, "empty"));
+      }
+
+      function micros(us) {
+        if (us >= 1000) return (us / 1000).toFixed(2) + " ms";
+        return us + " us";
+      }
+
+      function percentile(sorted, p) {
+        if (sorted.length === 0) return 0;
+        var index = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
+        return sorted[Math.max(0, index)];
+      }
+
+      function renderIpc() {
+        var panel = document.getElementById("ipc");
+        panel.textContent = "";
+        var log = data.ipcLog || [];
+        if (log.length === 0) {
+          empty(panel, "No IPC calls yet.");
+          return;
+        }
+        var sorted = log.map(function (e) { return e.latencyUs; }).sort(function (a, b) { return a - b; });
+        var failed = log.filter(function (e) { return e.outcome !== "ok"; }).length;
+        var summary = el("div", null, "summary");
+        [["Calls", log.length], ["Failed", failed], ["p50", micros(percentile(sorted, 50))],
+         ["p95", micros(percentile(sorted, 95))], ["Max", micros(sorted[sorted.length - 1])]]
+          .forEach(function (pair) {
+            var box = el("div");
+            box.appendChild(el("strong", pair[1]));
+            box.appendChild(el("span", pair[0], "muted"));
+            summary.appendChild(box);
+          });
+        panel.appendChild(summary);
+        var maxLatency = sorted[sorted.length - 1] || 1;
+        var rows = log.slice().reverse().map(function (e) {
+          var bar = el("div", null, "bar");
+          var fill = el("span");
+          fill.style.width = Math.max(2, Math.round((e.latencyUs / maxLatency) * 100)) + "%";
+          bar.appendChild(fill);
+          return [
+            el("span", e.command, "mono"),
+            micros(e.latencyUs),
+            bar,
+            el("span", e.outcome, e.outcome === "ok" ? "ok" : "bad")
+          ];
+        });
+        panel.appendChild(table(["Command", "Latency", "Relative", "Outcome"], rows, [1]));
+      }
+
+      function renderJobs() {
+        var panel = document.getElementById("jobs");
+        panel.textContent = "";
+        var jobs = data.jobs || [];
+        if (jobs.length === 0) {
+          empty(panel, "No jobs.");
+          return;
+        }
+        var rows = jobs.map(function (j) {
+          var progress = el("span", j.progress === null || j.progress === undefined
+            ? "-" : Math.round(j.progress * 100) + "%");
+          return [String(j.id), j.name, j.state, progress];
+        });
+        panel.appendChild(table(["Id", "Name", "State", "Progress"], rows, [0, 3]));
+      }
+
+      function renderCaps() {
+        var panel = document.getElementById("caps");
+        panel.textContent = "";
+        var caps = data.capabilities || [];
+        if (caps.length === 0) {
+          empty(panel, "No capabilities are declared.");
+          return;
+        }
+        var rows = caps.map(function (c) {
+          return [c.name, el("span", c.granted ? "granted" : "not granted", c.granted ? "ok" : "bad")];
+        });
+        panel.appendChild(table(["Capability", "State"], rows, []));
+      }
+
+      function renderAudit() {
+        var panel = document.getElementById("audit");
+        panel.textContent = "";
+        var rows = data.auditTail || [];
+        if (rows.length === 0) {
+          empty(panel, "The audit log is empty or not enabled.");
+          return;
+        }
+        var body = rows.slice().reverse().map(function (a) {
+          return [a.seq, a.wallUnixMs, a.actor, a.command, a.outcome];
+        });
+        panel.appendChild(table(["Seq", "Unix ms", "Actor", "Command", "Outcome"], body, [0, 1]));
+      }
+
+      function renderEngine() {
+        var panel = document.getElementById("engine");
+        panel.textContent = "";
+        var e = data.engine || {};
+        panel.appendChild(table(["Item", "Value"], [
+          ["Engine", e.name || "unknown"],
+          ["Runtime version", e.version || "unknown"],
+          ["Platform", e.platform || "unknown"]
+        ], []));
+      }
+
+      function renderContract() {
+        var panel = document.getElementById("contract");
+        panel.textContent = "";
+        var commands = data.contract || [];
+        if (commands.length === 0) {
+          empty(panel, "This app has no commands in its contract.");
+          return;
+        }
+        var layout = el("div", null, "explorer");
+        var list = el("ul");
+        var detail = el("div");
+        var title = el("h2", "", "");
+        title.style.fontSize = "14px";
+        var meta = el("p", "", "muted");
+        var args = el("textarea");
+        args.setAttribute("aria-label", "Arguments as JSON");
+        var call = el("button", "Call", "action");
+        call.type = "button";
+        var result = el("pre");
+        result.setAttribute("aria-live", "polite");
+
+        function show(command) {
+          title.textContent = command.name;
+          meta.textContent = command.kind + (command.capability ? " - needs " + command.capability : "");
+          args.value = JSON.stringify(sampleFor(command.args), null, 2);
+          result.textContent = "";
+          args.dataset.command = command.name;
+        }
+
+        commands.forEach(function (command, index) {
+          var li = el("li");
+          var pick = el("button", command.name);
+          pick.type = "button";
+          pick.addEventListener("click", function () { show(command); });
+          li.appendChild(pick);
+          list.appendChild(li);
+          if (index === 0) show(command);
+        });
+
+        call.addEventListener("click", function () {
+          var name = args.dataset.command;
+          var parsed;
+          try {
+            parsed = args.value.trim() === "" ? {} : JSON.parse(args.value);
+          } catch (err) {
+            result.textContent = "Arguments are not valid JSON: " + err.message;
+            return;
+          }
+          if (!window.tpt || typeof window.tpt.invoke !== "function") {
+            result.textContent = "The tpt runtime is not present in this window.";
+            return;
+          }
+          var started = performance.now();
+          window.tpt.invoke(name, parsed).then(function (value) {
+            result.textContent = "ok in " + Math.round(performance.now() - started) + " ms\n" +
+              JSON.stringify(value, null, 2);
+          }, function (error) {
+            var code = error && error.code ? error.code : "error";
+            var message = error && error.message ? error.message : String(error);
+            result.textContent = code + ": " + message;
+          });
+        });
+
+        detail.appendChild(title);
+        detail.appendChild(meta);
+        detail.appendChild(args);
+        detail.appendChild(el("div"));
+        detail.appendChild(call);
+        detail.appendChild(result);
+        layout.appendChild(list);
+        layout.appendChild(detail);
+        panel.appendChild(layout);
+      }
+
+      // A starting value for the arguments, built from the schema's field names. Only the shape
+      // is used; the developer edits the values.
+      function sampleFor(schema) {
+        if (!schema || typeof schema !== "object") return {};
+        var fields = schema.fields || schema.struct || null;
+        if (Array.isArray(fields)) {
+          var out = {};
+          fields.forEach(function (f) { if (f && f.name) out[f.name] = null; });
+          return out;
+        }
+        return {};
+      }
+
+      function renderAll() {
+        var engine = data.engine || {};
+        document.getElementById("engine-line").textContent =
+          (engine.name || "unknown engine") + (engine.version ? " " + engine.version : "") +
+          (engine.platform ? " on " + engine.platform : "");
+        renderIpc();
+        renderJobs();
+        renderCaps();
+        renderAudit();
+        renderContract();
+        renderEngine();
+      }
+
+      function select(name) {
+        document.querySelectorAll("nav [data-panel]").forEach(function (tab) {
+          tab.setAttribute("aria-selected", tab.dataset.panel === name ? "true" : "false");
+        });
+        document.querySelectorAll("main > section").forEach(function (section) {
+          section.hidden = section.dataset.panel !== name;
+        });
+      }
+
+      document.querySelectorAll("nav [data-panel]").forEach(function (tab) {
+        tab.addEventListener("click", function () { select(tab.dataset.panel); });
+      });
+
+      var root = document.body;
+      function setVisible(visible) {
+        root.hidden = !visible;
+      }
+      document.addEventListener("keydown", function (event) {
+        if (event.ctrlKey && event.shiftKey && (event.key === "D" || event.key === "d")) {
+          event.preventDefault();
+          setVisible(root.hidden);
+        }
+      });
+
+      renderAll();
+      window.tptDevtools = {
+        show: function () { setVisible(true); },
+        hide: function () { setVisible(false); },
+        // The host calls this with a new snapshot (as produced by Snapshot::to_json) to refresh.
+        update: function (next) {
+          data = next;
+          renderAll();
+        }
+      };
+    })();
+  </script>
+</body>
+</html>
