@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Copyright (c) 2026 TPT Solutions
 
-//! Printer and label builders (spec §10.2, helpers). These build bytes only; sending them to
-//! a device is the transport's job (later milestones).
+//! Device support (spec §10.2, M7): identifiers and scopes, the transport trait, the hub that
+//! opens devices under a scope and audits their use, virtual devices for tests, and the printer
+//! and label builders.
 //!
 //! Text is ASCII. A code page is not chosen for the device, so non-ASCII text is refused
 //! rather than printed as the wrong glyphs.
 
 pub mod escpos;
+pub mod hub;
 pub mod id;
+pub mod transport;
+pub mod virtual_devices;
 pub mod zpl;
 
 /// Text the builders refuse: anything outside printable ASCII plus tab and newline.
