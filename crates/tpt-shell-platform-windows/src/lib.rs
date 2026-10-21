@@ -33,9 +33,13 @@ pub mod local_time;
 #[cfg(windows)]
 pub mod random;
 #[cfg(windows)]
+pub mod registry;
+#[cfg(windows)]
 pub mod shim;
 #[cfg(windows)]
 pub mod single_instance;
+#[cfg(windows)]
+pub mod startup;
 #[cfg(windows)]
 pub mod tray;
 #[cfg(windows)]
