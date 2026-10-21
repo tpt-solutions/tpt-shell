@@ -169,9 +169,9 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ## Phase M2 â€” Typed contract, macros, codegen, manifest, capabilities, audit (basic chain)
 
 ### tpt-shell-macros
-- [ ] `#[command]` with name, capability, kind (sync/async/job/stream), flags (ui, agent) (name, capability and kind = "sync" are done; async, job, stream and the ui and agent flags are not)
+- [ ] `#[command]` with name, capability, kind (sync/async/job/stream), flags (ui, agent) (name, capability and kind = "sync" are done; a command with a capability registers behind its grant, with target `None`, so only an unrestricted grant allows it; a command that acts on a path, device or URL is registered by hand with a target; async, job, stream and the ui and agent flags are not)
 - [x] `commands![]` (and `register_commands!`, which registers the handlers on a router)
-- [ ] `embed_dir!` (final) and `include_manifest!`
+- [ ] `embed_dir!` (final) and `include_manifest!` (`embed_dir!` output reaches the app through `App::assets` and is served from the app origin; the directory is still read at compile time and does not rebuild on new files; `include_manifest!` is not built)
 - [ ] `Contract` derive macro
 - [ ] rust-analyzer friendliness checks
 - [ ] Compile-fail tests (trybuild-style, licence-checked or hand-rolled) (one bad option was checked by hand; no test suite yet)
@@ -270,7 +270,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ### Windows baseline features (first pass)
 - [ ] Multiple windows, parent/child, modal, frameless, always-on-top, transparent (multiple windows, parent/child, modal, frameless and always-on-top work on Windows and are tested; transparency is still `Unsupported`)
 - [ ] Dialogs (open, save, message, folder) via IFileDialog (open, save and folder dialogs are built with hand-written vtables checked against the SDK header; they are never shown in tests, and multi-select and the message box are not built)
-- [x] App builder in the facade (`tpt_shell::App`): windows, grants and commands; each window's page messages go through the capability-checked router with that window's grants; consent is refused until the native dialog exists; a runtime test runs an app end to end. Windows only, with `App::loader` set explicitly. Pages load from the app origin through `App::asset` (the old `Window::html` placed pages at a data: origin and is gone). Still missing: `#[command]`, `commands![]`, `embed_dir!`, async handlers and the worker pool
+- [x] App builder in the facade (`tpt_shell::App`): windows, grants and commands; each window's page messages go through the capability-checked router with that window's grants; consent is refused until the native dialog exists; a runtime test runs an app end to end. Windows only, with `App::loader` set explicitly. Pages load from the app origin through `App::asset` (the old `Window::html` placed pages at a data: origin and is gone). Commands come from `#[command]` through `App::register`, and assets from `embed_dir!` through `App::assets`. Still missing: async handlers, jobs and streams, the worker pool, and `include_manifest!`
 - [x] Clipboard (text first): `tpt-shell-platform-windows::clipboard`, restores the user's clipboard in its test
 - [ ] Window state restore, fullscreen, multi-monitor
 
