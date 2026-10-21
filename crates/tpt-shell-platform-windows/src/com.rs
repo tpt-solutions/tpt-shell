@@ -103,6 +103,21 @@ pub fn wide(s: &str) -> Vec<u16> {
 
 /// Reads a string that COM allocated, then frees it with CoTaskMemFree.
 ///
+/// Reads a NUL-terminated UTF-16 string that the caller does not own and must not free.
+///
+/// # Safety
+/// `p` must be null or point at a NUL-terminated UTF-16 string that stays valid for the call.
+pub unsafe fn read_wide(p: *const u16) -> String {
+    if p.is_null() {
+        return String::new();
+    }
+    let mut len = 0usize;
+    while *p.add(len) != 0 {
+        len += 1;
+    }
+    String::from_utf16_lossy(std::slice::from_raw_parts(p, len))
+}
+
 /// # Safety
 /// `p` must be null or a NUL-terminated UTF-16 string allocated with CoTaskMemAlloc.
 pub unsafe fn take_co_string(p: *mut u16) -> String {

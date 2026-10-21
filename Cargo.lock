@@ -630,6 +630,7 @@ dependencies = [
 name = "tpt-shell-agent"
 version = "0.0.0"
 dependencies = [
+ "serde",
  "serde_json",
  "tpt-shell-ipc",
 ]
@@ -739,6 +740,8 @@ dependencies = [
 name = "tpt-shell-platform-windows"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
+ "tpt-shell-agent",
  "tpt-shell-capabilities",
  "tpt-shell-core",
  "tpt-shell-ipc",

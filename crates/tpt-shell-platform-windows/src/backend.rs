@@ -63,6 +63,9 @@ const DWMWA_SYSTEMBACKDROP_TYPE: u32 = 38;
 const WINDOW_CLASS: &str = "tpt_shell_window";
 const CONTROLLER_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Where the result of [`WindowsBackend::eval_json`] lands: the status and the JSON text.
+type EvalSlot = Rc<RefCell<Option<(HRESULT, Option<String>)>>>;
+
 /// Handle to a window managed by [`WindowsBackend`]. It is the window's `HWND` value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowId(pub isize);
@@ -306,6 +309,31 @@ impl WindowsBackend {
                 DispatchMessageW(&msg);
             }
         }
+    }
+
+    /// Runs `script` in the window's page and returns its result as JSON text (`None` when the
+    /// script produced no value). Waits by pumping messages, so it must not be called from inside
+    /// a window procedure, such as a message handler.
+    pub fn eval_json(&mut self, id: WindowId, script: &str) -> Result<Option<String>> {
+        self.check_thread()?;
+        let slot: EvalSlot = Rc::new(RefCell::new(None));
+        let done = slot.clone();
+        self.with_web(id, |w| {
+            w.execute_script_json(script, move |hr, json| {
+                *done.borrow_mut() = Some((hr, json))
+            })
+        })?
+        .map_err(|hr| hr_error("ExecuteScript", hr))?;
+        if !pump_until(CONTROLLER_TIMEOUT, || slot.borrow().is_some()) {
+            return Err(Error::Backend(
+                "the page did not answer the script in time".into(),
+            ));
+        }
+        let (hr, json) = slot.borrow_mut().take().expect("set by the callback");
+        if hr < 0 {
+            return Err(hr_error("ExecuteScript", hr));
+        }
+        Ok(json)
     }
 
     /// Title of the window's loaded document, or an empty string when none is loaded.
@@ -1440,6 +1468,100 @@ mod tests {
             drop(b);
             let _ = std::fs::remove_dir_all(&dir);
             assert!(got, "expected title {expected:?}, last was {title:?}");
+        }
+
+        /// A page with a form, a password field, a redacted block, and a button that marks the
+        /// title when clicked.
+        const AGENT_PAGE: &str = r#"<!doctype html><title>starting</title>
+<form><label for="u">User</label><input id="u" type="text">
+<label for="p">Pass</label><input id="p" type="password" value="hunter2">
+<div data-tpt-redact>secret-42</div>
+<button id="go" type="button">Sign in</button></form>
+<script>
+document.getElementById('go').addEventListener('click', function () { document.title = 'clicked'; });
+document.title = 'ready';
+</script>"#;
+
+        /// Finds the reference of the first node with `role` and `name`.
+        fn find_ref(nodes: &[tpt_shell_agent::page::Node], role: &str, name: &str) -> Option<u32> {
+            nodes.iter().find_map(|n| {
+                if n.role == role && n.name == name {
+                    Some(n.ref_id)
+                } else {
+                    find_ref(&n.children, role, name)
+                }
+            })
+        }
+
+        #[test]
+        fn an_agent_snapshot_and_actions_work_on_a_real_page() {
+            use tpt_shell_agent::page::{
+                action_script, parse_action_result, parse_snapshot, render, snapshot_script, Action,
+            };
+            let Some((mut b, dir, _serial)) = start("agent") else {
+                return;
+            };
+            let id = b.create(&spec("main")).expect("create");
+            b.load_html(id, AGENT_PAGE).expect("load_html");
+            let mut title = String::new();
+            let ready = pump_until(Duration::from_secs(30), || {
+                title = b.document_title(id).unwrap_or_default();
+                title == "ready"
+            });
+            assert!(ready, "page never loaded; title was {title:?}");
+
+            let json = b
+                .eval_json(id, &snapshot_script())
+                .expect("snapshot")
+                .expect("a value");
+            let snap = parse_snapshot(&json).expect("parse");
+            let text = render(&snap);
+            assert!(text.contains("<untrusted>Sign in</untrusted>"), "{text}");
+            assert!(!text.contains("hunter2"), "a password value leaked: {text}");
+            assert!(!text.contains("secret-42"), "redacted text leaked: {text}");
+
+            let button = find_ref(&snap.tree, "button", "Sign in").expect("button ref");
+            let clicked = b
+                .eval_json(id, &action_script(&Action::Click { ref_id: button }))
+                .expect("click")
+                .expect("a value");
+            parse_action_result(&clicked).expect("click succeeds");
+            let got = pump_until(Duration::from_secs(30), || {
+                title = b.document_title(id).unwrap_or_default();
+                title == "clicked"
+            });
+            assert!(got, "the click did not reach the page; title was {title:?}");
+
+            let field = find_ref(&snap.tree, "textbox", "User").expect("user ref");
+            let typed = b
+                .eval_json(
+                    id,
+                    &action_script(&Action::Type {
+                        ref_id: field,
+                        text: "ada".into(),
+                    }),
+                )
+                .expect("type")
+                .expect("a value");
+            parse_action_result(&typed).expect("typing succeeds");
+            let read = b
+                .eval_json(id, &action_script(&Action::Read { ref_id: field }))
+                .expect("read")
+                .expect("a value");
+            assert_eq!(parse_action_result(&read), Ok(serde_json::json!("ada")));
+
+            let password = find_ref(&snap.tree, "textbox", "Pass").expect("password ref");
+            let refused = b
+                .eval_json(id, &action_script(&Action::Read { ref_id: password }))
+                .expect("read password")
+                .expect("a value");
+            assert!(
+                parse_action_result(&refused).is_err(),
+                "a password was read"
+            );
+
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
         }
 
         #[test]

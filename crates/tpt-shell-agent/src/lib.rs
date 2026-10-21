@@ -25,6 +25,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+pub mod page;
+
 use serde_json::{json, Value};
 use tpt_shell_ipc::contract::json_schema;
 use tpt_shell_ipc::rate_limit::{RateLimit, RateLimiter};

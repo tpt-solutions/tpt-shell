@@ -496,8 +496,22 @@ impl WebView {
         script: &str,
         on_done: impl FnOnce(HRESULT) + 'static,
     ) -> Result<(), HRESULT> {
-        let handler =
-            new_completed_handler(IID_EXECUTE_SCRIPT_HANDLER, move |hr, _result| on_done(hr));
+        self.execute_script_json(script, move |hr, _json| on_done(hr))
+    }
+
+    /// Runs `script` and passes its result to `on_done` as JSON text. The result is `None` when
+    /// the script failed or produced no value.
+    pub fn execute_script_json(
+        &self,
+        script: &str,
+        on_done: impl FnOnce(HRESULT, Option<String>) + 'static,
+    ) -> Result<(), HRESULT> {
+        let handler = new_completed_handler(IID_EXECUTE_SCRIPT_HANDLER, move |hr, result| {
+            // SAFETY: WebView2 passes the result string for the duration of this callback.
+            let json =
+                (!result.is_null()).then(|| unsafe { crate::com::read_wide(result as *const u16) });
+            on_done(hr, json);
+        });
         let text = wide(script);
         let vt: &WebViewVtbl = self.0.vtbl();
         // SAFETY: `text` is NUL-terminated and lives across the call; `handler` is live for the call.
