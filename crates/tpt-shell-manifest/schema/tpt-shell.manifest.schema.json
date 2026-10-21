@@ -36,7 +36,13 @@
           },
           "title": { "type": "string" },
           "width": { "type": "number", "exclusiveMinimum": 0 },
-          "height": { "type": "number", "exclusiveMinimum": 0 }
+          "height": { "type": "number", "exclusiveMinimum": 0 },
+          "allow_navigation": {
+            "type": "array",
+            "default": [],
+            "description": "https:// URL prefixes this window may navigate to. Remote navigation is blocked otherwise.",
+            "items": { "type": "string", "pattern": "^https://[^/?#@\\s]+" }
+          }
         }
       }
     },

@@ -16,6 +16,8 @@ pub struct WindowSpec {
     pub name: String,
     pub title: String,
     pub size: LogicalSize,
+    /// `https://` URL prefixes this window may navigate to. Empty: app content only.
+    pub allow_navigation: Vec<String>,
 }
 
 /// Owns the UI thread's event loop.

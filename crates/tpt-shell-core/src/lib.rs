@@ -12,6 +12,7 @@ pub mod error;
 pub mod executor;
 pub mod fake;
 pub mod geometry;
+pub mod navigation;
 pub mod platform;
 pub mod rng;
 pub mod theme;

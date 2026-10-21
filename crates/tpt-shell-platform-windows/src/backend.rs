@@ -99,10 +99,14 @@ pub fn is_app_url(url: &str) -> bool {
     }
 }
 
-/// Navigations the policy allows: the app origin, `about:blank` (used by WebView2 itself), and
-/// the exact `data:` URL of the document this backend loaded.
-fn allowed_navigation(url: &str, host_document: &Option<String>) -> bool {
-    is_app_url(url) || url == "about:blank" || host_document.as_deref() == Some(url)
+/// Navigations the policy allows: the app origin, `about:blank` (used by WebView2 itself), the
+/// exact `data:` URL of the document this backend loaded, and any URL the window's allowlist
+/// covers (spec §9: remote navigation is blocked unless allowlisted per window).
+fn allowed_navigation(url: &str, host_document: &Option<String>, allowlist: &[String]) -> bool {
+    is_app_url(url)
+        || url == "about:blank"
+        || host_document.as_deref() == Some(url)
+        || tpt_shell_core::navigation::url_is_allowlisted(url, allowlist)
 }
 
 /// The URL WebView2 uses when a document is loaded with NavigateToString.
@@ -631,7 +635,7 @@ impl WindowsBackend {
         let id = WindowId(hwnd as isize);
         // Size the window before the webview is attached, so the webview gets real bounds.
         resize_logical(hwnd, spec.size);
-        match self.attach_webview(hwnd) {
+        match self.attach_webview(hwnd, &spec.allow_navigation) {
             Ok(mut entry) => {
                 entry.owner = (!owner.is_null()).then_some(owner);
                 WINDOWS.with(|w| w.borrow_mut().insert(id.0, entry));
@@ -646,7 +650,7 @@ impl WindowsBackend {
     }
 
     /// Creates the controller and webview for a new window handle. The window stays hidden.
-    fn attach_webview(&self, hwnd: HWND) -> Result<Entry> {
+    fn attach_webview(&self, hwnd: HWND, allow_navigation: &[String]) -> Result<Entry> {
         let slot: Rc<RefCell<Option<std::result::Result<Controller, HRESULT>>>> =
             Rc::new(RefCell::new(None));
         let done = slot.clone();
@@ -677,11 +681,17 @@ impl WindowsBackend {
             .map_err(|hr| hr_error("put_AreDefaultContextMenusEnabled", hr))?;
         let host_document = Rc::new(RefCell::new(None::<String>));
         let for_top = host_document.clone();
-        web.set_navigation_policy(move |url| allowed_navigation(url, &for_top.borrow()))
-            .map_err(|hr| hr_error("NavigationStarting", hr))?;
+        let allow_top = allow_navigation.to_vec();
+        web.set_navigation_policy(move |url| {
+            allowed_navigation(url, &for_top.borrow(), &allow_top)
+        })
+        .map_err(|hr| hr_error("NavigationStarting", hr))?;
         let for_frames = host_document.clone();
-        web.set_frame_navigation_policy(move |url| allowed_navigation(url, &for_frames.borrow()))
-            .map_err(|hr| hr_error("frame NavigationStarting", hr))?;
+        let allow_frames = allow_navigation.to_vec();
+        web.set_frame_navigation_policy(move |url| {
+            allowed_navigation(url, &for_frames.borrow(), &allow_frames)
+        })
+        .map_err(|hr| hr_error("frame NavigationStarting", hr))?;
         // Accessibility signals are not read on Windows yet, so they default to off.
         let scheme = tpt_shell_core::ThemeBackend::color_scheme(self)?;
         let script = injection_script(&self.theme, scheme, Signals::default())?;
@@ -941,10 +951,44 @@ mod tests {
     #[test]
     fn only_the_loaded_document_may_use_a_data_url() {
         let loaded = Some(html_data_url("<p>a</p>"));
-        assert!(allowed_navigation(&html_data_url("<p>a</p>"), &loaded));
-        assert!(!allowed_navigation(&html_data_url("<p>evil</p>"), &loaded));
-        assert!(!allowed_navigation(&html_data_url("<p>a</p>"), &None));
-        assert!(allowed_navigation("about:blank", &None));
+        assert!(allowed_navigation(&html_data_url("<p>a</p>"), &loaded, &[]));
+        assert!(!allowed_navigation(
+            &html_data_url("<p>evil</p>"),
+            &loaded,
+            &[]
+        ));
+        assert!(!allowed_navigation(&html_data_url("<p>a</p>"), &None, &[]));
+        assert!(allowed_navigation("about:blank", &None, &[]));
+    }
+
+    #[test]
+    fn remote_pages_load_only_when_the_window_allowlists_them() {
+        let list = vec!["https://docs.example.com".to_string()];
+        assert!(!allowed_navigation(
+            "https://docs.example.com/a",
+            &None,
+            &[]
+        ));
+        assert!(allowed_navigation(
+            "https://docs.example.com/a",
+            &None,
+            &list
+        ));
+        assert!(!allowed_navigation(
+            "https://docs.example.com.evil.net/",
+            &None,
+            &list
+        ));
+        assert!(!allowed_navigation(
+            "https://other.example.com/",
+            &None,
+            &list
+        ));
+        assert!(!allowed_navigation(
+            "http://docs.example.com/",
+            &None,
+            &list
+        ));
     }
 
     #[test]
@@ -987,6 +1031,7 @@ mod tests {
                     width: 640.0,
                     height: 480.0,
                 },
+                allow_navigation: Vec::new(),
             }
         }
 

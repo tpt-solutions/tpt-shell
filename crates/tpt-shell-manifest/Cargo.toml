@@ -13,6 +13,7 @@ rust-version.workspace = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+tpt-shell-core = { path = "../tpt-shell-core", version = "0.0.0" }
 toml = "0.8"
 
 [dev-dependencies]

@@ -79,6 +79,8 @@ pub struct Window {
     pub title: String,
     pub width: f64,
     pub height: f64,
+    /// `https://` URL prefixes this window may navigate to. Empty: app content only.
+    pub allow_navigation: Vec<String>,
 }
 
 const LATER_SECTIONS: [&str; 8] = [
@@ -125,6 +127,8 @@ struct RawWindow {
     title: Option<String>,
     width: Option<Spanned<f64>>,
     height: Option<Spanned<f64>>,
+    #[serde(default)]
+    allow_navigation: Vec<Spanned<String>>,
 }
 
 #[derive(Deserialize)]
@@ -180,11 +184,25 @@ pub fn parse(text: &str) -> Result<Manifest, ManifestError> {
         }
         let width = positive(w.width, "width", line_of)?;
         let height = positive(w.height, "height", line_of)?;
+        let mut allow_navigation = Vec::new();
+        for entry in &w.allow_navigation {
+            if !tpt_shell_core::navigation::is_valid_entry(entry.get_ref()) {
+                return Err(invalid(
+                    line_of(entry.span().start),
+                    format!(
+                        "windows.allow_navigation `{}` must be an https:// URL with a host,                          no user information and no spaces",
+                        entry.get_ref()
+                    ),
+                ));
+            }
+            allow_navigation.push(entry.get_ref().clone());
+        }
         windows.push(Window {
             name: name.get_ref().clone(),
             title: w.title.unwrap_or_else(|| name.get_ref().clone()),
             width,
             height,
+            allow_navigation,
         });
     }
 
@@ -477,7 +495,10 @@ mod schema_tests {
         app_keys.sort();
         window_keys.sort();
         assert_eq!(app_keys, ["name", "version"]);
-        assert_eq!(window_keys, ["height", "name", "title", "width"]);
+        assert_eq!(
+            window_keys,
+            ["allow_navigation", "height", "name", "title", "width"]
+        );
 
         let full = "[app]
 name = \"demo\"
@@ -633,5 +654,63 @@ redact = [\"a\"]
     fn an_unknown_key_in_audit_is_refused() {
         let err = parse(&with_app("[audit]\nstore_paramz = true\n")).unwrap_err();
         assert_eq!(err.code, codes::UNKNOWN_KEY);
+    }
+}
+
+#[cfg(test)]
+mod window_navigation_tests {
+    use super::*;
+
+    fn with_window(extra: &str) -> String {
+        format!(
+            "[app]
+name = \"demo\"
+[[windows]]
+name = \"main\"
+width = 640
+height = 480
+{extra}"
+        )
+    }
+
+    #[test]
+    fn a_window_without_an_allowlist_loads_app_content_only() {
+        let m = parse(&with_window("")).unwrap();
+        assert!(m.windows[0].allow_navigation.is_empty());
+    }
+
+    #[test]
+    fn allowlisted_https_urls_are_kept_in_order() {
+        let m = parse(&with_window(
+            "allow_navigation = [\"https://docs.example.com\", \"https://example.org/help/\"]
+",
+        ))
+        .unwrap();
+        assert_eq!(
+            m.windows[0].allow_navigation,
+            ["https://docs.example.com", "https://example.org/help/"]
+        );
+    }
+
+    #[test]
+    fn a_plain_http_entry_is_refused_at_its_line() {
+        let err = parse(&with_window(
+            "allow_navigation = [\"http://example.com\"]
+",
+        ))
+        .unwrap_err();
+        assert_eq!(err.code, codes::INVALID_VALUE);
+        assert_eq!(err.line, Some(7));
+        assert!(err.message.contains("https://"));
+    }
+
+    #[test]
+    fn an_entry_with_user_information_is_refused() {
+        let err = parse(&with_window(
+            "allow_navigation = [\"https://example.com@evil.net\"]
+",
+        ))
+        .unwrap_err();
+        assert_eq!(err.code, codes::INVALID_VALUE);
     }
 }
