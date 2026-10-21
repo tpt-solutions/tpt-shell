@@ -17,11 +17,15 @@ pub mod com;
 #[cfg(windows)]
 pub mod consent;
 #[cfg(windows)]
+pub mod deep_link;
+#[cfg(windows)]
 pub mod dialogs;
 #[cfg(windows)]
 pub mod event_handler;
 #[cfg(windows)]
 pub mod handler;
+#[cfg(windows)]
+pub mod keystore;
 #[cfg(windows)]
 pub mod loader;
 #[cfg(windows)]

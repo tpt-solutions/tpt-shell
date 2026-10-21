@@ -14,7 +14,8 @@ use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
+    Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD, NIM_DELETE,
+    NIM_MODIFY, NOTIFYICONDATAW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
@@ -104,6 +105,25 @@ impl Tray {
         Ok(())
     }
 
+    /// Shows a balloon notification from the icon. The shell shows it for a while, or until the
+    /// user dismisses it. Title and text are cut to the lengths the shell allows.
+    pub fn notify(&self, title: &str, body: &str) -> Result<(), String> {
+        // SAFETY: NOTIFYICONDATAW is plain data, and the fields the shell reads are set below.
+        let mut nid: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
+        nid.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
+        nid.hWnd = self.window;
+        nid.uID = ICON_ID;
+        nid.uFlags = NIF_INFO;
+        nid.dwInfoFlags = NIIF_INFO;
+        copy_units(&mut nid.szInfoTitle, title);
+        copy_units(&mut nid.szInfo, body);
+        // SAFETY: `nid` is fully initialised and lives for the call.
+        if unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid) } == 0 {
+            return Err("the notification area did not show the balloon".into());
+        }
+        Ok(())
+    }
+
     /// Sends the window a mouse message as if the shell had, for tests.
     #[cfg(test)]
     fn send_mouse(&self, mouse_message: u32) {
@@ -117,6 +137,12 @@ impl Tray {
             );
         }
     }
+}
+
+/// Copies `text` as UTF-16 into `dest`, keeping one unit for the terminator.
+fn copy_units(dest: &mut [u16], text: &str) {
+    let units: Vec<u16> = text.encode_utf16().take(dest.len() - 1).collect();
+    dest[..units.len()].copy_from_slice(&units);
 }
 
 impl Drop for Tray {
@@ -299,5 +325,19 @@ mod tests {
         tray.send_mouse(WM_LBUTTONUP);
         drop(tray);
         assert_eq!(seen.lock().expect("seen").as_slice(), &[ACTIVATE]);
+    }
+
+    #[test]
+    fn a_balloon_can_be_shown_from_the_icon() {
+        if !crate::window::interactive_desktop_available() {
+            eprintln!("skipped: no interactive desktop in this session");
+            return;
+        }
+        let Ok(tray) = Tray::new("tpt-shell test", Vec::new(), |_| {}) else {
+            eprintln!("skipped: the shell did not take the icon");
+            return;
+        };
+        tray.notify("tpt-shell", "Test notification")
+            .expect("balloon");
     }
 }

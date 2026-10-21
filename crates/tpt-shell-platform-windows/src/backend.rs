@@ -43,8 +43,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     RegisterClassExW, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, SetWindowTextW,
     ShowWindow, TranslateMessage, CW_USEDEFAULT, GWL_STYLE, HWND_MESSAGE, HWND_NOTOPMOST, HWND_TOP,
     HWND_TOPMOST, MSG, PM_REMOVE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, SW_HIDE, SW_SHOW, WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_DESTROY, WM_DPICHANGED,
-    WM_SETTINGCHANGE, WM_SIZE, WNDCLASSEXW, WS_CAPTION, WS_OVERLAPPEDWINDOW, WS_POPUP,
+    SWP_NOZORDER, SW_HIDE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNORMAL, WINDOWPLACEMENT, WM_APP,
+    WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_SETTINGCHANGE, WM_SIZE, WNDCLASSEXW, WS_CAPTION,
+    WS_OVERLAPPEDWINDOW, WS_POPUP,
 };
 
 use crate::com::{wide, HRESULT};
@@ -69,6 +70,16 @@ type EvalSlot = Rc<RefCell<Option<(HRESULT, Option<String>)>>>;
 /// Handle to a window managed by [`WindowsBackend`]. It is the window's `HWND` value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowId(pub isize);
+
+/// Where a window is, for remembering it between runs. See [`WindowsBackend::placement`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Placement {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub maximized: bool,
+}
 
 /// Saved placement and style while a window is fullscreen.
 struct SavedPlacement {
@@ -334,6 +345,49 @@ impl WindowsBackend {
             return Err(hr_error("ExecuteScript", hr));
         }
         Ok(json)
+    }
+
+    /// Where the window is, for remembering it between runs. Reads the normal (not maximized)
+    /// placement, in device pixels, and whether the window is maximized.
+    pub fn placement(&self, id: WindowId) -> Result<Placement> {
+        self.with_entry(id, |_| ())?;
+        let mut wp: WINDOWPLACEMENT = unsafe { std::mem::zeroed() };
+        wp.length = size_of::<WINDOWPLACEMENT>() as u32;
+        // SAFETY: the window exists (checked above), and `wp` is the size the call expects.
+        if unsafe { GetWindowPlacement(id.0 as HWND, &mut wp) } == 0 {
+            return Err(Error::Backend("GetWindowPlacement failed".into()));
+        }
+        let r = wp.rcNormalPosition;
+        Ok(Placement {
+            x: r.left,
+            y: r.top,
+            width: r.right - r.left,
+            height: r.bottom - r.top,
+            maximized: wp.showCmd == SW_SHOWMAXIMIZED as u32,
+        })
+    }
+
+    /// Puts the window at `placement`. Used to restore a window before or after it is shown.
+    pub fn set_placement(&mut self, id: WindowId, placement: Placement) -> Result<()> {
+        self.with_entry(id, |_| ())?;
+        let mut wp: WINDOWPLACEMENT = unsafe { std::mem::zeroed() };
+        wp.length = size_of::<WINDOWPLACEMENT>() as u32;
+        wp.showCmd = if placement.maximized {
+            SW_SHOWMAXIMIZED as u32
+        } else {
+            SW_SHOWNORMAL as u32
+        };
+        wp.rcNormalPosition = RECT {
+            left: placement.x,
+            top: placement.y,
+            right: placement.x + placement.width,
+            bottom: placement.y + placement.height,
+        };
+        // SAFETY: the window exists (checked above), and `wp` is the size the call expects.
+        if unsafe { SetWindowPlacement(id.0 as HWND, &wp) } == 0 {
+            return Err(Error::Backend("SetWindowPlacement failed".into()));
+        }
+        Ok(())
     }
 
     /// Title of the window's loaded document, or an empty string when none is loaded.
