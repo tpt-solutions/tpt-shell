@@ -3,7 +3,9 @@
 
 //! Test support for tpt-shell apps (spec §10.6).
 //!
-//! The test driver and the accessibility audit are not built yet. [`visual`] compares two
-//! screenshots, and works on raw pixels so it needs no image decoder.
+//! The test driver is not built yet. [`visual`] compares two screenshots on raw pixels, so it
+//! needs no image decoder. [`a11y`] holds the accessibility rules that need only numbers and
+//! names: contrast, target size and form labels.
 
+pub mod a11y;
 pub mod visual;

@@ -894,6 +894,54 @@ mod signed_tests {
     }
 
     #[test]
+    fn random_signed_chains_verify_and_random_edits_are_caught() {
+        // The same generator as the unsigned test, over logs with checkpoints. Dropping the
+        // tail is left out: a checkpoint names only earlier records, so the chain cannot
+        // catch that (see the external anchor item).
+        let mut state: u64 = 0xD1B5_4A32_D192_ED03;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let verifying = key(1).verifying_key();
+        for round in 0..30 {
+            let path = temp_path(&format!("signed-random-{round}.jsonl"));
+            let _ = std::fs::remove_file(&path);
+            let records = 2 + next() % 10;
+            let every = 1 + next() % 4;
+            write_signed(&path, records, every);
+            let original = lines(&path);
+            assert!(verify_file_with_key(&path, &verifying).is_ok());
+
+            let at = (next() as usize) % (original.len() - 1);
+            match next() % 3 {
+                0 => {
+                    let mut bytes = std::fs::read(&path).unwrap();
+                    let i = (next() as usize) % bytes.len();
+                    bytes[i] = if bytes[i] == b'q' { b'r' } else { b'q' };
+                    std::fs::write(&path, &bytes).unwrap();
+                }
+                1 => {
+                    let mut edited = original.clone();
+                    edited.remove(at);
+                    save(&path, &edited);
+                }
+                _ => {
+                    let mut edited = original.clone();
+                    edited.swap(at, at + 1);
+                    save(&path, &edited);
+                }
+            }
+            assert!(
+                verify_file_with_key(&path, &verifying).is_err(),
+                "round {round}: edit not caught"
+            );
+        }
+    }
+
+    #[test]
     fn reopening_a_signed_log_continues_it() {
         let path = temp_path("reopen-signed.jsonl");
         write_signed(&path, 3, 2);

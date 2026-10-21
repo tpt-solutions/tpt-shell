@@ -214,7 +214,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] SHA-256 hash chain
 - [ ] Redaction policy from manifest (`[audit] store_params` and `redact` parse into `AuditSettings`, validated with the schema; the mapping to `tpt_shell_audit::Policy` is done as `Policy::from(&AuditSettings)`; `App::manifest_audit(manifest, log)` reads the `[audit]` section of the manifest and writes each page command call with its policy; `App::audit(path, policy)` takes a policy directly. Tested. The item stays open because a running app does not yet read the manifest's windows or other sections, and the `[audit]` section is read at build time only)
 - [x] Append-only file writer
-- [ ] Property tests for chain integrity (randomized and exhaustive single-byte tests exist; not a proptest suite)
+- [ ] Property tests for chain integrity (seeded randomized and exhaustive single-byte tests exist, for unsigned and signed chains; not a proptest suite)
 - [x] Golden tests for audit format
 
 ### Security defaults (ยง9)
@@ -481,7 +481,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Decide: visual baseline store implementation (O5): Git LFS in the repo
 
 ### Accessibility audit
-- [ ] Rule engine for WCAG 2.2 AA subset: names/roles, contrast, focus order, keyboard traps, target size, form labels, reduced motion
+- [ ] Rule engine for WCAG 2.2 AA subset: names/roles, contrast, focus order, keyboard traps, target size, form labels, reduced motion (`tpt-shell-test::a11y` has contrast with the AA minimums, the large-text rule, target size at 24 px without the spacing exception, and unnamed form inputs; focus order, keyboard traps, reduced motion and names from the live tree are not built)
 - [ ] Native tree dump: UIA
 - [ ] Native tree dump: NSAccessibility
 - [ ] Native tree dump: AT-SPI
@@ -532,7 +532,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Verify reports first bad sequence number (`verify_file` and `verify_file_with_key`)
 - [ ] Devtools audit viewer panel
 - [ ] Tamper tests: flip, drop, swap, truncate all detected (flip, drop, swap, re-chain and forged signatures are tested; truncating the tail is a documented limit that needs an external anchor)
-- [ ] Property tests for the full chain with checkpoints
+- [x] Property tests for the full chain with checkpoints (a seeded suite of 30 random signed chains, with byte flips, removed and swapped records, each caught; tail truncation is left out, as the anchor item covers it)
 - [ ] Document limits (compromised host, role of anchoring)
 - [ ] `audit-app` template and `audit-viewer` example (preview)
 
@@ -611,7 +611,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] rustvac port
 
 ### Docs site (mdBook)
-- [ ] Five-minute quickstart
+- [ ] Five-minute quickstart (`docs/src/quickstart.md` covers scaffolding, the manifest check and the dev preview, each run here; it stops before opening a window, which needs an App example that does not exist yet)
 - [ ] Concepts
 - [ ] Cookbook with 20+ recipes
 - [ ] Guides: kiosk deployment, devices, audit, agents, profiles, compliance

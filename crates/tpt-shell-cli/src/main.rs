@@ -42,7 +42,12 @@ fn main() -> ExitCode {
     }
 }
 
-/// Runs one command. `Err` means bad usage or an I/O failure (exit 2).
+/// Drops the `\\?\` prefix that Windows adds when a path is canonicalized, so a path printed
+/// for people reads as the path they typed.
+fn without_verbatim_prefix(path: &str) -> &str {
+    path.strip_prefix(r"\\?\").unwrap_or(path)
+}
+
 /// Serves `dir` on the loopback address at `port`, reports file changes, and runs until stopped.
 fn dev_server(dir: &Path, port: u16) -> Result<ExitCode, String> {
     if !dir.is_dir() {
@@ -55,12 +60,13 @@ fn dev_server(dir: &Path, port: u16) -> Result<ExitCode, String> {
     dev::serve(&root, addr, |bound| {
         println!(
             "serving {} at http://{bound}/ (Ctrl+C to stop)",
-            root.display()
+            without_verbatim_prefix(&root.display().to_string())
         );
     })?;
     Ok(ExitCode::SUCCESS)
 }
 
+/// Runs one command. `Err` means bad usage or an I/O failure (exit 2).
 fn run(args: &[&str]) -> Result<ExitCode, String> {
     match args {
         ["explain", code] => Ok(explain(code)),
@@ -368,6 +374,12 @@ mod tests {
         ] {
             assert!(lookup(code).is_some(), "{code} has no registry entry");
         }
+    }
+
+    #[test]
+    fn the_verbatim_prefix_is_dropped_only_when_present() {
+        assert_eq!(without_verbatim_prefix(r"\\?\C:\app"), r"C:\app");
+        assert_eq!(without_verbatim_prefix(r"C:\app"), r"C:\app");
     }
 
     #[test]
