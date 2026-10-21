@@ -1,0 +1,5 @@
+error: a job command takes a `&JobContext` parameter, for progress and cancellation
+ --> tests/ui/job_without_context.rs:8:4
+  |
+8 | fn scan(n: u32) -> Result<u32, CommandError> {
+  |    ^^^^

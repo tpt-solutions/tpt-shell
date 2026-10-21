@@ -1,0 +1,5 @@
+error: target needs a capability: add capability = "..."
+ --> tests/ui/target_without_capability.rs:8:4
+  |
+8 | fn read(p: String) -> Result<String, CommandError> {
+  |    ^^^^

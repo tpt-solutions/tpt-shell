@@ -1,0 +1,5 @@
+error: Contract needs a struct with named fields
+ --> tests/ui/derive_refuses_tuple_structs.rs:8:12
+  |
+8 | struct Pair(u8, u8);
+  |            ^^^^^^^^

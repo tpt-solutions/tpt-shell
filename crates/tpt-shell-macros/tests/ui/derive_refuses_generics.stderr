@@ -1,0 +1,5 @@
+error: Contract cannot derive a schema for a generic type
+ --> tests/ui/derive_refuses_generics.rs:8:13
+  |
+8 | struct Entry<T> {
+  |             ^^^

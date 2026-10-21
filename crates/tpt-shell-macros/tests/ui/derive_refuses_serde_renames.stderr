@@ -1,0 +1,5 @@
+error: Contract does not read serde attributes; use the names as written, without renaming
+ --> tests/ui/derive_refuses_serde_renames.rs:9:5
+  |
+9 |     #[serde(rename = "named")]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^

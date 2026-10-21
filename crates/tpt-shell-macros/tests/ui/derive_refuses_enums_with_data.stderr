@@ -1,0 +1,5 @@
+error: Contract can only derive an enum whose variants have no fields
+ --> tests/ui/derive_refuses_enums_with_data.rs:9:5
+  |
+9 |     Read(u8),
+  |     ^^^^^^^^

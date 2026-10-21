@@ -14,19 +14,35 @@ use crate::schema::Schema;
 /// Version of the contract file format.
 pub const CONTRACT_VERSION: u64 = 1;
 
-/// How a command runs. Only `Sync` is implemented; the others come with the jobs API (M3)
-/// and the stream channel (M2).
+/// How a command runs. `Sync` runs to completion in its handler. `Async` is a future that the
+/// handler drives with [`crate::block_on`]. `Job` returns a job id at once and reports through
+/// the jobs runner (see [`crate::jobs`]). Streams are not a command kind yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Sync,
+    Async,
+    Job,
 }
 
 impl Kind {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Kind::Sync => "sync",
+            Kind::Async => "async",
+            Kind::Job => "job",
         }
     }
+}
+
+/// Flags a command carries besides its kind. Both default to off: a command runs on the worker
+/// side unless it says otherwise, and an agent does not see a command unless it is marked for
+/// the agent surface (spec §8, §10.4).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Flags {
+    /// Runs on the UI thread (`#[command(ui)]`).
+    pub ui: bool,
+    /// Exposed on the agent and MCP surface (`#[command(agent)]`).
+    pub agent: bool,
 }
 
 /// One command's public description.
@@ -43,6 +59,7 @@ pub struct Command {
 #[derive(Default)]
 pub struct Contract {
     commands: BTreeMap<&'static str, Command>,
+    flags: BTreeMap<&'static str, Flags>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -53,10 +70,17 @@ impl Contract {
         Self::default()
     }
 
+    /// Adds a command with default flags.
     pub fn add(&mut self, command: Command) -> Result<(), DuplicateCommand> {
+        self.add_flagged(command, Flags::default())
+    }
+
+    /// Adds a command with its flags.
+    pub fn add_flagged(&mut self, command: Command, flags: Flags) -> Result<(), DuplicateCommand> {
         if self.commands.contains_key(command.name) {
             return Err(DuplicateCommand(command.name));
         }
+        self.flags.insert(command.name, flags);
         self.commands.insert(command.name, command);
         Ok(())
     }
@@ -66,9 +90,23 @@ impl Contract {
         self.commands.values()
     }
 
+    /// The flags of the command called `name`, or `None` when there is no such command.
+    pub fn flags(&self, name: &str) -> Option<Flags> {
+        self.flags.get(name).copied()
+    }
+
     /// The contract as pretty-printed JSON with a trailing newline.
     pub fn to_json_string(&self) -> String {
-        let commands: Vec<Value> = self.commands.values().map(command_json).collect();
+        let commands: Vec<Value> = self
+            .commands
+            .values()
+            .map(|c| {
+                let mut value = command_json(c);
+                let flags = self.flags.get(c.name).copied().unwrap_or_default();
+                value["flags"] = json!({ "agent": flags.agent, "ui": flags.ui });
+                value
+            })
+            .collect();
         let doc = json!({
             "contract_version": CONTRACT_VERSION,
             "commands": commands,
@@ -255,6 +293,10 @@ mod tests {
         "type": "object"
       },
       "capability": "fs.read",
+      "flags": {
+        "agent": false,
+        "ui": false
+      },
       "kind": "sync",
       "name": "alpha"
     },
@@ -266,6 +308,10 @@ mod tests {
         "type": "object"
       },
       "capability": null,
+      "flags": {
+        "agent": false,
+        "ui": false
+      },
       "kind": "sync",
       "name": "zeta"
     }

@@ -1,0 +1,5 @@
+error: expected boolean literal
+ --> tests/ui/flag_with_a_non_boolean_value.rs:7:16
+  |
+7 | #[command(ui = 3)]
+  |                ^

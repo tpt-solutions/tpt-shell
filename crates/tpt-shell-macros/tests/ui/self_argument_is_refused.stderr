@@ -1,0 +1,5 @@
+error: commands cannot take `self`
+  --> tests/ui/self_argument_is_refused.rs:12:13
+   |
+12 |     fn scan(&self) -> Result<u32, CommandError> {
+   |             ^^^^^

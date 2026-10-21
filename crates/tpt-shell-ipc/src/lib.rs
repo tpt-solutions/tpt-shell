@@ -11,17 +11,21 @@
 
 use serde_json::{json, Map};
 
+pub use executor::block_on;
 pub use router::{encode, Caller, CommandError, Router, Target};
+pub use scoped::{DeviceId, ScopeError, ScopedPath};
 pub use serde_json::Value;
 
 pub mod blob;
 pub mod contract;
 pub mod contract_diff;
+pub mod executor;
 pub mod jobs;
 pub mod rate_limit;
 pub mod reflect;
 pub mod router;
 pub mod schema;
+pub mod scoped;
 pub mod stream;
 pub mod typescript;
 

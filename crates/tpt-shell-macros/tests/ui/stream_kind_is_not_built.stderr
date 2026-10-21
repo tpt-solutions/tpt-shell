@@ -1,0 +1,5 @@
+error: stream commands are not built yet; use tpt_shell_ipc::stream
+ --> tests/ui/stream_kind_is_not_built.rs:7:11
+  |
+7 | #[command(kind = "stream")]
+  |           ^^^^^^^^^^^^^^^

@@ -12,15 +12,24 @@
 //! records from the end of the file, or a rewritten file. Signed checkpoints and external
 //! anchors (M9) close that gap.
 
+pub mod anchor;
+pub mod keys;
+pub mod segments;
+
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use anchor::{check_anchors, Anchor, AnchorPoint};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use keys::CheckpointSigner;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use tpt_shell_manifest::AuditSettings;
+
+pub use segments::{verify_rotated, RotatingLog};
 
 /// `prev` of the first record.
 pub const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
@@ -78,6 +87,11 @@ pub enum AuditError {
         seq: u64,
         reason: String,
     },
+    /// A key, anchor, segment or signature check refused. `code` is a registered `TS####` code.
+    Refused {
+        code: &'static str,
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for AuditError {
@@ -87,6 +101,7 @@ impl std::fmt::Display for AuditError {
             AuditError::Chain { seq, reason } => {
                 write!(f, "audit chain broken at seq {seq}: {reason}")
             }
+            AuditError::Refused { code, reason } => write!(f, "{code}: {reason}"),
         }
     }
 }
@@ -102,16 +117,45 @@ impl From<io::Error> for AuditError {
 /// Command name of checkpoint records. Their params hold `upto`, `hash` and `signature`.
 pub const CHECKPOINT_COMMAND: &str = "tpt.checkpoint";
 
-/// Signs checkpoints. The key signs the hash of the record a checkpoint names.
+/// Signs checkpoints. The key signs the hash of the record a checkpoint names. The key comes
+/// from a [`keys::KeySupplier`]: the OS keystore, a key file, or an HSM hook.
 ///
 /// A checkpoint is written after an entry when `every` entries have been written since the
 /// last count-based interval, or when `every_secs` seconds have passed since the last
 /// checkpoint. The time check runs only when an entry is written, so a quiet log gets its
 /// next checkpoint with the next entry. Zero turns an interval off.
+#[derive(Clone)]
 pub struct Signing {
-    pub key: SigningKey,
+    pub key: Arc<dyn CheckpointSigner>,
     pub every: u64,
     pub every_secs: u64,
+}
+
+/// Where a log segment picks up: the next sequence number, the hash the next record must
+/// name as `prev`, and how many entries (not checkpoints) came before.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Resume {
+    next_seq: u64,
+    prev: String,
+    entries: u64,
+}
+
+impl Resume {
+    fn genesis() -> Self {
+        Resume {
+            next_seq: 0,
+            prev: GENESIS.to_string(),
+            entries: 0,
+        }
+    }
+
+    fn from_summary(summary: &Summary) -> Self {
+        Resume {
+            next_seq: summary.records,
+            prev: summary.last_hash.clone(),
+            entries: summary.records - summary.checkpoints,
+        }
+    }
 }
 
 /// Writer for one audit file. Opening an existing file verifies it first.
@@ -126,6 +170,10 @@ pub struct AuditLog {
     /// When the last checkpoint was written, or when the file was opened. Drives the time interval.
     last_checkpoint: Instant,
     prev: String,
+    /// Bytes in the file, for the size limit of a rotating log.
+    bytes: u64,
+    /// Where each checkpoint hash also goes, if an anchor is set.
+    anchor: Option<Box<dyn Anchor>>,
 }
 
 impl AuditLog {
@@ -151,27 +199,61 @@ impl AuditLog {
     ) -> Result<Self, AuditError> {
         let path = path.to_path_buf();
         let verifying = signing.as_ref().map(|s| s.key.verifying_key());
-        let (next_seq, entries, prev) = if path.exists() {
-            let summary = verify_inner(&path, verifying.as_ref())?;
-            (
-                summary.records,
-                summary.records - summary.checkpoints,
-                summary.last_hash,
-            )
+        let resume = if path.exists() {
+            let (summary, _) = verify_chain(std::slice::from_ref(&path), verifying.as_ref())?;
+            Some(Resume::from_summary(&summary))
         } else {
-            (0, 0, GENESIS.to_string())
+            None
         };
+        Self::open_at(path, policy, signing, resume)
+    }
+
+    /// Opens a file for appending without verifying it. The caller has verified the chain up to
+    /// `resume`, or starts a new one with `None`.
+    pub(crate) fn open_at(
+        path: PathBuf,
+        policy: Policy,
+        signing: Option<Signing>,
+        resume: Option<Resume>,
+    ) -> Result<Self, AuditError> {
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
+        let bytes = file.metadata()?.len();
+        let resume = resume.unwrap_or_else(Resume::genesis);
         Ok(AuditLog {
             path,
             file,
             policy,
             signing,
-            next_seq,
-            entries,
+            next_seq: resume.next_seq,
+            entries: resume.entries,
             last_checkpoint: Instant::now(),
-            prev,
+            prev: resume.prev,
+            bytes,
+            anchor: None,
         })
+    }
+
+    pub(crate) fn resume_point(&self) -> Resume {
+        Resume {
+            next_seq: self.next_seq,
+            prev: self.prev.clone(),
+            entries: self.entries,
+        }
+    }
+
+    pub(crate) fn take_anchor(&mut self) -> Option<Box<dyn Anchor>> {
+        self.anchor.take()
+    }
+
+    /// Sends each checkpoint hash to `anchor` as well as to the file. Anchors cover checkpoints,
+    /// so a log without signing has nothing to send.
+    pub fn set_anchor(&mut self, anchor: Box<dyn Anchor>) {
+        self.anchor = Some(anchor);
+    }
+
+    /// Bytes in the file so far.
+    pub fn bytes(&self) -> u64 {
+        self.bytes
     }
 
     /// Writes one record line and returns its hash.
@@ -183,6 +265,7 @@ impl AuditLog {
         self.file.write_all(text.as_bytes())?;
         self.file.write_all(b"\n")?;
         self.file.sync_data()?;
+        self.bytes += text.len() as u64 + 1;
         Ok(hash)
     }
 
@@ -214,7 +297,7 @@ impl AuditLog {
         let hash = self.prev.clone();
         let message = checkpoint_message(upto, &hash);
         let signature = match &self.signing {
-            Some(s) => hex_encode(&s.key.sign(&message).to_bytes()),
+            Some(s) => hex_encode(&s.key.sign(&message)?),
             None => return Ok(()),
         };
         let checkpoint = Entry {
@@ -237,6 +320,13 @@ impl AuditLog {
         self.prev = self.write_record(record)?;
         self.next_seq += 1;
         self.last_checkpoint = Instant::now();
+        if let Some(anchor) = self.anchor.as_mut() {
+            anchor.publish(&AnchorPoint {
+                seq,
+                hash: self.prev.clone(),
+                wall_unix_ms: around.wall_unix_ms,
+            })?;
+        }
         Ok(())
     }
 
@@ -278,14 +368,69 @@ pub fn verify_file_with_key(
     verify_inner(path.as_ref(), Some(key))
 }
 
+/// Verifies a file and checks its anchors. Each anchor must name a record of the chain with the
+/// same hash, so a truncated or replaced log fails even when its own chain is consistent.
+pub fn verify_file_anchored(
+    path: impl AsRef<Path>,
+    key: Option<&VerifyingKey>,
+    anchors: &[AnchorPoint],
+) -> Result<Summary, AuditError> {
+    let (summary, hashes) = verify_chain(&[path.as_ref().to_path_buf()], key)?;
+    check_anchors(&hashes, anchors)?;
+    Ok(summary)
+}
+
 fn verify_inner(path: &Path, key: Option<&VerifyingKey>) -> Result<Summary, AuditError> {
+    verify_chain(&[path.to_path_buf()], key).map(|(summary, _)| summary)
+}
+
+/// The state of a chain part way through verification.
+struct ChainState {
+    next_seq: u64,
+    prev: String,
+    /// `hashes[i]` is the hash of record `i`, for checkpoints that name earlier records.
+    hashes: Vec<String>,
+    checkpoints: u64,
+}
+
+impl ChainState {
+    fn new() -> Self {
+        ChainState {
+            next_seq: 0,
+            prev: GENESIS.to_string(),
+            hashes: Vec::new(),
+            checkpoints: 0,
+        }
+    }
+}
+
+/// Verifies the files in order as one chain, starting from genesis. Returns the summary and
+/// the hash of every record, which anchor checks use.
+pub(crate) fn verify_chain(
+    paths: &[PathBuf],
+    key: Option<&VerifyingKey>,
+) -> Result<(Summary, Vec<String>), AuditError> {
+    let mut state = ChainState::new();
+    for path in paths {
+        verify_into(path, &mut state, key)?;
+    }
+    let summary = Summary {
+        records: state.next_seq,
+        checkpoints: state.checkpoints,
+        last_hash: state.prev,
+    };
+    Ok((summary, state.hashes))
+}
+
+fn verify_into(
+    path: &Path,
+    state: &mut ChainState,
+    key: Option<&VerifyingKey>,
+) -> Result<(), AuditError> {
     let reader = BufReader::new(File::open(path)?);
-    let mut prev = GENESIS.to_string();
-    let mut hashes: Vec<String> = Vec::new();
-    let mut checkpoints: u64 = 0;
-    let mut seq: u64 = 0;
     for line in reader.split(b'\n') {
         let line = line?;
+        let seq = state.next_seq;
         let bad = |reason: &str| AuditError::Chain {
             seq,
             reason: reason.to_string(),
@@ -302,25 +447,21 @@ fn verify_inner(path: &Path, key: Option<&VerifyingKey>) -> Result<Summary, Audi
         if record.get("seq") != Some(&json!(seq)) {
             return Err(bad("sequence number does not match its position"));
         }
-        if record.get("prev") != Some(&Value::String(prev.clone())) {
+        if record.get("prev") != Some(&Value::String(state.prev.clone())) {
             return Err(bad("previous hash does not match"));
         }
         if hash_record(&record) != stored_hash {
             return Err(bad("hash does not match record contents"));
         }
         if record.get("command") == Some(&json!(CHECKPOINT_COMMAND)) {
-            check_checkpoint(&record, &hashes, key).map_err(|reason| bad(&reason))?;
-            checkpoints += 1;
+            check_checkpoint(&record, &state.hashes, key).map_err(|reason| bad(&reason))?;
+            state.checkpoints += 1;
         }
-        hashes.push(stored_hash.clone());
-        prev = stored_hash;
-        seq += 1;
+        state.hashes.push(stored_hash.clone());
+        state.prev = stored_hash;
+        state.next_seq += 1;
     }
-    Ok(Summary {
-        records: seq,
-        checkpoints,
-        last_hash: prev,
-    })
+    Ok(())
 }
 
 /// Checks one checkpoint record: it names an earlier record by its hash, and when a key is
@@ -797,6 +938,7 @@ mod tests {
 #[cfg(test)]
 mod signed_tests {
     use super::*;
+    use ed25519_dalek::SigningKey;
 
     fn temp_path(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -828,7 +970,7 @@ mod signed_tests {
 
     fn write_signed(path: &Path, records: u64, every: u64) {
         let signing = Signing {
-            key: key(1),
+            key: Arc::new(key(1)),
             every,
             every_secs: 0,
         };
@@ -868,7 +1010,7 @@ mod signed_tests {
         let path = temp_path("every-secs.jsonl");
         let _ = std::fs::remove_file(&path);
         let signing = Signing {
-            key: key(1),
+            key: Arc::new(key(1)),
             every: 0,
             every_secs: 1,
         };
@@ -955,7 +1097,7 @@ mod signed_tests {
         write_signed(&path, 4, 2);
         assert!(verify_file_with_key(&path, &key(2).verifying_key()).is_err());
         let wrong = Signing {
-            key: key(2),
+            key: Arc::new(key(2)),
             every: 2,
             every_secs: 0,
         };
@@ -1054,6 +1196,7 @@ mod signed_tests {
 #[cfg(test)]
 mod export_tests {
     use super::*;
+    use ed25519_dalek::SigningKey;
 
     fn temp_path(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()

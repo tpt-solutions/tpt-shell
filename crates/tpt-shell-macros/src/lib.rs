@@ -11,12 +11,13 @@
 //! an embedded file changes. Touch a source file after adding one.
 
 mod command;
+mod derive;
 
 use std::path::{Path, PathBuf};
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, LitStr};
+use syn::{parse_macro_input, DeriveInput, LitStr};
 
 #[proc_macro]
 pub fn embed_dir(input: TokenStream) -> TokenStream {
@@ -80,12 +81,56 @@ fn content_type(path: &str) -> &'static str {
     }
 }
 
+/// `include_manifest!("tpt-shell.toml")` expands to the manifest's text, as a `&'static str`.
+///
+/// The file is parsed at compile time, so a broken manifest is a compile error with its line.
+/// The file is also tracked by `include_str!`, so an edit rebuilds the crate. Pass the text to
+/// `App::manifest_audit` or any other reader.
+#[proc_macro]
+pub fn include_manifest(input: TokenStream) -> TokenStream {
+    let rel = parse_macro_input!(input as LitStr);
+    let manifest = std::env::var_os("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let path = manifest.join(rel.value());
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) => {
+            let msg = format!("include_manifest!: cannot read {}: {err}", path.display());
+            return syn::Error::new(rel.span(), msg).to_compile_error().into();
+        }
+    };
+    if let Err(err) = tpt_shell_manifest::parse(&text) {
+        let msg = format!("include_manifest!: {err}");
+        return syn::Error::new(rel.span(), msg).to_compile_error().into();
+    }
+    let abs = path.to_string_lossy().replace('\\', "/");
+    quote! { include_str!(#abs) }.into()
+}
+
+/// `#[derive(Contract)]` gives a struct or a unit-variant enum its argument schema, so it can be
+/// a command argument. Bounds go on fields: `#[contract(max_len = 16, chars = "a-z")]`.
+/// See the `derive` module for the rules.
+#[proc_macro_derive(Contract, attributes(contract))]
+pub fn derive_contract(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match derive::expand(input) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
 /// Marks a function as a command: `#[command(capability = "fs.read", name = "list_dir")]`.
 ///
 /// The function itself is unchanged. Hidden helpers are added beside it; see [`commands!`]
-/// and [`register_commands!`]. Options: `name` (defaults to the function name), `capability`,
-/// `target(path = "arg")` (or `device`, `url`, `bytes`: the argument the grant's scope checks,
-/// which needs a capability), and `kind = "sync"` (the only kind so far).
+/// and [`register_commands!`]. Options:
+/// - `name`: the wire name (defaults to the function name);
+/// - `capability`, and `target(path = "arg")` (or `device`, `url`, `bytes`): the argument the
+///   grant's scope checks, which needs a capability;
+/// - `kind = "sync" | "async" | "job"`: an `async fn` needs `async`, a job body takes a
+///   `&JobContext` parameter and answers with a job id. `job` is shorthand for `kind = "job"`;
+/// - `ui` and `agent`: flags, both off by default (`ui` runs on the UI thread; `agent` exposes
+///   the command to the agent surface).
 #[proc_macro_attribute]
 pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as syn::ItemFn);

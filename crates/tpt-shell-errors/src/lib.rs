@@ -39,6 +39,108 @@ pub const REGISTRY: &[Entry] = &[
         explanation: "A required section or key is absent from tpt-shell.toml.",
         fix: "Add the missing section or key. Every manifest needs [app] with a name.",
     },
+    Entry {
+        code: "TS0100",
+        title: "signing key unavailable",
+        explanation: "The audit checkpoint signing key could not be read, or the keystore that holds it refused the request.",
+        fix: "Check that the key file exists and is readable by the current user, or that the keystore is unlocked, then retry.",
+    },
+    Entry {
+        code: "TS0101",
+        title: "signature invalid",
+        explanation: "A checkpoint or detached signature does not match the data and the public key it was checked against.",
+        fix: "Check that the file was not changed after signing and that the public key is the one that signed it.",
+    },
+    Entry {
+        code: "TS0102",
+        title: "anchor write failed",
+        explanation: "The external anchor could not be written, so the audit chain head was not recorded outside the log.",
+        fix: "Check that the anchor path exists, is writable, and is on the volume you intended, then retry the checkpoint.",
+    },
+    Entry {
+        code: "TS0103",
+        title: "anchor mismatch or malformed anchor",
+        explanation: "The anchor does not match the audit chain it was written for, or the anchor file cannot be parsed. The log may have been truncated, replaced, or edited.",
+        fix: "Compare the log with its anchor and restore the log from a backup if the anchor is the trusted copy.",
+    },
+    Entry {
+        code: "TS0104",
+        title: "audit segments missing or out of order",
+        explanation: "A rotated audit log segment is missing, or the segment numbers are not in sequence, so the chain cannot be checked across files.",
+        fix: "Restore the missing segment from a backup or the external anchor, then run the audit verify command again.",
+    },
+    Entry {
+        code: "TS0110",
+        title: "agent profile invalid",
+        explanation: "An [agent] profile is malformed, or one of its route patterns cannot be used. The profile is refused so that a typo cannot widen what the agent may reach.",
+        fix: "Fix the reported route pattern or key in the [agent] section. Routes are exact paths, or a prefix ending in '*'.",
+    },
+    Entry {
+        code: "TS0111",
+        title: "HTTP token or bind refused",
+        explanation: "The local HTTP endpoint was refused: its token is shorter than 32 characters, or the address is not the loopback address.",
+        fix: "Use a token of at least 32 characters and bind to 127.0.0.1 only.",
+    },
+    Entry {
+        code: "TS0112",
+        title: "route refused",
+        explanation: "An agent tried to open a URL or route that the profile's allow-list does not include. Navigation fails closed.",
+        fix: "Add the route to the agent profile if the agent should reach it, or use an allowed route.",
+    },
+    Entry {
+        code: "TS0113",
+        title: "action not recorded, session stopped",
+        explanation: "An agent action could not be written to the audit log, so it was not run and the session was stopped.",
+        fix: "Check that the audit log is writable and has space, then start a new agent session.",
+    },
+    Entry {
+        code: "TS0114",
+        title: "invoke not allowed",
+        explanation: "An agent asked to run a command that the profile does not allow, or that needs confirmation it did not get.",
+        fix: "Add the command to the profile's invoke list, or confirm the action when prompted.",
+    },
+    Entry {
+        code: "TS0120",
+        title: "deny.toml unreadable",
+        explanation: "The licence policy file could not be read or parsed, so the licence gate cannot run.",
+        fix: "Check that deny.toml exists in the project root and is valid TOML with an allow list.",
+    },
+    Entry {
+        code: "TS0122",
+        title: "licence gate refused",
+        explanation: "A dependency has a licence that the policy in deny.toml does not allow. The build is refused.",
+        fix: "Replace the dependency, or record a justified exception in deny.toml after review.",
+    },
+    Entry {
+        code: "TS0301",
+        title: "test message refused",
+        explanation: "The test driver received a message it does not accept. Only the documented commands run, and nothing else is executed.",
+        fix: "Use one of the driver's documented commands, or check that the test client and the app are the same version.",
+    },
+    Entry {
+        code: "TS0302",
+        title: "test driver timed out",
+        explanation: "The app did not answer a test driver request before the deadline.",
+        fix: "Check that the app is running and not blocked, or increase the timeout for a slow step.",
+    },
+    Entry {
+        code: "TS0303",
+        title: "element not found",
+        explanation: "No element matched the role and name in the test query. This is the only test driver error that is retried.",
+        fix: "Check the role and name against the accessibility tree, or wait for the page to finish loading.",
+    },
+    Entry {
+        code: "TS0304",
+        title: "not supported on this platform",
+        explanation: "The test driver or a replay step needs a capability that this platform does not provide yet.",
+        fix: "Run the test on a platform that supports it, or skip the step on this platform.",
+    },
+    Entry {
+        code: "TS0305",
+        title: "artifact path refused",
+        explanation: "A test artifact path points outside the artifact directory, or is not a plain relative path.",
+        fix: "Use a plain relative file name inside the artifact directory.",
+    },
 ];
 
 /// Looks up a code. The match ignores ASCII case, so `ts0001` finds `TS0001`.

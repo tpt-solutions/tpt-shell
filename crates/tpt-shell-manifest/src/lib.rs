@@ -714,3 +714,129 @@ height = 480
         assert_eq!(err.code, codes::INVALID_VALUE);
     }
 }
+
+#[cfg(test)]
+mod golden_tests {
+    //! The published schema's key lists against the parser, found by probing the parser. Each
+    //! candidate key is put in a manifest; the parser accepts it unless it reports an unknown
+    //! key. The probed outline is compared with a golden text, so a key added to the parser or
+    //! to the schema alone fails here.
+
+    use super::*;
+
+    /// A section name, its schema path and the probe that builds a manifest around a key.
+    type Section = (&'static str, &'static [&'static str], Builder);
+    /// Builds the probe manifest for one candidate key.
+    type Builder = fn(&str) -> String;
+
+    const SCHEMA: &str = include_str!("../schema/tpt-shell.manifest.schema.json");
+
+    /// Keys of one object in the published schema, in the order the schema lists them.
+    fn schema_keys(path: &[&str]) -> Vec<String> {
+        let mut node: serde_json::Value = serde_json::from_str(SCHEMA).expect("valid JSON");
+        for step in path {
+            node = node[*step].clone();
+        }
+        node.as_object()
+            .expect("an object of keys")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// The candidates for a probe: the schema's keys plus one name no parser accepts.
+    fn candidates(path: &[&str]) -> Vec<String> {
+        let mut keys = schema_keys(path);
+        keys.push("zz_not_a_key".into());
+        keys
+    }
+
+    /// The keys the parser accepts for one section, given a manifest built around each key.
+    fn accepted(candidates: &[String], build: impl Fn(&str) -> String) -> Vec<String> {
+        candidates
+            .iter()
+            .filter(|key| match parse(&build(key)) {
+                Ok(_) => true,
+                Err(err) => err.code != codes::UNKNOWN_KEY,
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn probe_app(key: &str) -> String {
+        format!("[app]\nname = \"demo\"\n{key} = \"x\"\n")
+    }
+
+    fn probe_window(key: &str) -> String {
+        format!(
+            "[app]\nname = \"demo\"\n[[windows]]\nname = \"main\"\nwidth = 1\nheight = 1\n{key} = \"x\"\n"
+        )
+    }
+
+    fn probe_audit(key: &str) -> String {
+        format!("[app]\nname = \"demo\"\n[audit]\n{key} = true\n")
+    }
+
+    fn probe_capabilities(key: &str) -> String {
+        format!("[app]\nname = \"demo\"\n[capabilities]\n{key} = [\"fs.read\"]\n")
+    }
+
+    /// The probed key lists, one line per section, sorted, as the golden text.
+    fn outline() -> String {
+        let mut out = String::new();
+        let sections: [Section; 4] = [
+            ("app", &["properties", "app", "properties"], probe_app),
+            (
+                "windows",
+                &["properties", "windows", "items", "properties"],
+                probe_window,
+            ),
+            ("audit", &["properties", "audit", "properties"], probe_audit),
+            (
+                "capabilities",
+                &["properties", "capabilities", "properties"],
+                probe_capabilities,
+            ),
+        ];
+        for (name, path, build) in sections {
+            let mut keys = accepted(&candidates(path), build);
+            keys.sort();
+            out.push_str(&format!("{name}: {}\n", keys.join(", ")));
+        }
+        out
+    }
+
+    #[test]
+    fn the_parser_accepts_exactly_the_keys_the_schema_lists() {
+        let sections: [(&[&str], Builder); 4] = [
+            (&["properties", "app", "properties"], probe_app),
+            (
+                &["properties", "windows", "items", "properties"],
+                probe_window,
+            ),
+            (&["properties", "audit", "properties"], probe_audit),
+            (
+                &["properties", "capabilities", "properties"],
+                probe_capabilities,
+            ),
+        ];
+        for (path, build) in sections {
+            let mut listed = schema_keys(path);
+            listed.sort();
+            let mut probed = accepted(&candidates(path), build);
+            probed.sort();
+            assert_eq!(probed, listed, "section at {path:?}");
+        }
+    }
+
+    #[test]
+    fn the_probed_outline_matches_the_golden_text() {
+        assert_eq!(
+            outline(),
+            "app: name, version\n\
+             windows: allow_navigation, height, name, title, width\n\
+             audit: redact, store_params\n\
+             capabilities: grant\n"
+        );
+    }
+}

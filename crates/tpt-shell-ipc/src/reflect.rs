@@ -108,6 +108,91 @@ pub mod __private {
         })
     }
 
+    /// Bounds a `#[derive(Contract)]` field may set. Each one applies only to the schema kind it
+    /// belongs to (see [`bounded`]).
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct Bounds {
+        pub min: Option<i64>,
+        pub max: Option<i64>,
+        pub max_len: Option<usize>,
+        pub max_items: Option<usize>,
+        pub chars: Option<&'static str>,
+    }
+
+    /// Applies a field's bounds to the schema of its type. Panics when a bound does not fit the
+    /// type (`max_len` on a number, for example): the schema is built at start-up, so the
+    /// mistake shows at once instead of silently dropping the limit.
+    pub fn bounded(schema: Schema, b: Bounds) -> Schema {
+        fn misplaced(name: &str) -> ! {
+            panic!("contract bound `{name}` does not apply to this field's type")
+        }
+        fn check(name: &str, set: bool) {
+            if set {
+                misplaced(name);
+            }
+        }
+        match schema {
+            Schema::Optional(inner) => {
+                Schema::Optional(Box::leak(Box::new(bounded((*inner).clone(), b))))
+            }
+            Schema::Int { min, max } => {
+                check("max_len", b.max_len.is_some());
+                check("max_items", b.max_items.is_some());
+                check("chars", b.chars.is_some());
+                Schema::Int {
+                    min: b.min.unwrap_or(min),
+                    max: b.max.unwrap_or(max),
+                }
+            }
+            Schema::Float { min, max } => {
+                check("max_len", b.max_len.is_some());
+                check("max_items", b.max_items.is_some());
+                check("chars", b.chars.is_some());
+                Schema::Float {
+                    min: b.min.map_or(min, |v| v as f64),
+                    max: b.max.map_or(max, |v| v as f64),
+                }
+            }
+            Schema::Str { max_len, chars } => {
+                check("min", b.min.is_some());
+                check("max", b.max.is_some());
+                check("max_items", b.max_items.is_some());
+                Schema::Str {
+                    max_len: b.max_len.unwrap_or(max_len),
+                    chars: b.chars.or(chars),
+                }
+            }
+            Schema::List { item, max_len } => {
+                check("min", b.min.is_some());
+                check("max", b.max.is_some());
+                check("max_len", b.max_len.is_some());
+                check("chars", b.chars.is_some());
+                Schema::List {
+                    item,
+                    max_len: b.max_items.unwrap_or(max_len),
+                }
+            }
+            Schema::Map { value, max_len } => {
+                check("min", b.min.is_some());
+                check("max", b.max.is_some());
+                check("max_len", b.max_len.is_some());
+                check("chars", b.chars.is_some());
+                Schema::Map {
+                    value,
+                    max_len: b.max_items.unwrap_or(max_len),
+                }
+            }
+            other => {
+                check("min", b.min.is_some());
+                check("max", b.max.is_some());
+                check("max_len", b.max_len.is_some());
+                check("max_items", b.max_items.is_some());
+                check("chars", b.chars.is_some());
+                other
+            }
+        }
+    }
+
     /// Serializes a handler's result.
     pub fn to_value<T: serde::Serialize>(value: &T) -> Result<Value, CommandError> {
         serde_json::to_value(value).map_err(|e| CommandError::new("IPC_BAD_RESULT", &e.to_string()))

@@ -17,10 +17,14 @@ pub mod platform;
 pub mod rng;
 pub mod theme;
 
+pub use backend::{devtools_policy, PreferredScheme};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use error::{Error, Result, Support};
 pub use executor::{block_on, Executor};
 pub use geometry::{LogicalRect, LogicalSize, PhysicalSize, ScaleFactor};
-pub use platform::{ClipboardBackend, ColorScheme, ThemeBackend};
+pub use platform::{
+    ClipboardBackend, ColorScheme, MessageAnswer, MessageBox, MessageButtons, MessageIcon,
+    OpenDialog, Platform, ThemeBackend,
+};
 pub use rng::{Rng, SeededRng, SystemRng};
 pub use theme::{injection_script, Signals, Theme};

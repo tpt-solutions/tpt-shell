@@ -5,18 +5,24 @@
 //! Backend-independent: a platform backend passes each page message through [`Router::handle`]
 //! and posts the returned text back to the page.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::Duration;
 
 use serde_json::json;
 
 use tpt_shell_capabilities::{ConsentPrompt, Decision, Engine};
 
+use crate::jobs::{self, JobEvent, Jobs};
 use crate::rate_limit::RateLimiter;
 use crate::schema::{self, validate, Schema};
 use crate::{
     err_response, ok_response, parse_error_response, parse_request, Limits, Request, Value,
 };
+
+/// Jobs that may run at once, unless the router is given another limit.
+pub const DEFAULT_JOB_LIMIT: usize = 4;
 
 /// A failed command. `code` is stable and meant for the page; `message` is for developers.
 /// `details` is optional structured data for the page, such as the path of a bad argument.
@@ -50,6 +56,7 @@ type Handler = Box<dyn Fn(&Value) -> Result<Value, CommandError>>;
 pub struct Router {
     handlers: HashMap<String, Handler>,
     guards: HashMap<String, Guard>,
+    jobs: Option<Rc<RefCell<Jobs>>>,
 }
 
 /// What a guarded command acts on, read from its arguments and checked against the caller's
@@ -147,6 +154,73 @@ impl Router {
         handler: impl Fn(&Value) -> Result<Value, CommandError> + 'static,
     ) {
         self.register_guarded(cmd, capability, target_of, checked(schema, handler));
+    }
+
+    /// The job runner shared by this router's job commands. It is created on first use, with
+    /// [`DEFAULT_JOB_LIMIT`] running jobs and the `job.cancel` command registered beside it.
+    /// The UI thread drains it with [`Router::drain_job_events`].
+    pub fn jobs(&mut self) -> Rc<RefCell<Jobs>> {
+        if let Some(jobs) = &self.jobs {
+            return jobs.clone();
+        }
+        let jobs = Rc::new(RefCell::new(Jobs::new(DEFAULT_JOB_LIMIT)));
+        let cancel_jobs = jobs.clone();
+        let schema = Schema::Struct(&[crate::schema::Field {
+            name: "job",
+            schema: Schema::Int {
+                min: 0,
+                max: i64::MAX,
+            },
+        }]);
+        self.register_validated("job.cancel", schema, move |args| {
+            let id = args["job"].as_u64().unwrap_or(0);
+            let stopped = cancel_jobs.borrow_mut().cancel(jobs::JobId(id));
+            Ok(json!({ "cancelled": stopped }))
+        });
+        self.jobs = Some(jobs.clone());
+        jobs
+    }
+
+    /// Registers a job command, `start`, which receives the arguments and the shared job runner.
+    /// `start` returns the page's answer, normally `{"job": id}` from [`jobs::start_shared`].
+    pub fn register_job(
+        &mut self,
+        cmd: &str,
+        schema: Schema,
+        start: impl Fn(&Value, &Rc<RefCell<Jobs>>) -> Result<Value, CommandError> + 'static,
+    ) {
+        let jobs = self.jobs();
+        self.register_validated(cmd, schema, move |args| start(args, &jobs));
+    }
+
+    /// Like [`Router::register_job`], behind `capability`, with `target_of` naming what the call
+    /// acts on (see [`Router::register_guarded`]).
+    pub fn register_job_guarded(
+        &mut self,
+        cmd: &str,
+        capability: &str,
+        schema: Schema,
+        target_of: impl Fn(&Value) -> Target + 'static,
+        start: impl Fn(&Value, &Rc<RefCell<Jobs>>) -> Result<Value, CommandError> + 'static,
+    ) {
+        let jobs = self.jobs();
+        self.register_guarded_validated(cmd, capability, schema, target_of, move |args| {
+            start(args, &jobs)
+        });
+    }
+
+    /// Collects the job events reported since the last call, as envelope events ready to send to
+    /// the page. Empty when no job has been started.
+    pub fn drain_job_events(&self) -> Vec<Value> {
+        match &self.jobs {
+            Some(jobs) => jobs
+                .borrow_mut()
+                .drain()
+                .iter()
+                .map(JobEvent::to_envelope)
+                .collect(),
+            None => Vec::new(),
+        }
     }
 
     /// Handles one raw message from the page and returns the response text to send back.

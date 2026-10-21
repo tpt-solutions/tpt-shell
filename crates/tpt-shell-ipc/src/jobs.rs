@@ -11,7 +11,9 @@
 //! Cancellation is cooperative: a job that never checks [`JobContext::is_cancelled`] runs to
 //! the end. Each job reports exactly one terminal event: `Result`, `Failed` or `Cancelled`.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -215,10 +217,87 @@ impl Jobs {
     }
 }
 
+/// Starts `body` on a runner shared by a router's job commands (see `Router::jobs`) and returns
+/// the page's answer, `{"job": id}`. A refused start is `JOB_LIMIT`, with a hint.
+pub fn start_shared<F>(jobs: &Rc<RefCell<Jobs>>, body: F) -> Result<Value, CommandError>
+where
+    F: FnOnce(&JobContext) -> Result<Value, CommandError> + Send + 'static,
+{
+    let id = jobs.borrow_mut().start(body).map_err(|e| match e {
+        StartError::TooMany { limit } => CommandError::new(
+            "JOB_LIMIT",
+            &format!("{limit} jobs are already running; wait for one to finish or cancel it"),
+        ),
+    })?;
+    Ok(json!({ "job": id.0 }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::router::Router;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_shared_runner_starts_jobs_through_the_router() {
+        let mut router = Router::new();
+        let jobs = router.jobs();
+        let answer = start_shared(&jobs, |ctx| {
+            ctx.progress(1, 1);
+            Ok(json!("done"))
+        })
+        .unwrap();
+        let id = answer["job"].as_u64().unwrap();
+        let mut seen = Vec::new();
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(10)
+            && !seen.iter().any(|e: &Value| e["event"] == "job.result")
+        {
+            seen.extend(router.drain_job_events());
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(seen[0]["event"], "job.progress");
+        assert_eq!(seen[0]["data"]["job"], id);
+        assert!(seen.iter().any(|e| e["event"] == "job.result"));
+    }
+
+    #[test]
+    fn job_cancel_is_a_command_that_stops_a_job() {
+        let mut router = Router::new();
+        let jobs = router.jobs();
+        let answer = start_shared(&jobs, |ctx| {
+            while !ctx.is_cancelled() {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(CommandError::new("JOB_STOPPED", "stopped"))
+        })
+        .unwrap();
+        let request =
+            json!({ "v": 1, "id": 1, "cmd": "job.cancel", "args": { "job": answer["job"] } });
+        let reply = router.handle(request.to_string().as_bytes(), &crate::Limits::default());
+        let reply: Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(reply["data"]["cancelled"], true);
+    }
+
+    #[test]
+    fn a_refused_start_names_the_limit() {
+        let mut router = Router::new();
+        let jobs = router.jobs();
+        for _ in 0..crate::router::DEFAULT_JOB_LIMIT {
+            start_shared(&jobs, |ctx| {
+                while !ctx.is_cancelled() {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(CommandError::new("JOB_STOPPED", "stopped"))
+            })
+            .unwrap();
+        }
+        let err = start_shared(&jobs, |_| Ok(json!(null))).unwrap_err();
+        assert_eq!(err.code, "JOB_LIMIT");
+        for id in 1..=crate::router::DEFAULT_JOB_LIMIT as u64 {
+            assert!(jobs.borrow_mut().cancel(JobId(id)));
+        }
+    }
 
     /// Drains until `done` is true or the timeout passes, and returns everything collected.
     fn collect_until(jobs: &mut Jobs, mut done: impl FnMut(&[JobEvent]) -> bool) -> Vec<JobEvent> {

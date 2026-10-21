@@ -301,6 +301,74 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// Like [`Engine::check`] for a path, but also checks where the path really points. The
+    /// path is first checked lexically; then its real location (symbolic links and junctions
+    /// followed, see [`real_path`]) must also be inside the scope. A path that cannot be
+    /// resolved is denied.
+    pub fn check_path_on_disk(
+        &self,
+        window: &str,
+        origin: &str,
+        capability: &str,
+        raw: &str,
+    ) -> Decision {
+        match self.check(window, origin, capability, Request::Path(raw)) {
+            Decision::Allow => self.check_real(window, origin, capability, raw),
+            other => other,
+        }
+    }
+
+    /// Like [`Engine::check_path_on_disk`], but asks `prompt` when consent is needed.
+    pub fn authorize_path_on_disk(
+        &mut self,
+        prompt: &mut dyn ConsentPrompt,
+        window: &str,
+        origin: &str,
+        capability: &str,
+        raw: &str,
+    ) -> Decision {
+        match self.authorize(prompt, window, origin, capability, Request::Path(raw)) {
+            Decision::Allow => self.check_real(window, origin, capability, raw),
+            other => other,
+        }
+    }
+
+    fn check_real(&self, window: &str, origin: &str, capability: &str, raw: &str) -> Decision {
+        match real_path(raw) {
+            Ok(real) => self.check(window, origin, capability, Request::Path(&real)),
+            Err(why) => Decision::Deny(bad_request(format!(
+                "`{raw}` cannot be checked against the scope: {why}"
+            ))),
+        }
+    }
+}
+
+/// The real location of `raw` on disk, normalized like [`normalize_path`]. Symbolic links and
+/// junctions are followed, so a link inside a granted root that points outside it gives a path
+/// outside the root. A path that does not exist yet (a file to be created) is resolved through
+/// its parent directory. A dangling link is an error, never a path to trust.
+pub fn real_path(raw: &str) -> Result<String, String> {
+    let path = std::path::Path::new(raw);
+    let real = match fs::canonicalize(path) {
+        Ok(real) => real,
+        Err(err)
+            if err.kind() == io::ErrorKind::NotFound && fs::symlink_metadata(path).is_err() =>
+        {
+            let parent = path.parent().ok_or("the path has no parent directory")?;
+            let name = path.file_name().ok_or("the path has no file name")?;
+            fs::canonicalize(parent)
+                .map_err(|e| format!("the parent directory cannot be resolved: {e}"))?
+                .join(name)
+        }
+        Err(err) => return Err(format!("the path cannot be resolved: {err}")),
+    };
+    let text = real.to_string_lossy().into_owned();
+    // Windows returns verbatim paths (`\\?\C:\...`). The prefix is not part of the path.
+    let text = text.strip_prefix(r"\\?\").unwrap_or(&text).to_string();
+    normalize_path(&text)
+}
+
 fn declined(capability: &str) -> Denial {
     Denial {
         code: "CAP_CONSENT_DECLINED",
@@ -1061,5 +1129,136 @@ mod tests {
             Decision::Allow
         );
         let _ = fs::remove_file(&path);
+    }
+
+    /// A fresh directory under the system temp dir, unique per test run.
+    fn fresh_dir(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir =
+            std::env::temp_dir().join(format!("tpt-scope-{name}-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Makes a directory link, or returns `false` when this machine does not allow links
+    /// (Windows needs developer mode or elevation). The caller then skips the link checks.
+    fn link_dir(target: &std::path::Path, link: &std::path::Path) -> bool {
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(target, link);
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(target, link).or_else(|_| {
+            // A junction needs no privilege, unlike a symbolic link, so it is the fallback
+            // when developer mode is off. It is what `mklink /J` makes.
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .output()
+                .map_err(io::Error::other)
+                .and_then(|out| {
+                    if out.status.success() {
+                        Ok(())
+                    } else {
+                        Err(io::Error::other("mklink /J failed"))
+                    }
+                })
+        });
+        #[cfg(not(any(unix, windows)))]
+        let made: io::Result<()> = Err(io::Error::other("no links here"));
+        if let Err(why) = &made {
+            eprintln!("skipping link checks: cannot create a directory link ({why})");
+        }
+        made.is_ok()
+    }
+
+    fn engine_for_root(root: &std::path::Path) -> Engine {
+        let mut e = Engine::new();
+        e.add_grant(grant(
+            "main",
+            ORIGIN,
+            "fs.read",
+            Scope::Paths(vec![root.to_string_lossy().into_owned()]),
+        ))
+        .unwrap();
+        e
+    }
+
+    #[test]
+    fn a_link_inside_the_root_that_points_outside_is_denied() {
+        let root = fresh_dir("root");
+        let outside = fresh_dir("outside");
+        fs::write(outside.join("secret.txt"), b"x").unwrap();
+        if !link_dir(&outside, &root.join("escape")) {
+            return;
+        }
+        let e = engine_for_root(&root);
+        let via_link = root.join("escape").join("secret.txt");
+        let raw = via_link.to_string_lossy().into_owned();
+        // Lexically the path is inside the root, so only the real-path check refuses it.
+        assert_eq!(
+            e.check("main", ORIGIN, "fs.read", Request::Path(&raw)),
+            Decision::Allow
+        );
+        assert_eq!(
+            code(e.check_path_on_disk("main", ORIGIN, "fs.read", &raw)),
+            "CAP_OUT_OF_SCOPE"
+        );
+    }
+
+    #[test]
+    fn a_file_inside_the_root_is_allowed_on_disk() {
+        let root = fresh_dir("inside");
+        fs::write(root.join("a.txt"), b"x").unwrap();
+        let e = engine_for_root(&root);
+        let raw = root.join("a.txt").to_string_lossy().into_owned();
+        assert_eq!(
+            e.check_path_on_disk("main", ORIGIN, "fs.read", &raw),
+            Decision::Allow
+        );
+        // A file that does not exist yet is resolved through its parent.
+        let new_file = root.join("new.txt").to_string_lossy().into_owned();
+        assert_eq!(
+            e.check_path_on_disk("main", ORIGIN, "fs.read", &new_file),
+            Decision::Allow
+        );
+    }
+
+    #[test]
+    fn a_dangling_link_is_denied_not_trusted() {
+        let root = fresh_dir("dangling");
+        let gone = fresh_dir("gone");
+        if !link_dir(&gone, &root.join("dangling")) {
+            return;
+        }
+        // The link now points at nothing, but it is still there.
+        fs::remove_dir_all(&gone).unwrap();
+        let e = engine_for_root(&root);
+        let raw = root.join("dangling").to_string_lossy().into_owned();
+        assert!(matches!(
+            e.check_path_on_disk("main", ORIGIN, "fs.read", &raw),
+            Decision::Deny(_)
+        ));
+    }
+
+    #[test]
+    fn real_paths_are_normalized_and_lowercased() {
+        let root = fresh_dir("case");
+        fs::write(root.join("MiXed.TXT"), b"x").unwrap();
+        let real = real_path(&root.join("MiXed.TXT").to_string_lossy()).unwrap();
+        assert_eq!(real, real.to_ascii_lowercase());
+        assert!(!real.contains('\\'), "{real}");
+        assert!(!real.starts_with("//"), "{real}");
+    }
+
+    #[test]
+    fn a_path_that_is_not_absolute_is_refused_on_disk() {
+        let e = Engine::new();
+        assert!(matches!(
+            e.check_path_on_disk("main", ORIGIN, "fs.read", "relative/a.txt"),
+            Decision::Deny(_)
+        ));
     }
 }

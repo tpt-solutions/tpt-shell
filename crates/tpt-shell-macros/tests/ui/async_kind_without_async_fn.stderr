@@ -1,0 +1,5 @@
+error: kind = "async" needs an `async fn`
+ --> tests/ui/async_kind_without_async_fn.rs:8:1
+  |
+8 | fn scan() -> Result<u32, CommandError> {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

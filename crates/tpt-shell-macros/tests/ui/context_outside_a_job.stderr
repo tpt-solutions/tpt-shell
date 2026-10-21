@@ -1,0 +1,5 @@
+error: JobContext is only for a command with kind = "job"
+ --> tests/ui/context_outside_a_job.rs:9:14
+  |
+9 | fn scan(job: &JobContext) -> Result<u32, CommandError> {
+  |              ^^^^^^^^^^^

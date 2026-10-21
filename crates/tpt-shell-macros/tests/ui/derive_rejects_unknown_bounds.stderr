@@ -1,0 +1,5 @@
+error: unknown bound; expected `min`, `max`, `max_len`, `max_items` or `chars`
+ --> tests/ui/derive_rejects_unknown_bounds.rs:9:16
+  |
+9 |     #[contract(maxlen = 3)]
+  |                ^^^^^^

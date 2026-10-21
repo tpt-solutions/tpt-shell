@@ -6,13 +6,20 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
+use std::path::PathBuf;
+
 use crate::backend::{
-    AssetSource, Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler,
-    WebviewBackend, WindowBackend, WindowSpec,
+    devtools_policy, AssetSource, Backdrop, CloseAction, EventLoopBackend, EventLoopProxy,
+    MessageHandler, PreferredScheme, WebviewBackend, WindowBackend, WindowSpec,
 };
 use crate::error::{Error, Result};
 use crate::geometry::{LogicalRect, LogicalSize};
-use crate::platform::{ClipboardBackend, ColorScheme, ThemeBackend};
+use crate::platform::{
+    ClipboardBackend, ColorScheme, MessageAnswer, MessageBox, OpenDialog, Platform, ThemeBackend,
+};
+
+/// The PNG signature, which the fake's snapshots start with.
+pub const FAKE_PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 /// Window handle used by the fake backend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +46,12 @@ pub struct FakeWindow {
     pub url: Option<String>,
     pub messages: Vec<String>,
     pub closed: bool,
+    pub dark_title_bar: bool,
+    /// Whether the developer tools are on for this window's page.
+    pub devtools: bool,
+    /// How many times the developer tools were opened in their own window.
+    pub devtools_opened: u32,
+    pub preferred_scheme: PreferredScheme,
 }
 
 type Task = Box<dyn FnOnce() + Send>;
@@ -73,6 +86,20 @@ pub struct FakeBackend {
     pub clipboard: Option<String>,
     /// The system colour scheme the fake reports.
     pub scheme: ColorScheme,
+    /// Whether the fake behaves as a release build (developer tools refused).
+    pub release_build: bool,
+    /// Answers the next message boxes give, oldest first. With none left, a box is cancelled.
+    pub message_answers: VecDeque<MessageAnswer>,
+    /// Paths the next open dialogs return, oldest first. With none left, the dialog is cancelled.
+    pub open_answers: VecDeque<Vec<PathBuf>>,
+    /// Message boxes shown, in order.
+    pub messages_shown: Vec<MessageBox>,
+    /// Secrets in the fake keystore.
+    pub keystore: HashMap<String, Vec<u8>>,
+    /// URL schemes registered, in order.
+    pub schemes: Vec<String>,
+    /// Notifications shown, as (title, body).
+    pub notifications: Vec<(String, String)>,
 }
 
 impl ClipboardBackend for FakeBackend {
@@ -176,6 +203,10 @@ impl WindowBackend for FakeBackend {
             url: None,
             messages: Vec::new(),
             closed: false,
+            dark_title_bar: false,
+            devtools: !self.release_build,
+            devtools_opened: 0,
+            preferred_scheme: PreferredScheme::System,
         });
         Ok(FakeId(self.windows.len() as u64 - 1))
     }
@@ -259,6 +290,11 @@ impl WindowBackend for FakeBackend {
         self.window_mut(id)?.close_action = action;
         Ok(())
     }
+
+    fn set_dark_title_bar(&mut self, id: FakeId, on: bool) -> Result<()> {
+        self.window_mut(id)?.dark_title_bar = on;
+        Ok(())
+    }
 }
 
 impl WebviewBackend for FakeBackend {
@@ -298,6 +334,94 @@ impl WebviewBackend for FakeBackend {
     fn set_asset_source(&mut self, id: FakeId, source: AssetSource) -> Result<()> {
         self.window(id)?;
         self.asset_sources.insert(id.0, source);
+        Ok(())
+    }
+
+    fn snapshot(&mut self, id: FakeId) -> Result<Vec<u8>> {
+        self.window(id)?;
+        Ok(FAKE_PNG.to_vec())
+    }
+
+    fn set_devtools(&mut self, id: FakeId, on: bool) -> Result<()> {
+        devtools_policy(self.release_build, on)?;
+        self.window_mut(id)?.devtools = on;
+        Ok(())
+    }
+
+    fn open_devtools(&mut self, id: FakeId) -> Result<()> {
+        let w = self.window_mut(id)?;
+        if !w.devtools {
+            return Err(Error::Unsupported {
+                feature: "developer tools are off for this window",
+            });
+        }
+        w.devtools_opened += 1;
+        Ok(())
+    }
+
+    fn set_preferred_color_scheme(&mut self, id: FakeId, scheme: PreferredScheme) -> Result<()> {
+        self.window_mut(id)?.preferred_scheme = scheme;
+        Ok(())
+    }
+}
+
+impl Platform for FakeBackend {
+    fn message_box(
+        &mut self,
+        owner: Option<FakeId>,
+        message: &MessageBox,
+    ) -> Result<MessageAnswer> {
+        if let Some(owner) = owner {
+            self.window(owner)?;
+        }
+        self.messages_shown.push(message.clone());
+        Ok(self
+            .message_answers
+            .pop_front()
+            .unwrap_or(MessageAnswer::Cancel))
+    }
+
+    fn open_files(&mut self, owner: Option<FakeId>, dialog: &OpenDialog) -> Result<Vec<PathBuf>> {
+        if let Some(owner) = owner {
+            self.window(owner)?;
+        }
+        let picked = self.open_answers.pop_front().unwrap_or_default();
+        if !dialog.multiple && picked.len() > 1 {
+            return Err(Error::Backend(
+                "a single-select dialog returned several files".into(),
+            ));
+        }
+        Ok(picked)
+    }
+
+    fn keystore_set(&mut self, name: &str, secret: &[u8]) -> Result<()> {
+        self.keystore.insert(name.to_string(), secret.to_vec());
+        Ok(())
+    }
+
+    fn keystore_get(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        Ok(self.keystore.get(name).cloned())
+    }
+
+    fn keystore_delete(&mut self, name: &str) -> Result<bool> {
+        Ok(self.keystore.remove(name).is_some())
+    }
+
+    fn register_scheme(&mut self, scheme: &str, _description: &str) -> Result<()> {
+        if !self.schemes.iter().any(|s| s == scheme) {
+            self.schemes.push(scheme.to_string());
+        }
+        Ok(())
+    }
+
+    fn unregister_scheme(&mut self, scheme: &str) -> Result<()> {
+        self.schemes.retain(|s| s != scheme);
+        Ok(())
+    }
+
+    fn notify(&mut self, title: &str, body: &str) -> Result<()> {
+        self.notifications
+            .push((title.to_string(), body.to_string()));
         Ok(())
     }
 }
@@ -628,5 +752,136 @@ mod asset_tests {
         let mut b = FakeBackend::new();
         let id = b.create(&spec()).unwrap();
         assert_eq!(b.fetch_asset(id, "index.html").unwrap(), None);
+    }
+}
+
+#[cfg(test)]
+mod platform_tests {
+    use super::*;
+
+    fn spec() -> WindowSpec {
+        WindowSpec {
+            name: "main".into(),
+            title: "Main".into(),
+            size: LogicalSize {
+                width: 800.0,
+                height: 600.0,
+            },
+            allow_navigation: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn message_boxes_return_queued_answers_and_cancel_when_none_are_left() {
+        let mut b = FakeBackend::new();
+        let id = b.create(&spec()).unwrap();
+        b.message_answers.push_back(MessageAnswer::Yes);
+        let question = MessageBox {
+            title: "Save".into(),
+            text: "Keep changes?".into(),
+            buttons: crate::platform::MessageButtons::YesNo,
+            icon: crate::platform::MessageIcon::Warning,
+        };
+        assert_eq!(
+            b.message_box(Some(id), &question).unwrap(),
+            MessageAnswer::Yes
+        );
+        assert_eq!(
+            b.message_box(None, &question).unwrap(),
+            MessageAnswer::Cancel
+        );
+        assert_eq!(b.messages_shown.len(), 2);
+    }
+
+    #[test]
+    fn a_message_box_needs_a_real_owner() {
+        let mut b = FakeBackend::new();
+        let bogus = FakeId(9);
+        assert_eq!(
+            b.message_box(Some(bogus), &MessageBox::default()),
+            Err(Error::UnknownWindow(9))
+        );
+    }
+
+    #[test]
+    fn open_dialog_returns_the_queued_paths_and_refuses_several_in_single_mode() {
+        let mut b = FakeBackend::new();
+        let single = OpenDialog {
+            title: "Open".into(),
+            filters: Vec::new(),
+            multiple: false,
+        };
+        let many = vec![PathBuf::from("a.txt"), PathBuf::from("b.txt")];
+        b.open_answers.push_back(many.clone());
+        assert!(b.open_files(None, &single).is_err());
+        b.open_answers.push_back(many.clone());
+        let multi = OpenDialog {
+            multiple: true,
+            ..single
+        };
+        assert_eq!(b.open_files(None, &multi).unwrap(), many);
+        assert!(b.open_files(None, &multi).unwrap().is_empty());
+    }
+
+    #[test]
+    fn keystore_round_trips_and_delete_reports_what_was_there() {
+        let mut b = FakeBackend::new();
+        assert_eq!(b.keystore_get("token").unwrap(), None);
+        b.keystore_set("token", b"secret").unwrap();
+        assert_eq!(b.keystore_get("token").unwrap(), Some(b"secret".to_vec()));
+        assert!(b.keystore_delete("token").unwrap());
+        assert!(!b.keystore_delete("token").unwrap());
+    }
+
+    #[test]
+    fn schemes_and_notifications_are_recorded() {
+        let mut b = FakeBackend::new();
+        b.register_scheme("myapp", "My app").unwrap();
+        b.register_scheme("myapp", "My app").unwrap();
+        assert_eq!(b.schemes, vec!["myapp".to_string()]);
+        b.unregister_scheme("myapp").unwrap();
+        assert!(b.schemes.is_empty());
+        b.notify("Done", "Export finished").unwrap();
+        assert_eq!(
+            b.notifications,
+            vec![("Done".into(), "Export finished".into())]
+        );
+    }
+
+    #[test]
+    fn release_builds_refuse_devtools_and_debug_builds_allow_them() {
+        let mut debug = FakeBackend::new();
+        let id = debug.create(&spec()).unwrap();
+        assert!(debug.window(id).unwrap().devtools);
+        debug.set_devtools(id, false).unwrap();
+        debug.set_devtools(id, true).unwrap();
+        debug.open_devtools(id).unwrap();
+        assert_eq!(debug.window(id).unwrap().devtools_opened, 1);
+
+        let mut release = FakeBackend {
+            release_build: true,
+            ..FakeBackend::new()
+        };
+        let id = release.create(&spec()).unwrap();
+        assert!(!release.window(id).unwrap().devtools);
+        assert!(release.set_devtools(id, true).is_err());
+        assert!(!release.window(id).unwrap().devtools);
+        assert!(release.open_devtools(id).is_err());
+        assert_eq!(release.window(id).unwrap().devtools_opened, 0);
+        release.set_devtools(id, false).unwrap();
+    }
+
+    #[test]
+    fn snapshot_preferred_scheme_and_dark_title_bar_are_stored() {
+        let mut b = FakeBackend::new();
+        let id = b.create(&spec()).unwrap();
+        assert_eq!(b.snapshot(id).unwrap(), FAKE_PNG);
+        b.set_preferred_color_scheme(id, PreferredScheme::Dark)
+            .unwrap();
+        b.set_dark_title_bar(id, true).unwrap();
+        let w = b.window(id).unwrap();
+        assert_eq!(w.preferred_scheme, PreferredScheme::Dark);
+        assert!(w.dark_title_bar);
+        assert!(b.snapshot(FakeId(7)).is_err());
     }
 }

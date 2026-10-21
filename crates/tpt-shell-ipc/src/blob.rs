@@ -42,11 +42,13 @@ impl std::fmt::Display for BlobError {
 
 impl std::error::Error for BlobError {}
 
-/// Blobs held for one window or session, with a total size cap.
+/// Blobs held for one app, with a total size cap. Each blob may name an owner (a window), so
+/// that the blobs of a window can be removed when it closes.
 pub struct BlobStore {
     limit: usize,
     used: usize,
     blobs: HashMap<String, Blob>,
+    owners: HashMap<String, String>,
 }
 
 impl BlobStore {
@@ -55,11 +57,23 @@ impl BlobStore {
             limit,
             used: 0,
             blobs: HashMap::new(),
+            owners: HashMap::new(),
         }
     }
 
-    /// Stores `bytes` under `id`.
+    /// Stores `bytes` under `id`, with no owner.
     pub fn put(&mut self, id: &str, media_type: &str, bytes: Vec<u8>) -> Result<(), BlobError> {
+        self.put_owned(None, id, media_type, bytes)
+    }
+
+    /// Stores `bytes` under `id`, owned by `owner` (a window name) when one is given.
+    pub fn put_owned(
+        &mut self,
+        owner: Option<&str>,
+        id: &str,
+        media_type: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), BlobError> {
         if !is_valid_id(id) {
             return Err(BlobError::BadId);
         }
@@ -73,6 +87,9 @@ impl BlobStore {
             });
         }
         self.used += bytes.len();
+        if let Some(owner) = owner {
+            self.owners.insert(id.to_string(), owner.to_string());
+        }
         self.blobs.insert(
             id.to_string(),
             Blob {
@@ -90,8 +107,34 @@ impl BlobStore {
     /// Removes a blob and returns its size. Removing frees its quota.
     pub fn remove(&mut self, id: &str) -> Option<usize> {
         let blob = self.blobs.remove(id)?;
+        self.owners.remove(id);
         self.used -= blob.bytes.len();
         Some(blob.bytes.len())
+    }
+
+    /// Removes every blob owned by `owner`, and returns how many were removed.
+    pub fn remove_owned(&mut self, owner: &str) -> usize {
+        let ids: Vec<String> = self
+            .owners
+            .iter()
+            .filter(|(_, o)| o.as_str() == owner)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &ids {
+            self.remove(id);
+        }
+        ids.len()
+    }
+
+    /// The total size allowed for this store.
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
+    /// Changes the total size allowed. Blobs already stored are kept; a lower limit only refuses
+    /// new blobs until enough are removed.
+    pub fn set_limit(&mut self, limit: usize) {
+        self.limit = limit;
     }
 
     pub fn used(&self) -> usize {
@@ -200,5 +243,60 @@ mod tests {
         ] {
             assert_eq!(id_from_route(&bad), None, "{bad}");
         }
+    }
+
+    const OTHER: &str = "fedcba9876543210fedcba9876543210";
+
+    #[test]
+    fn removing_an_owner_removes_only_its_blobs() {
+        let mut store = BlobStore::new(100);
+        store
+            .put_owned(Some("main"), ID, "text/plain", vec![0; 10])
+            .unwrap();
+        store
+            .put_owned(Some("main"), OTHER, "text/plain", vec![0; 20])
+            .unwrap();
+        store
+            .put_owned(
+                Some("aux"),
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "text/plain",
+                vec![0; 5],
+            )
+            .unwrap();
+        store
+            .put("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "text/plain", vec![0; 1])
+            .unwrap();
+
+        assert_eq!(store.remove_owned("main"), 2);
+        assert!(store.get(ID).is_none());
+        assert!(store.get(OTHER).is_none());
+        assert_eq!(store.used(), 6, "freed quota comes back");
+        assert!(store.get("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").is_some());
+        assert_eq!(store.remove_owned("main"), 0);
+    }
+
+    #[test]
+    fn a_removed_blob_frees_its_owner_entry() {
+        let mut store = BlobStore::new(100);
+        store
+            .put_owned(Some("main"), ID, "text/plain", vec![0; 10])
+            .unwrap();
+        store.remove(ID);
+        assert_eq!(store.remove_owned("main"), 0);
+    }
+
+    #[test]
+    fn the_limit_can_be_read_and_changed() {
+        let mut store = BlobStore::new(10);
+        assert_eq!(store.limit(), 10);
+        store.put(ID, "text/plain", vec![0; 8]).unwrap();
+        store.set_limit(4);
+        assert_eq!(store.limit(), 4);
+        assert!(store.get(ID).is_some(), "stored blobs are kept");
+        assert!(matches!(
+            store.put(OTHER, "text/plain", vec![0; 1]),
+            Err(BlobError::QuotaExceeded { .. })
+        ));
     }
 }

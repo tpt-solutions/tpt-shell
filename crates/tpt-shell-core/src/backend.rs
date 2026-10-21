@@ -107,7 +107,6 @@ pub trait WindowBackend {
         })
     }
 
-    /// Chooses what a user close request does. Applies to later requests only.
     /// Creates a window owned by `parent`. It closes with its parent and stays above it.
     fn create_child(&mut self, _parent: Self::Id, _spec: &WindowSpec) -> Result<Self::Id> {
         Err(Error::Unsupported {
@@ -123,11 +122,41 @@ pub trait WindowBackend {
         })
     }
 
+    /// Chooses what a user close request does. Applies to later requests only.
     fn set_close_action(&mut self, _id: Self::Id, _action: CloseAction) -> Result<()> {
         Err(Error::Unsupported {
             feature: "close handling",
         })
     }
+
+    /// Draws the title bar in the dark style (Windows 10 1809 and later). Off restores the light
+    /// style. Only the frame changes; the page's own colours are not touched.
+    fn set_dark_title_bar(&mut self, _id: Self::Id, _on: bool) -> Result<()> {
+        Err(Error::Unsupported {
+            feature: "dark title bar",
+        })
+    }
+}
+
+/// Whether developer tools may be switched on or opened for a window (spec §9). Release builds
+/// keep them off: turning them on there is refused. Debug builds may switch them either way.
+pub fn devtools_policy(release_build: bool, on: bool) -> Result<()> {
+    if release_build && on {
+        return Err(Error::Unsupported {
+            feature: "developer tools in release builds",
+        });
+    }
+    Ok(())
+}
+
+/// Colour scheme a page sees through `prefers-color-scheme` (spec 10.x, theme sync).
+/// `System` follows the operating system and changes with it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PreferredScheme {
+    #[default]
+    System,
+    Light,
+    Dark,
 }
 
 /// Receives a message the page posted, and returns the reply to post back, if there is one.
@@ -170,6 +199,35 @@ pub trait WebviewBackend: WindowBackend {
         let _ = (id, source);
         Err(Error::Unsupported {
             feature: "app assets",
+        })
+    }
+    /// Captures what the window's page shows, as PNG bytes.
+    fn snapshot(&mut self, _id: Self::Id) -> Result<Vec<u8>> {
+        Err(Error::Unsupported {
+            feature: "snapshot",
+        })
+    }
+    /// Turns the developer tools on or off for the window's page. Release builds refuse `on`
+    /// (see [`devtools_policy`]).
+    fn set_devtools(&mut self, _id: Self::Id, _on: bool) -> Result<()> {
+        Err(Error::Unsupported {
+            feature: "devtools toggle",
+        })
+    }
+    /// Opens the developer tools in their own window. Refused unless they are enabled.
+    fn open_devtools(&mut self, _id: Self::Id) -> Result<()> {
+        Err(Error::Unsupported {
+            feature: "devtools toggle",
+        })
+    }
+    /// Sets the colour scheme the page's `prefers-color-scheme` media query sees.
+    fn set_preferred_color_scheme(
+        &mut self,
+        _id: Self::Id,
+        _scheme: PreferredScheme,
+    ) -> Result<()> {
+        Err(Error::Unsupported {
+            feature: "preferred colour scheme",
         })
     }
 }
