@@ -667,6 +667,14 @@ impl WindowsBackend {
         let web = controller
             .webview()
             .map_err(|hr| hr_error("get_CoreWebView2", hr))?;
+        let page = page_settings(!cfg!(debug_assertions));
+        let settings = web.settings().map_err(|hr| hr_error("get_Settings", hr))?;
+        settings
+            .set_devtools_enabled(page.devtools)
+            .map_err(|hr| hr_error("put_AreDevToolsEnabled", hr))?;
+        settings
+            .set_default_context_menus_enabled(page.context_menu)
+            .map_err(|hr| hr_error("put_AreDefaultContextMenusEnabled", hr))?;
         let host_document = Rc::new(RefCell::new(None::<String>));
         let for_top = host_document.clone();
         web.set_navigation_policy(move |url| allowed_navigation(url, &for_top.borrow()))
@@ -693,6 +701,21 @@ impl WindowsBackend {
             modal: false,
             host_document,
         })
+    }
+}
+
+/// Switches a page window gets when it is created. Release builds turn the developer tools and
+/// the right-click menu off (spec §9). Debug builds keep both, for development.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PageSettings {
+    devtools: bool,
+    context_menu: bool,
+}
+
+fn page_settings(release: bool) -> PageSettings {
+    PageSettings {
+        devtools: !release,
+        context_menu: !release,
     }
 }
 
@@ -1099,6 +1122,24 @@ mod tests {
             );
             drop(b);
             let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn release_builds_turn_devtools_and_the_context_menu_off() {
+            assert_eq!(
+                page_settings(true),
+                PageSettings {
+                    devtools: false,
+                    context_menu: false
+                }
+            );
+            assert_eq!(
+                page_settings(false),
+                PageSettings {
+                    devtools: true,
+                    context_menu: true
+                }
+            );
         }
 
         #[test]

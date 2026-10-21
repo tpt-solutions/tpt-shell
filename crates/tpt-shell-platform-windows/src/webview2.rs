@@ -108,10 +108,23 @@ struct ControllerVtbl {
     get_core_webview2: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
 }
 
+/// `ICoreWebView2Settings`. The slots we use: get_AreDevToolsEnabled = 8, put_AreDevToolsEnabled
+/// = 9, put_AreDefaultContextMenusEnabled = 11 (BOOL is an i32 in the vtable).
+#[repr(C)]
+struct SettingsVtbl {
+    base: IUnknownVtbl,
+    _before_devtools_get: [usize; 8],
+    get_devtools_enabled: unsafe extern "system" fn(*mut c_void, *mut i32) -> HRESULT,
+    put_devtools_enabled: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
+    _before_context_menus: [usize; 1],
+    put_default_context_menus_enabled: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
+}
+
 #[repr(C)]
 struct WebViewVtbl {
     base: IUnknownVtbl,
-    _before_navigate: [usize; 2],
+    get_settings: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+    _before_navigate: [usize; 1],
     navigate: unsafe extern "system" fn(*mut c_void, *const u16) -> HRESULT,
     navigate_to_string: unsafe extern "system" fn(*mut c_void, *const u16) -> HRESULT,
     add_navigation_starting:
@@ -188,6 +201,17 @@ struct WebMessageArgsVtbl {
     try_get_web_message_as_string: unsafe extern "system" fn(*mut c_void, *mut *mut u16) -> HRESULT,
 }
 
+/// Content-Security-Policy for every response the shell serves (spec §9). Only the app's own
+/// scripts and styles run: no inline script or style, no remote origins, no plugins.
+pub const PAGE_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; \
+img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; \
+form-action 'none'; frame-ancestors 'none'";
+
+/// Header block for a served response: its content type and the page policy.
+fn response_headers(content_type: &str) -> String {
+    format!("Content-Type: {content_type}\r\nContent-Security-Policy: {PAGE_CSP}\r\n")
+}
+
 /// A request the webview wants to make, which we can answer (for `app://` content).
 pub struct WebResourceRequest(ComPtr);
 
@@ -226,7 +250,7 @@ impl WebResourceRequest {
         // SAFETY: on success the call returns a new reference to the stream.
         let stream = unsafe { ComPtr::from_owned(stream) }.ok_or(E_POINTER)?;
         let reason = wide(if status == 200 { "OK" } else { "Not Found" });
-        let headers = wide(&format!("Content-Type: {content_type}\r\n"));
+        let headers = wide(&response_headers(content_type));
         let env_vt: &EnvironmentVtbl = env.0.vtbl();
         let mut response: *mut c_void = null_mut();
         // SAFETY: the stream, strings and out-pointer are valid for the call.
@@ -285,6 +309,9 @@ pub struct Controller(ComPtr);
 
 /// `ICoreWebView2`.
 pub struct WebView(ComPtr);
+
+/// `ICoreWebView2Settings`: switches that apply to every page the webview shows.
+pub struct Settings(ComPtr);
 
 /// Default WebView2 user-data folder for an app (RFC 0001, question 2):
 /// `<local_app_data>\tpt-shell\<app_id>\webview2`. `app_id` must be one plain folder name:
@@ -369,6 +396,40 @@ impl Environment {
     }
 }
 
+impl Settings {
+    /// Turns the developer tools on or off. Off also blocks F12 and the DevTools shortcuts.
+    pub fn set_devtools_enabled(&self, on: bool) -> Result<(), HRESULT> {
+        let vt: &SettingsVtbl = self.0.vtbl();
+        // SAFETY: `self.0` is a live settings object.
+        check(unsafe { (vt.put_devtools_enabled)(self.0.as_ptr(), i32::from(on)) })
+    }
+
+    /// Reads back whether the developer tools are on.
+    pub fn devtools_enabled(&self) -> Result<bool, HRESULT> {
+        let vt: &SettingsVtbl = self.0.vtbl();
+        let mut on: i32 = 0;
+        // SAFETY: `on` is a valid out-pointer for a BOOL.
+        check(unsafe { (vt.get_devtools_enabled)(self.0.as_ptr(), &mut on) })?;
+        Ok(on != 0)
+    }
+
+    /// Turns the default right-click menu on or off.
+    pub fn set_default_context_menus_enabled(&self, on: bool) -> Result<(), HRESULT> {
+        let vt: &SettingsVtbl = self.0.vtbl();
+        // SAFETY: `self.0` is a live settings object.
+        check(unsafe { (vt.put_default_context_menus_enabled)(self.0.as_ptr(), i32::from(on)) })
+    }
+}
+
+/// Maps a failed HRESULT to `Err`.
+fn check(hr: HRESULT) -> Result<(), HRESULT> {
+    if hr < 0 {
+        Err(hr)
+    } else {
+        Ok(())
+    }
+}
+
 impl Controller {
     /// Sets the area the webview fills, in the parent window's client coordinates.
     pub fn set_bounds(&self, bounds: RECT) -> Result<(), HRESULT> {
@@ -410,6 +471,21 @@ impl Controller {
 }
 
 impl WebView {
+    /// The webview's settings (`get_Settings`). They apply to pages shown from now on.
+    pub fn settings(&self) -> Result<Settings, HRESULT> {
+        let vt: &WebViewVtbl = self.0.vtbl();
+        let mut out: *mut c_void = null_mut();
+        // SAFETY: `out` is a valid out-pointer for an interface pointer.
+        let hr = unsafe { (vt.get_settings)(self.0.as_ptr(), &mut out) };
+        if hr < 0 {
+            return Err(hr);
+        }
+        // SAFETY: on success the callee returned a new reference that we now own.
+        unsafe { ComPtr::from_owned(out) }
+            .map(Settings)
+            .ok_or(E_POINTER)
+    }
+
     /// Runs `script` in every document before any page script, from now on. `on_done` receives
     /// the registration result on the UI thread.
     /// Runs `script` in the page. `on_done` receives the call's HRESULT on the UI thread. The
@@ -733,7 +809,7 @@ mod header_tests {
     use std::path::PathBuf;
 
     /// (interface, header index, method name) for every slot we call.
-    const USED_SLOTS: [(&str, usize, &str); 26] = [
+    const USED_SLOTS: [(&str, usize, &str); 30] = [
         (
             "ICoreWebView2Environment",
             0,
@@ -743,7 +819,15 @@ mod header_tests {
         ("ICoreWebView2Controller", 3, "put_Bounds"),
         ("ICoreWebView2Controller", 21, "Close"),
         ("ICoreWebView2Controller", 22, "get_CoreWebView2"),
+        ("ICoreWebView2", 0, "get_Settings"),
         ("ICoreWebView2", 2, "Navigate"),
+        ("ICoreWebView2Settings", 8, "get_AreDevToolsEnabled"),
+        ("ICoreWebView2Settings", 9, "put_AreDevToolsEnabled"),
+        (
+            "ICoreWebView2Settings",
+            11,
+            "put_AreDefaultContextMenusEnabled",
+        ),
         ("ICoreWebView2", 3, "NavigateToString"),
         ("ICoreWebView2", 4, "add_NavigationStarting"),
         ("ICoreWebView2", 22, "add_ProcessFailed"),
@@ -874,7 +958,10 @@ mod runtime_tests {
     use crate::window::{pump_until, runtime_test_loader, HiddenWindow};
     use tpt_shell_ipc::{Limits, Router};
 
-    const INDEX_HTML: &[u8] = b"<!doctype html><title>loading</title><script>window.chrome.webview.addEventListener('message', e => { document.title = 'got-' + e.data; });window.chrome.webview.postMessage('ping');</script>";
+    // Pages load their script from app.js: the page policy blocks inline scripts.
+    const INDEX_HTML: &[u8] =
+        b"<!doctype html><title>loading</title><script src=\"app.js\"></script>";
+    const INDEX_JS: &[u8] = b"window.chrome.webview.addEventListener('message', e => { document.title = 'got-' + e.data; });window.chrome.webview.postMessage('ping');";
 
     /// Serves app content from `APP_ORIGIN` through WebResourceRequested and round-trips a message: the
     /// page posts "ping", Rust replies "pong", and the page sets its title to "got-pong".
@@ -934,6 +1021,8 @@ mod runtime_tests {
             let (status, content_type, body): (i32, &str, &[u8]) =
                 if uri == format!("{APP_ORIGIN}/index.html") {
                     (200, "text/html", INDEX_HTML)
+                } else if uri == format!("{APP_ORIGIN}/app.js") {
+                    (200, "text/javascript", INDEX_JS)
                 } else {
                     (404, "text/plain", b"not found")
                 };
@@ -1022,6 +1111,8 @@ mod runtime_tests {
             let (status, content_type, body): (i32, &str, &[u8]) =
                 if uri == format!("{APP_ORIGIN}/index.html") {
                     (200, "text/html", INDEX_HTML)
+                } else if uri == format!("{APP_ORIGIN}/app.js") {
+                    (200, "text/javascript", INDEX_JS)
                 } else {
                     (404, "text/plain", b"not found")
                 };
@@ -1082,7 +1173,9 @@ mod runtime_tests {
         );
     }
 
-    const INVOKE_HTML: &[u8] = b"<!doctype html><title>loading</title><script>window.tpt.invoke('echo', { msg: 'hi' }).then(function (d) {window.tpt.invoke('nope').then(null, function (e) { document.title = 'echo:' + d.msg + '|' + e.code; });});</script>";
+    const INVOKE_HTML: &[u8] =
+        b"<!doctype html><title>loading</title><script src=\"app.js\"></script>";
+    const INVOKE_JS: &[u8] = b"window.tpt.invoke('echo', { msg: 'hi' }).then(function (d) {window.tpt.invoke('nope').then(null, function (e) { document.title = 'echo:' + d.msg + '|' + e.code; });});";
 
     /// The page calls `window.tpt.invoke` from the shim: a Rust command answers with data, and an
     /// unknown command answers with a typed error. Both come back through the message channel.
@@ -1164,6 +1257,8 @@ mod runtime_tests {
             let (status, content_type, body): (i32, &str, &[u8]) =
                 if uri == format!("{APP_ORIGIN}/index.html") {
                     (200, "text/html", INVOKE_HTML)
+                } else if uri == format!("{APP_ORIGIN}/app.js") {
+                    (200, "text/javascript", INVOKE_JS)
                 } else {
                     (404, "text/plain", b"not found")
                 };
@@ -1641,6 +1736,131 @@ mod runtime_tests {
 
     /// Renders HTML in a hidden window and reads the document title back. Needs a loader
     /// (`TPT_WEBVIEW2_LOADER`) and an installed WebView2 runtime. Skipped otherwise.
+    /// Served page for the CSP test: an inline script, then the app's own script.
+    const CSP_PAGE: &str = "<!doctype html><title>start</title>\
+        <script>document.title = 'inline-ran';</script>\
+        <script src=\"app.js\"></script>";
+
+    #[test]
+    fn page_csp_blocks_inline_script_and_allows_the_app_script() {
+        let Some(loader_path) = runtime_test_loader() else {
+            return;
+        };
+        // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
+        let co = unsafe { windows_sys::Win32::System::Com::CoInitializeEx(std::ptr::null(), 2) };
+        assert!(co >= 0, "CoInitializeEx failed: 0x{co:08X}");
+
+        let window = HiddenWindow::new().expect("hidden window");
+        let (env, ctrl, web) = runtime_webview(&loader_path, &window);
+        web.add_web_resource_requested_filter(&format!("{APP_ORIGIN}/*"))
+            .expect("filter");
+        web.on_web_resource_requested(move |req| {
+            let uri = req.uri().unwrap_or_default();
+            let path = uri
+                .strip_prefix(APP_ORIGIN)
+                .unwrap_or("")
+                .trim_start_matches('/');
+            let (content_type, body): (&str, &[u8]) = match path {
+                "" | "index.html" => ("text/html", CSP_PAGE.as_bytes()),
+                "app.js" => (
+                    "text/javascript",
+                    b"document.title = document.title === 'inline-ran' ? 'both' : 'external-only';",
+                ),
+                _ => {
+                    let _ = req.respond(&env, 404, "text/plain", b"not found");
+                    return;
+                }
+            };
+            let _ = req.respond(&env, 200, content_type, body);
+        })
+        .expect("resource handler");
+        web.navigate(&format!("{APP_ORIGIN}/index.html"))
+            .expect("navigate");
+
+        let mut title = String::new();
+        let done = pump_until(Duration::from_secs(30), || {
+            title = web.document_title().unwrap_or_default();
+            title == "external-only" || title == "both"
+        });
+        ctrl.close().expect("close controller");
+        // SAFETY: balances the CoInitializeEx above.
+        unsafe { windows_sys::Win32::System::Com::CoUninitialize() };
+
+        assert!(done, "the app script never ran; title is {title:?}");
+        assert_eq!(title, "external-only", "the inline script must be blocked");
+    }
+
+    #[test]
+    fn every_response_carries_the_page_policy() {
+        let headers = response_headers("text/html");
+        assert!(headers.starts_with("Content-Type: text/html\r\n"));
+        assert!(headers.contains(&format!("Content-Security-Policy: {PAGE_CSP}\r\n")));
+        assert!(PAGE_CSP.contains("script-src 'self'"));
+        assert!(!PAGE_CSP.contains("unsafe-inline"));
+    }
+
+    /// Creates a controller on a hidden window and returns it with its webview.
+    fn runtime_webview(
+        loader_path: &std::ffi::OsStr,
+        window: &HiddenWindow,
+    ) -> (Environment, Controller, WebView) {
+        let loader = OfficialLoader::load(Path::new(loader_path)).expect("loader should load");
+        let create = loader
+            .create_environment_fn()
+            .expect("environment entry point");
+        let data_dir =
+            std::env::temp_dir().join(format!("tpt-shell-settings-{}", std::process::id()));
+        let env_slot: Rc<RefCell<Option<Result<Environment, HRESULT>>>> =
+            Rc::new(RefCell::new(None));
+        let slot = env_slot.clone();
+        create_environment(create, &data_dir, move |r| *slot.borrow_mut() = Some(r))
+            .expect("start environment");
+        assert!(pump_until(Duration::from_secs(30), || env_slot
+            .borrow()
+            .is_some()));
+        let env = env_slot.borrow_mut().take().unwrap().expect("environment");
+
+        let ctrl_slot: Rc<RefCell<Option<Result<Controller, HRESULT>>>> =
+            Rc::new(RefCell::new(None));
+        let slot = ctrl_slot.clone();
+        env.create_controller(window.hwnd() as isize, move |r| {
+            *slot.borrow_mut() = Some(r)
+        })
+        .expect("start controller");
+        assert!(pump_until(Duration::from_secs(30), || ctrl_slot
+            .borrow()
+            .is_some()));
+        let ctrl = ctrl_slot.borrow_mut().take().unwrap().expect("controller");
+        let web = ctrl.webview().expect("webview");
+        (env, ctrl, web)
+    }
+
+    #[test]
+    fn devtools_and_context_menu_settings_round_trip() {
+        let Some(loader_path) = runtime_test_loader() else {
+            return;
+        };
+        // SAFETY: standard COM init for this thread, balanced by CoUninitialize below.
+        let co = unsafe { windows_sys::Win32::System::Com::CoInitializeEx(std::ptr::null(), 2) };
+        assert!(co >= 0, "CoInitializeEx failed: 0x{co:08X}");
+
+        let window = HiddenWindow::new().expect("hidden window");
+        let (_env, ctrl, web) = runtime_webview(&loader_path, &window);
+        let settings = web.settings().expect("get_Settings");
+
+        settings.set_devtools_enabled(false).expect("put devtools");
+        assert!(!settings.devtools_enabled().expect("get devtools"));
+        settings.set_devtools_enabled(true).expect("put devtools");
+        assert!(settings.devtools_enabled().expect("get devtools"));
+        settings
+            .set_default_context_menus_enabled(false)
+            .expect("put context menus");
+
+        ctrl.close().expect("close controller");
+        // SAFETY: balances the CoInitializeEx above.
+        unsafe { windows_sys::Win32::System::Com::CoUninitialize() };
+    }
+
     #[test]
     fn renders_html_and_reads_title() {
         let Some(loader_path) = runtime_test_loader() else {
