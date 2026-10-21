@@ -7,8 +7,8 @@
 //! loaded and messaged. Menus, tray, dialogs, clipboard and the rest of the
 //! `Platform` trait are later milestones.
 
-use crate::error::Result;
-use crate::geometry::LogicalSize;
+use crate::error::{Error, Result};
+use crate::geometry::{LogicalRect, LogicalSize};
 
 /// Settings used to create a window.
 #[derive(Clone, Debug, PartialEq)]
@@ -35,7 +35,30 @@ pub trait EventLoopProxy: Send + Sync + Clone + 'static {
     fn post(&self, task: Box<dyn FnOnce() + Send>) -> Result<()>;
 }
 
+/// What happens when the user asks a window to close (title bar button, Alt+F4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CloseAction {
+    /// Close the window.
+    #[default]
+    Close,
+    /// Keep the window; hide it instead. The app can show it again later.
+    Hide,
+}
+
+/// System backdrop material behind a window's client area (spec §10.x, Windows 11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Backdrop {
+    #[default]
+    None,
+    Mica,
+    Acrylic,
+    Tabbed,
+}
+
 /// Window management.
+///
+/// Methods past `close` are optional. Their default is [`Error::Unsupported`], so a backend
+/// that does not provide one says so instead of silently ignoring the request.
 pub trait WindowBackend {
     /// Backend-specific window handle.
     type Id: Copy + Eq + std::fmt::Debug;
@@ -47,6 +70,62 @@ pub trait WindowBackend {
     fn set_size(&mut self, id: Self::Id, size: LogicalSize) -> Result<()>;
     fn set_fullscreen(&mut self, id: Self::Id, on: bool) -> Result<()>;
     fn close(&mut self, id: Self::Id) -> Result<()>;
+
+    /// Removes the title bar and border.
+    fn set_frameless(&mut self, _id: Self::Id, _on: bool) -> Result<()> {
+        Err(Error::Unsupported {
+            feature: "frameless",
+        })
+    }
+
+    fn set_always_on_top(&mut self, _id: Self::Id, _on: bool) -> Result<()> {
+        Err(Error::Unsupported {
+            feature: "always-on-top",
+        })
+    }
+
+    /// Makes the window background see-through where the page does not paint.
+    fn set_transparent(&mut self, _id: Self::Id, _on: bool) -> Result<()> {
+        Err(Error::Unsupported {
+            feature: "transparency",
+        })
+    }
+
+    fn set_backdrop(&mut self, _id: Self::Id, _backdrop: Backdrop) -> Result<()> {
+        Err(Error::Unsupported {
+            feature: "backdrop",
+        })
+    }
+
+    /// Regions (in logical units, window coordinates) that drag the window when pressed.
+    /// An empty slice removes all drag regions.
+    fn set_drag_regions(&mut self, _id: Self::Id, _regions: &[LogicalRect]) -> Result<()> {
+        Err(Error::Unsupported {
+            feature: "drag regions",
+        })
+    }
+
+    /// Chooses what a user close request does. Applies to later requests only.
+    /// Creates a window owned by `parent`. It closes with its parent and stays above it.
+    fn create_child(&mut self, _parent: Self::Id, _spec: &WindowSpec) -> Result<Self::Id> {
+        Err(Error::Unsupported {
+            feature: "child windows",
+        })
+    }
+
+    /// Makes `child` modal to its owner: while on, the owner ignores input. Turning it off, or
+    /// closing the child, gives the owner its input back.
+    fn set_modal(&mut self, _child: Self::Id, _on: bool) -> Result<()> {
+        Err(Error::Unsupported {
+            feature: "modal windows",
+        })
+    }
+
+    fn set_close_action(&mut self, _id: Self::Id, _action: CloseAction) -> Result<()> {
+        Err(Error::Unsupported {
+            feature: "close handling",
+        })
+    }
 }
 
 /// Webview inside a window.
