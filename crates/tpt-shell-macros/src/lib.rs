@@ -10,6 +10,8 @@
 //! Limitation: Cargo does not rerun the build when a file is added to the directory, only when
 //! an embedded file changes. Touch a source file after adding one.
 
+mod command;
+
 use std::path::{Path, PathBuf};
 
 use proc_macro::TokenStream;
@@ -75,6 +77,38 @@ fn content_type(path: &str) -> &'static str {
         "woff2" => "font/woff2",
         "txt" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
+    }
+}
+
+/// Marks a function as a command: `#[command(capability = "fs.read", name = "list_dir")]`.
+///
+/// The function itself is unchanged. Hidden helpers are added beside it; see [`commands!`]
+/// and [`register_commands!`]. Options: `name` (defaults to the function name), `capability`,
+/// and `kind = "sync"` (the only kind so far).
+#[proc_macro_attribute]
+pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let item = parse_macro_input!(item as syn::ItemFn);
+    match command::expand_command(attr.into(), item) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// `commands![a, b]` builds a `Contract` from `#[command]` functions in the same module.
+#[proc_macro]
+pub fn commands(input: TokenStream) -> TokenStream {
+    match command::expand_commands(input.into()) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// `register_commands!(&mut router, a, b)` registers each `#[command]` handler on the router.
+#[proc_macro]
+pub fn register_commands(input: TokenStream) -> TokenStream {
+    match command::expand_register(input.into()) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
     }
 }
 
