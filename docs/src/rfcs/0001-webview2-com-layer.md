@@ -65,9 +65,14 @@ Interface IIDs come from the same header, for example `IID_ICoreWebView2CreateCo
 2. User-data folder location. Proposed default: `%LOCALAPPDATA%\tpt-shell\<app-id>\webview2`. Do you want a different default, or the profile mapping from spec §10.7 applied now?
 3. Hidden-window integration tests on CI runners without a display. Proposed: skip with a message when no interactive desktop is available, and run the full test on a developer machine.
 
-## Decision needed
+## Decision (2026-10-21)
 
-Approve the design (alternative 3) and the defaults above, or change them. Implementation starts after approval.
+Decided by following the recommended defaults, as the owner asked:
+
+- Question 1: alternative 3 (hand-written vtables, header-order test). Approved.
+- Question 2: default user-data folder `%LOCALAPPDATA%\tpt-shell\<app-id>\webview2`, built by `webview2::default_user_data_dir`, which rejects app ids that are not one plain folder name. The spec §10.7 profile mapping is not applied now; it belongs to M6.
+- Question 3: runtime tests skip with a message when `TPT_WEBVIEW2_LOADER` is unset or no interactive desktop exists (`window::runtime_test_loader`). The full set runs on a desktop session, including this machine.
+- Deviation: the virtual origin `https://tpt-app.localhost` replaces `app://` on Windows (the first recommendation above). Spec §5.4 and §9 are not edited yet; the wording change is recorded here and in todo.md.
 
 ## Implementation status (2026-10-20)
 
@@ -111,3 +116,41 @@ Approve the design (alternative 3) and the defaults above, or change them. Imple
 - Handler refcount, drop-once, QueryInterface and owning-pointer tests pass (unit tests in handler.rs and event_handler.rs).
 - Controller cycles: live callback objects return to baseline; process handles stable over 15 cycles after warm-up (254 -> 255). Test: controller_cycles_do_not_leak.
 - Open: in a 60-cycle run on one environment, creating the 23rd controller did not complete within 30 s (cycles about 9 s each). Cause unknown; investigate before the soak test. Possible workaround under test: a fresh environment per N controllers (not yet tried).
+
+## Status update: controller stall investigation (2026-10-21)
+
+- The stall did not reproduce. Shared environment: 30 controller cycles, no stall, process count flat at 21-23, creation 0.8-5.8 s. Fresh environment per cycle: 10 cycles, no stall, environment creation 0-1.6 s, controller creation 0.7-1.5 s, process count 23-24.
+- Cause of the original 60-cycle stall is unknown. Keep the 30 s timeout and treat it as an open risk for the soak test (spec 10.1).
+- Creation latency (0.7-5.8 s per controller) is far above the spec 13 cold-start budget. Measure cold start separately before drawing conclusions.
+
+## Status update: cold-start measurement (2026-10-21)
+
+- Five separate-process runs on this machine (warm runtime: about 23 WebView2 processes already running for other apps): loader 0.5-0.7 ms, window 2-10 ms, environment about 6 ms, controller 0.8-2.0 s, first page title 1.3-1.5 s; total 2.1-2.3 s.
+- Shell overhead (loader and window) is within the spec 13 budget of 50 ms.
+- WebView2 init and first page are 2.1-2.3 s against the 500 ms budget. Not met on this machine. A true cold start (no runtime running) would be slower still, and was not measured because it would close other apps' WebView2 processes.
+- The environment figure (about 6 ms) looks too low. Likely the runtime was already up. Not verified.
+
+## Status update: where the cold-start time goes (2026-10-21)
+
+- Navigations in one established controller, 10 pages: first 590 ms, then 360, 290, 278, 296, 283, 280, 293, 278, 271 ms. Steady state about 270-300 ms per page.
+- An earlier run of the same test gave 2148, 1061 and 612 ms for its first three pages. So the first navigation after startup is slow and varies with runtime state, while steady-state pages are well inside 500 ms.
+- Adopted recommendation (spec 13 budget): the 500 ms first-paint budget is a target to confirm on reference hardware. Local numbers stay on the record here. Spec text unchanged; a change to spec 13 needs your decision.
+
+## Status update: startup overlap (2026-10-21)
+
+- Test: the same 1000 ms of app work either after the webview is ready (sequential) or while the controller is being created (overlap). Ten trials each, separate processes.
+- Sequential median 2122 ms (range 1860-2265). Overlap median 2180 ms (range 1054-2342).
+- No reliable saving. Three overlap trials were about 1 s faster, the rest matched sequential. Not explained. The async API lets an app start early, but this measurement does not show a gain, so no benefit is claimed.
+
+## Status update: frame navigation policy (2026-10-21)
+
+- Implemented: set_frame_navigation_policy, using add_FrameNavigationStarting (slot 14). The header takes the same NavigationStarting handler as the top-level event, so one shared helper serves both.
+- Verified: an iframe to https://example.com is cancelled, the top-level app page still loads, and its title is unchanged. Test: blocks_frame_navigation_outside_the_app_origin.
+- Workspace: 44 tests pass; the Windows suite has 15 tests, all passing against runtime 155.0.4283.62.
+
+## Status update: crash callback and reload (2026-10-21)
+
+- Implemented: WebView::on_process_failed (add_ProcessFailed, slot 22) with ProcessFailure::{BrowserExited, RenderExited, Other}, WebView::reload (slot 28). The DevTools call used by the test (CallDevToolsProtocolMethod, slot 33) is crate-private and test-only, so raw protocol access is not offered to pages or agents (spec 9, 10.4).
+- Verified: Page.crash through DevTools reports RenderExited; the callback reloads the page and the page loads again. Test: renderer_crash_is_reported_and_the_page_reloads.
+- Not yet: BrowserExited handling, and a true process kill (which would close other apps' WebView2 processes on this machine, so it was not done).
+- Workspace: 45 tests pass; the Windows suite has 16 tests, all passing.

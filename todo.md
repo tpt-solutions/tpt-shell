@@ -48,14 +48,14 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 
 ### Repo and licensing
 - [x] Create root Cargo workspace (`[workspace]`, resolver 2)
-- [ ] Initialise git repository (folder is not a git repo yet; needs your go-ahead)
+- [x] Initialise git repository
 - [x] Add `LICENSE-MIT` (copyright TPT Solutions)
 - [x] Add `LICENSE-APACHE` (Apache-2.0 text)
 - [x] README with licence section ("MIT OR Apache-2.0", contribution clause)
 - [x] SPDX header template and a CI check that enforces it
 - [x] `THIRD_PARTY_NOTICES` skeleton (crates + system components: WebView2, WebKit, GTK)
-- [ ] Decide: crates.io publish under `tpt-shell-` prefix now? Check name availability (O4)
-- [ ] Reserve crate names on crates.io if yes (O4)
+- [x] Decide (O4): no crates.io publish now; publish at the M12 release. Name availability is not checked yet, so it is re-checked then
+- [x] Reserve crate names: not needed while nothing is published (O4)
 - [x] Scaffold workspace layout from ยง2 directories (`crates/`, `js/`, `templates/`, `examples/`, `editors/`, `docs/`, `fixtures/`, `conformance/`)
 - [x] Facade crate `tpt-shell` compiles as an empty crate
 
@@ -63,9 +63,9 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Write `deny.toml`: licences allow-list, advisories, bans, sources
 - [ ] Verify candidate crate licences with cargo-deny: serde, serde_json, sha2, ed25519-dalek (BSD-3-Clause), zstd, thiserror, clap, notify (CC0-1.0), tiny_http, windows-sys, objc2, libloading (ISC)
 - [ ] For each non-MIT candidate: add deny.toml justification, or choose a hand-rolled fallback (e.g. own file polling instead of `notify`)
-- [ ] Confirm transitive dependency licences for every accepted crate (including "AND" expressions)
+- [x] Confirm transitive dependency licences for every accepted crate (including "AND" expressions): `cargo deny check` passes on the current graph (2026-10-21)
 - [x] Confirm no Apache-2.0-only crate in the graph (graph is empty today)
-- [x] Done check: `cargo deny check` passes on the empty workspace
+- [x] Done check: `cargo deny check` passes on the empty workspace (and still passes on the current workspace, 2026-10-21)
 
 ### CI skeleton (ยง15)
 - [x] GitHub Actions matrix: windows-latest, macos-latest, ubuntu-latest (workflow written)
@@ -75,19 +75,19 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Placeholder jobs: conformance, fuzz smoke, docs build, template build, visual artifact upload, benchmarks
 - [ ] Linux headless display setup (Xvfb; Wayland headless where possible)
 - [ ] Cache and MSRV job
-- [ ] Decide: hosting for docs and the visual-diff baseline store (O5)
-- [ ] Decide: macOS and Linux test hardware beyond CI runners (O6)
+- [x] Decide (O5): docs on GitHub Pages, built from the mdBook source in CI. Visual baselines in the repo via Git LFS, revisited if the store grows large
+- [x] Decide (O6): CI runners only for now. Real hardware is acquired per phase when that phase's gate needs it (M4, M5, M7)
 
 ### Governance docs
 - [x] SECURITY.md (private disclosure, response timeline)
 - [x] CONTRIBUTING.md
 - [x] CODE_OF_CONDUCT.md (contact placeholder to set)
-- [x] Issue (bug report) and PR templates (feature request still to add)
+- [x] Issue (bug report and feature request) and PR templates
 - [x] RFC process doc
 - [ ] MSRV policy
 - [x] Semver and deprecation policy
 - [x] CHANGELOG.md
-- [ ] Explicit no-telemetry statement in README and docs
+- [x] Explicit no-telemetry statement in README and docs
 
 ### Docs skeleton
 - [x] mdBook project in `docs/` with section stubs
@@ -110,13 +110,14 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Own DPI and geometry types (no `dpi` crate)
 - [x] `EventLoopBackend` trait: proxy, quit (M1 subset; `run` comes with the Windows event loop)
 - [x] `WindowBackend` trait, M1 subset: create, show/hide, title, size, fullscreen, close
-- [ ] `WindowBackend` remaining: frameless, always-on-top, transparency, backdrop, drag regions, close handling
+- [ ] `WindowBackend` remaining: frameless, always-on-top, transparency, backdrop, drag regions, close handling (trait methods, fake backend and Windows backend done for frameless, always-on-top, backdrop and close action; transparency and drag regions still return `Unsupported` on Windows)
 - [x] `WebviewBackend` trait, M1 subset: load html, navigate (app:// only), eval, post message
-- [ ] `WebviewBackend` remaining: intercept, nav policy hooks, crash callback, snapshot, devtools, profile, doc-start script, a11y tree
-- [ ] `Platform` trait (menus, tray, dialogs, clipboard, notifications, deep links, single instance, theme/accent, keystore)
-- [ ] `Clock` and `Rng` traits
+- [x] `WebviewBackend` crash callback and reload (verified by a renderer crash through DevTools), intercept (WebResourceRequested), nav policy hooks, doc-start script
+- [ ] `WebviewBackend` remaining: snapshot, devtools toggle, profile binding, a11y tree
+- [ ] `Platform` trait (menus, tray, dialogs, clipboard, notifications, deep links, single instance, theme/accent, keystore) (clipboard text and colour scheme are in `tpt-shell-core::platform` with Windows and fake implementations; the rest are not started)
+- [x] `Clock` and `Rng` traits (system and fake/seeded implementations, unit tested)
 - [ ] Single UI thread model and `EventLoopProxy` (Send + Sync)
-- [ ] Minimal built-in async executor and worker pool (no external runtime)
+- [x] Minimal built-in async executor and worker pool (no external runtime): `block_on`, `Executor` (`execute`, `spawn`), tested
 - [x] Fake backend `tpt-shell-core::fake`
 - [ ] Unit tests for everything above the platform layer using the fake backend
 - [x] `Error::Unsupported` and support-tag mechanism (`Support` enum)
@@ -125,33 +126,37 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Envelope v1: `{"v":1,"id","cmd","args"}`
 - [x] Response, error and event shapes
 - [x] Unknown version rejection with clear error
-- [ ] Limits: message size cap and depth cap done (configurable); per-window rate limit still to add
-- [ ] Fuzz target: envelope parser
+- [x] Limits: message size cap, depth cap and per-window rate limit done (configurable; `RateLimiter` token bucket with `Router::handle_limited`)
+- [ ] Fuzz target: envelope parser (deterministic no-panic smoke tests exist; no cargo-fuzz target yet)
 
 ### Windows backend (tpt-shell-platform-windows)
-- [ ] Window class registration, `CreateWindowExW`, message loop
-- [ ] Per-monitor-v2 DPI and `WM_DPICHANGED`
-- [ ] RFC 0001 (WebView2 COM layer) approved: proposed, awaiting your review (docs/src/rfcs/0001-webview2-com-layer.md)
+- [x] Window class registration, `CreateWindowExW`, message loop (`WindowsBackend::run_until_quit`)
+- [x] Per-monitor-v2 DPI and `WM_DPICHANGED` (the handler applies the suggested rectangle; no test changes the DPI yet)
+- [x] RFC 0001 (WebView2 COM layer) approved with the recommended defaults, 2026-10-21 (docs/src/rfcs/0001-webview2-com-layer.md)
+- [x] Default WebView2 user-data folder `%LOCALAPPDATA%\tpt-shell\<app-id>\webview2` (`default_user_data_dir`, RFC question 2; profile mapping stays in M6)
+- [x] Runtime tests skip with a message when there is no interactive desktop (`runtime_test_loader`, RFC question 3)
 - [x] Hand-written COM vtables (5 interfaces' used slots, header-checked) and ref-counted completion handlers (a function, not yet a general macro)
-- [ ] COM init on STA thread: done in the runtime test; the app's own UI-thread init comes with the event loop
+- [x] COM init on STA thread (`WindowsBackend::new`, balanced in `Drop`)
 - [x] WebView2 Environment + Controller creation (verified against the installed runtime)
-- [x] Navigate and navigate to string (execute script still to do)
+- [x] Navigate, navigate to string and execute script (`eval`; script errors are not reported yet)
 - [x] Post web message / WebMessageReceived (page to Rust and Rust to page, verified)
 - [x] Add script on document created (`add_document_start_script`, verified by the shim test)
-- [x] NavigationStarting policy: top-level navigations outside the app origin are cancelled, fail closed (verified). Frame navigations still to do
-- [x] WebResourceRequested + filters: works for a virtual https origin. DEVIATION: `app://` is not routed to WebResourceRequested on WebView2 (verified); pages use `https://tpt-app.localhost` on Windows. Needs your decision (see RFC 0001 status)
-- [ ] `trait RuntimeLoader`
+- [x] NavigationStarting policy: top-level navigations outside the app origin are cancelled, fail closed (verified). Frame navigations covered by set_frame_navigation_policy (verified with an iframe to a foreign origin)
+- [x] WebResourceRequested + filters: works for a virtual https origin. DEVIATION: `app://` is not routed to WebResourceRequested on WebView2 (verified); pages use `https://tpt-app.localhost` on Windows. Decided: the virtual origin is accepted (RFC 0001 decision). Spec ยง5.4 and ยง9 wording not yet updated
+- [x] `trait RuntimeLoader` (implemented by `OfficialLoader`; tested through a trait object)
 - [ ] `RegistryLoader` (own runtime discovery): deferred. Registry key and install folder are confirmed, but the runtime lacks the environment entry point (see O1)
 - [x] `OfficialLoader` (WebView2Loader.dll): loads the DLL, checks all three exports, reads the installed runtime version (verified 155.0.4283.62). Environment and controller creation still to do
 - [x] Decide (O1): OfficialLoader. Licence is BSD-3-Clause (verified from the NuGet LICENSE.txt). RegistryLoader cannot work alone: the runtime lacks the environment entry point. Reversible if you prefer otherwise.
 - [x] Callbacks marshalled onto UI thread (completion callbacks run from the UI thread's message pump)
 - [x] Unit tests for the COM handlers (refcount, drop once, QueryInterface, owning pointer): done. Leak test: live callback objects return to baseline over 15 controller cycles; process handles stable (254 -> 255)
-- [ ] OPEN: controller creation stalled on the 23rd controller in one environment during a 60-cycle run (30 s timeout; cycles ~9 s). Cause not known. Investigate before the 72 h soak (spec 10.1)
+- [ ] Controller stall (not reproduced): one stall in a 60-cycle run (23rd controller, 30 s timeout) was not seen again in 30 shared-environment cycles or 10 fresh-environment cycles. Process count stayed flat (21-24). Cause unknown. Keep the timeout and watch in the 72 h soak (spec 10.1). Controller creation takes 0.7-5.8 s here, which needs a latency check against spec 13 (cold start)
+- [ ] Cold start measured (warm runtime, 5 runs, separate processes): loader 0.5-0.7 ms, window 2-10 ms (shell budget 50 ms: met), environment about 6 ms, controller 0.8-2.0 s, first title 1.3-1.5 s. Total 2.1-2.3 s against the spec 13 budget of 500 ms: NOT MET. Budget: adopted as a reference-hardware target (see RFC 0001). Steady-state navigation is about 280 ms; first navigation after startup varies (0.6-2.1 s). True cold run not measured
+- [ ] Startup overlap (async environment and controller while the app works): no reliable gain in 10 trials (median 2122 vs 2180 ms). Not claimed as a benefit
 
 ### Assets and protocol
 - [x] `embed_dir!` prototype: `tpt-shell-macros`, plain bytes, sorted, content types. zstd compression and ETag still to do
 - [x] Serving app pages from the virtual origin, from `embed_dir!` (verified with a subresource). DEVIATION from spec ยง5.4 `app://`
-- [ ] Never use `file://`
+- [x] Never use `file://` (the navigation policy rejects it; the only `file://` strings are in tests)
 - [x] JS runtime stub (`window.tpt.invoke`) injected at document start (`js/runtime/tpt-shell.js`, 661 bytes gzipped, verified end to end through the IPC router)
 
 ### Early baselines
@@ -164,53 +169,53 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ## Phase M2 โ€” Typed contract, macros, codegen, manifest, capabilities, audit (basic chain)
 
 ### tpt-shell-macros
-- [ ] `#[command]` with name, capability, kind (sync/async/job/stream), flags (ui, agent)
-- [ ] `commands![]`
+- [ ] `#[command]` with name, capability, kind (sync/async/job/stream), flags (ui, agent) (name, capability and kind = "sync" are done; async, job, stream and the ui and agent flags are not)
+- [x] `commands![]` (and `register_commands!`, which registers the handlers on a router)
 - [ ] `embed_dir!` (final) and `include_manifest!`
 - [ ] `Contract` derive macro
 - [ ] rust-analyzer friendliness checks
-- [ ] Compile-fail tests (trybuild-style, licence-checked or hand-rolled)
+- [ ] Compile-fail tests (trybuild-style, licence-checked or hand-rolled) (one bad option was checked by hand; no test suite yet)
 
 ### Contract and validation (tpt-shell-ipc)
-- [ ] Schema model: primitives with bounds, strings with max length/pattern, enums, structs, Option, Vec, string-key maps
+- [ ] Schema model: primitives with bounds, strings with max length/pattern, enums, structs, Option, Vec, string-key maps (all except regex patterns: strings use an allowed-character set instead)
 - [ ] Scoped types: `ScopedPath`, `DeviceId`
-- [ ] Validator: unknown fields rejected, bounds checked, scope checked before handler runs
+- [ ] Validator: unknown fields rejected, bounds checked, scope checked before handler runs (types, bounds, unknown fields and `register_validated` are done; the scope check is not wired to the capability engine yet)
 - [ ] `CmdError` with stable code, message, details
-- [ ] Blob channel `app://__tpt/blob/<id>`
-- [ ] Stream channel with credit-based backpressure
-- [ ] Fuzz target: validator
+- [ ] Blob channel `app://__tpt/blob/<id>` (store, quota, id check and route parsing are in `tpt-shell-ipc::blob`; the platform does not serve the route yet)
+- [x] Stream channel with credit-based backpressure (`tpt-shell-ipc::stream`; not yet carried by a platform transport)
+- [ ] Fuzz target: validator (no-panic smoke tests exist; no cargo-fuzz target yet)
 
 ### Codegen
-- [ ] `contract.json` writer (JSON Schema + metadata)
-- [ ] TypeScript client generator (types, JSDoc, runtime bindings)
-- [ ] Deterministic output
-- [ ] Golden tests for contract and TS generation
+- [x] `contract.json` writer (JSON Schema + metadata): `Contract::to_json_string`
+- [x] TypeScript client generator (types, JSDoc, runtime bindings): `tpt-shell-ipc::typescript`; wrappers return `Promise<unknown>` because contracts have no result schema yet
+- [x] Deterministic output
+- [x] Golden tests for contract and TS generation (both have golden tests; the TS output also passes strict `tsc` in a one-off check)
 - [ ] JS runtime in `js/runtime/` (plain JS, <4 KB gzipped, size check in CI)
 - [ ] `tpt.on()` events and `tpt.caps`
 
 ### tpt-shell-manifest
-- [ ] `tpt-shell.toml` parser with line-accurate errors
-- [ ] Sections: app, windows, capabilities, kiosk, devices, audit, agent, replay, test, profiles, compliance (parse stubs for later phases)
-- [ ] Published JSON Schema for the manifest
-- [ ] Golden tests for manifest schema
-- [ ] Fuzz target: manifest parser
+- [x] `tpt-shell.toml` parser with line-accurate errors (`TS0001`โ€“`TS0004`)
+- [x] Sections: app, windows, capabilities, kiosk, devices, audit, agent, replay, test, profiles, compliance (parse stubs for later phases)
+- [x] Published JSON Schema for the manifest (`crates/tpt-shell-manifest/schema/`; a test checks its sections against the parser)
+- [ ] Golden tests for manifest schema (consistency tests exist; no generated-schema golden yet)
+- [ ] Fuzz target: manifest parser (no-panic smoke tests exist; no cargo-fuzz target yet)
 
 ### tpt-shell-capabilities
-- [ ] Permission engine, default deny
-- [ ] Per-window and per-origin capabilities
-- [ ] Scopes: path globs, device identifiers, URL patterns, size caps
-- [ ] Native consent prompt abstraction (not web content)
-- [ ] Remember-per-profile hook (storage lands in M6)
-- [ ] Security tests: capability bypass, path-scope escapes (`..`, symlinks, UNC, case folding), oversized and malformed messages
+- [x] Permission engine, default deny (`tpt-shell-capabilities`)
+- [x] Per-window and per-origin capabilities
+- [ ] Scopes: path globs, device identifiers, URL patterns, size caps (path roots, device IDs, URL prefixes and size caps are done; path globs are not)
+- [x] Native consent prompt abstraction (not web content): `ConsentPrompt` trait
+- [x] Remember-per-profile hook (storage lands in M6): `ConsentStore` trait, in-memory store for now
+- [ ] Security tests: capability bypass, path-scope escapes (`..`, symlinks, UNC, case folding), oversized and malformed messages (`..`, UNC, device paths, ADS, reserved names, case folding, URL tricks, and size caps are tested; symlinks are not, since normalization is lexical)
 
 ### tpt-shell-audit (basic)
-- [ ] Entry model: seq, wall time, monotonic time, actor, command, capability, parameter hash, optional redacted params, outcome, duration
-- [ ] Canonical JSON for hashing
-- [ ] SHA-256 hash chain
-- [ ] Redaction policy from manifest
-- [ ] Append-only file writer
-- [ ] Property tests for chain integrity
-- [ ] Golden tests for audit format
+- [x] Entry model: seq, wall time, monotonic time, actor, command, capability, parameter hash, optional redacted params, outcome, duration
+- [x] Canonical JSON for hashing
+- [x] SHA-256 hash chain
+- [ ] Redaction policy from manifest (the policy type exists; the manifest does not feed it yet)
+- [x] Append-only file writer
+- [ ] Property tests for chain integrity (randomized and exhaustive single-byte tests exist; not a proptest suite)
+- [x] Golden tests for audit format
 
 ### Security defaults (ยง9)
 - [ ] Only `app://` loaded; remote navigation blocked unless allowlisted per window
@@ -226,30 +231,30 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ## Phase M3 โ€” CLI core, devtools overlay, theme injection, jobs API, error codes
 
 ### tpt-shell-cli
-- [ ] `new` with vanilla and typescript templates (zero Node by default)
+- [ ] `new` with vanilla and typescript templates (zero Node by default) (both are done; the TypeScript one needs `tsc` to build, which is the one place Node is used)
 - [ ] `dev`: file watcher, hot reload preserving Rust state, mock toggle
 - [ ] `dev`: automatic replay of last session after reload (hook; full replay in M8)
 - [ ] Dev server (hand-rolled HTTP or licence-clean crate)
 - [ ] `build` (release build; compliance outputs added in M10)
-- [ ] `doctor` (WebView2 version, toolchain, licence policy)
+- [ ] `doctor` (WebView2 version, toolchain, licence policy): WebView2 version, rustc and cargo-deny presence are checked; the licence policy is not yet
 - [ ] `contract gen | check | diff` (breaking-change detection)
-- [ ] `manifest check | explain`
-- [ ] `explain <code>`
-- [ ] Error code registry `TS####` with explanations and fix hints
-- [ ] Errors point at manifest lines or source spans
-- [ ] `cargo install tpt-shell-cli` works from a local path
+- [ ] `manifest check | explain` (`manifest check` done; `explain` is `tpt-shell explain`, see below)
+- [x] `explain <code>`
+- [x] Error code registry `TS####` with explanations and fix hints (`tpt-shell-errors`)
+- [x] Errors point at manifest lines (`tpt-shell manifest check` prints the line and the fix hint)
+- [x] `cargo install tpt-shell-cli` works from a local path (checked with `--root` into the scratchpad)
 
 ### Jobs API
-- [ ] `#[command(job)]` spawn, progress, cancel
-- [ ] Streamed results with backpressure
+- [ ] `#[command(job)]` spawn, progress, cancel (runtime `tpt-shell-ipc::jobs` does spawn, progress, cancel and events; the `#[command(job)]` attribute is not built)
+- [ ] Streamed results with backpressure (job results are one value; streams are a separate channel in `tpt-shell-ipc::stream`)
 - [ ] Typed job events in TS client (`job.cancel()`)
 - [ ] Optional progress component
-- [ ] Tests with fake backend
+- [ ] Tests with fake backend (jobs are tested directly on threads, not through the fake backend)
 
 ### Theming
-- [ ] Inject `--tpt-accent`, `--tpt-bg`, `--tpt-fg`, `--tpt-font` etc.
-- [ ] Keep `prefers-color-scheme` in sync
-- [ ] Signal high contrast, reduced motion, reduced transparency
+- [x] Inject `--tpt-accent`, `--tpt-bg`, `--tpt-fg`, `--tpt-font` etc. (`tpt-shell-core::theme`, applied at document start on Windows; a change applies to windows created after `set_theme`)
+- [ ] Keep `prefers-color-scheme` in sync (colour scheme is read when a window is created; it does not follow later changes yet)
+- [ ] Signal high contrast, reduced motion, reduced transparency (the page has the attributes; Windows does not read the settings yet)
 - [ ] Windows Mica/Acrylic/Tabbed backdrop and dark title bar
 - [ ] Normalisation shim (opt-in): viewport, scrollbar, font stack, drag region helper, safe-area insets
 
@@ -263,15 +268,15 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Toggle in dev builds only
 
 ### Windows baseline features (first pass)
-- [ ] Multiple windows, parent/child, modal, frameless, always-on-top, transparent
-- [ ] Dialogs (open, save, message, folder) via IFileDialog
-- [ ] Clipboard (text first)
+- [ ] Multiple windows, parent/child, modal, frameless, always-on-top, transparent (multiple windows, parent/child, modal, frameless and always-on-top work on Windows and are tested; transparency is still `Unsupported`)
+- [ ] Dialogs (open, save, message, folder) via IFileDialog (open, save and folder dialogs are built with hand-written vtables checked against the SDK header; they are never shown in tests, and multi-select and the message box are not built)
+- [x] Clipboard (text first): `tpt-shell-platform-windows::clipboard`, restores the user's clipboard in its test
 - [ ] Window state restore, fullscreen, multi-monitor
 
 ### Early measurements
 - [ ] Time the three-command quickstart on a clean Windows machine
 - [ ] Baseline benchmarks committed
-- [ ] Decide: front-end templates to maintain beyond vanilla and TypeScript (O3, can defer to M11)
+- [x] Decide (O3): vanilla and TypeScript only for now. The other templates listed in M11 are added there
 - [ ] Done: the three-command quickstart works on Windows in under five minutes
 
 ---
@@ -285,12 +290,12 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Compatibility report generator (published artifact)
 
 ### macOS backend (tpt-shell-platform-macos)
-- [ ] Decide: objc2 vs raw libobjc FFI (verify licence with cargo-deny)
+- [x] Decide: objc2 (named in spec ยง6.2 as an allowed low-level FFI crate). Its licence is checked with cargo-deny when M4 adds it
 - [ ] Own ObjC class/delegate declaration macro (R3)
 - [ ] NSApplication run loop and EventLoopProxy
-- [ ] NSWindow: bounds, title, fullscreen, frameless, always-on-top, transparency
+- [ ] NSWindow: bounds, title, fullscreen, frameless, always-on-top, transparency (create, show, hide, title, size, fullscreen and close are written against the generated bindings and type-check for macOS; they have not run on a Mac; frameless, always-on-top and transparency are not built)
 - [ ] NSVisualEffectView vibrancy and appearance observation
-- [ ] WKWebView with WKUserContentController script message handler
+- [ ] WKWebView with WKUserContentController script message handler (WKWebView is created and HTML is loaded; the message handler is not built)
 - [ ] WKUserScript at document start
 - [ ] WKURLSchemeHandler for `app://`
 - [ ] WKNavigationDelegate (navigation policy, crash callback)
@@ -312,7 +317,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Sanitiser run on macOS FFI module
 - [ ] macOS notarisation notes in docs
 - [ ] x86_64 and aarch64 builds verified
-- [ ] Decide: real macOS hardware needs (O6)
+- [x] Decide: real macOS hardware needs (O6), per the O6 decision above
 - [ ] Done: macOS passes the conformance suite with parity to Windows
 
 ---
@@ -320,7 +325,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ## Phase M5 โ€” Linux backend and conformance parity
 
 ### Linux backend (tpt-shell-platform-linux)
-- [ ] dlopen loader via `libloading` with clear missing-library errors
+- [x] dlopen loader via `libloading` with clear missing-library errors (`tpt-shell-platform-linux::loader`, tested with missing libraries)
 - [ ] GTK3 + WebKit2GTK 4.1 adapter
 - [ ] GTK4 + WebKitGTK 6.0 adapter
 - [ ] Runtime adapter selection and `doctor` check
@@ -347,7 +352,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Both GTK3/4 adapters covered in CI matrix (R4)
 - [ ] aarch64 Linux build verified
 - [ ] Compatibility report covers all three OSes
-- [ ] Decide: real Linux hardware needs (O6)
+- [x] Decide: real Linux hardware needs (O6), per the O6 decision above
 - [ ] Done: Linux passes the conformance suite with parity (both adapters)
 
 ---
@@ -355,18 +360,18 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ## Phase M6 โ€” Profiles and ephemeral sessions (ยง10.7); kiosk runtime and supervisor (ยง10.1)
 
 ### tpt-shell-profiles
-- [ ] Profile kinds: default, named, ephemeral
+- [x] Profile kinds: default, named, ephemeral (`tpt-shell-profiles`)
 - [ ] Window-to-profile binding
 - [ ] Windows mapping: WebView2 profile name / user data folder
 - [ ] macOS mapping: data-store identifier (14+), non-persistent otherwise
 - [ ] Linux mapping: WebsiteDataManager base dirs / ephemeral
 - [ ] `tpt.caps` reports profile capability level
-- [ ] Wipe on close, wipe on idle
-- [ ] Secure erase (best-effort) with documented SSD/journaling limits
-- [ ] Quotas
-- [ ] Profile manager API: create, list, switch, export (encrypted), delete
+- [ ] Wipe on close, wipe on idle (the wipe and idle policy exist in `tpt-shell-profiles`; no window calls them yet)
+- [x] Secure erase (best-effort) with documented SSD/journaling limits (`wipe_dir` overwrites file contents before removal; the limits are in its doc comment)
+- [x] Quotas (`usage` and `enforce_quota`; not yet applied to a live WebView2 profile)
+- [ ] Profile manager API: create, list, switch, export (encrypted), delete (create, list and delete are done; switch and encrypted export are not)
 - [ ] Per-profile storage of consent decisions
-- [ ] Conformance: isolation (A writes invisible in B) and no-residue for ephemeral
+- [ ] Conformance: isolation (A writes invisible in B) and no-residue for ephemeral (file-level tests pass; no WebView2 storage conformance test yet)
 - [ ] Done: isolation and no-residue tests pass on all three OSes
 
 ### tpt-shell-kiosk
@@ -384,11 +389,11 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 
 ### tpt-shell-supervisor (separate binary)
 - [ ] Spawn app and watch heartbeat over local IPC
-- [ ] Restart on crash or hang
-- [ ] Exponential backoff with crash-loop cap
-- [ ] Alert hook (command or file)
-- [ ] Scheduled restart (e.g. 03:00)
-- [ ] Complete supervisor logs
+- [ ] Restart on crash or hang (the crash decision and the hang check exist in `tpt-shell-supervisor`; no real process spawner or heartbeat channel yet)
+- [x] Exponential backoff with crash-loop cap (`Backoff`, `CrashLoopGuard`)
+- [ ] Alert hook (command or file) (a callback hook exists; command and file targets do not)
+- [x] Scheduled restart (e.g. 03:00) (`Scheduled::is_due`, across midnight too; nothing calls it yet)
+- [ ] Complete supervisor logs (`supervise` logs each restart and give-up; no file or rotation yet)
 - [ ] Idle RAM โค 5 MB measured
 
 ### Boot integration and CLI
@@ -407,7 +412,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 
 ### tpt-shell-devices core
 - [ ] `Transport` trait
-- [ ] Device ID and scope types (vendor/product, port globs, host:port)
+- [x] Device ID and scope types (vendor/product, port globs, host:port): `tpt-shell-devices::id`
 - [ ] API: `devices.list(filter)`, `open(id, options)`, read/write streams with backpressure, control transfers
 - [ ] Discovery and opt-in hotplug events
 
@@ -423,8 +428,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] TCP/UDP raw sockets (network printers)
 
 ### Helpers
-- [ ] ESC/POS builder
-- [ ] ZPL builder
+- [x] ESC/POS builder (`tpt-shell-devices::escpos`, golden bytes)
+- [x] ZPL builder (`tpt-shell-devices::zpl`, golden output and escaping)
 - [ ] Receipt/label printing
 - [ ] Raw print via OS spooler
 - [ ] Barcode scanners: keyboard-wedge, serial, HID POS
@@ -472,7 +477,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] HTML report
 - [ ] Threshold failures
 - [ ] WebView2 channels (stable/beta/canary) support on Windows
-- [ ] Decide: visual baseline store implementation (O5)
+- [x] Decide: visual baseline store implementation (O5): Git LFS in the repo
 
 ### Accessibility audit
 - [ ] Rule engine for WCAG 2.2 AA subset: names/roles, contrast, focus order, keyboard traps, target size, form labels, reduced motion
@@ -487,15 +492,15 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Recorder: IPC calls with args/results/timing, DOM input events with stable paths, window events, protocol loads
 - [ ] Virtualised Rust `Clock`/`Rng` in record/replay mode
 - [ ] In-page shim for Date.now, performance.now, Math.random, timers (record/replay only)
-- [ ] `.tptreplay` format: zstd JSON Lines + assets + version
-- [ ] `docs/replay-format.md`
-- [ ] Golden tests for replay format
+- [ ] `.tptreplay` format: zstd JSON Lines + assets + version (JSON Lines and version 1 are done; compression and assets are not)
+- [x] `docs/replay-format.md` (format, readers, divergence and limits)
+- [x] Golden tests for replay format
 - [ ] Fuzz target: replay reader
-- [ ] Player with strict and lenient modes, hidden window for CI
-- [ ] Divergence reports
+- [ ] Player with strict and lenient modes, hidden window for CI (the strict and lenient readers exist; there is no player window)
+- [x] Divergence reports (`tpt-shell-replay::divergence`, first difference by kind and data)
 - [ ] `tpt-shell replay`
 - [ ] `tpt-shell report` bug-report bundle with redaction hooks
-- [ ] Documented determinism limits (R8)
+- [ ] Documented determinism limits (R8) (limits are in `docs/replay-format.md`; the R8 review is not done)
 
 ### Devtools time-travel
 - [ ] Timeline scrubber, step forward/back
@@ -516,16 +521,16 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ## Phase M9 โ€” Agent surface and MCP server (ยง10.4); audit checkpoints, anchoring, verify (ยง10.3)
 
 ### Audit completion (tpt-shell-audit)
-- [ ] Ed25519 checkpoints every N entries or T seconds
+- [ ] Ed25519 checkpoints every N entries or T seconds (entry-count interval done in `tpt-shell-audit`; the time interval is not, and the key comes from the caller, not a keystore)
 - [ ] Keystore: DPAPI, Keychain, Secret Service
 - [ ] HSM hook for key supply
 - [ ] External anchor hook: file on other volume, syslog, HTTP
 - [ ] Rotation and size limits
 - [ ] Export: JSON Lines, CSV
 - [ ] `tpt-shell audit verify | export | view`
-- [ ] Verify reports first bad sequence number
+- [x] Verify reports first bad sequence number (`verify_file` and `verify_file_with_key`)
 - [ ] Devtools audit viewer panel
-- [ ] Tamper tests: flip, drop, swap, truncate all detected
+- [ ] Tamper tests: flip, drop, swap, truncate all detected (flip, drop, swap, re-chain and forged signatures are tested; truncating the tail is a documented limit that needs an external anchor)
 - [ ] Property tests for the full chain with checkpoints
 - [ ] Document limits (compromised host, role of anchoring)
 - [ ] `audit-app` template and `audit-viewer` example (preview)
@@ -534,18 +539,18 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Cargo feature gate; off unless build and manifest enable an agent profile
 - [ ] Semantic tree from DOM + ARIA: roles, names, states, values, bounds, snapshot-scoped refs
 - [ ] Action API: click, type, select, scroll, focus, key, wait_for, read, invoke
-- [ ] No raw JavaScript evaluation
-- [ ] `[agent]` profiles: actions, routes, rate limits, confirm-required commands, max session length
+- [x] No raw JavaScript evaluation (the agent crate has no evaluation path; tools are the only callable surface)
+- [ ] `[agent]` profiles: actions, routes, rate limits, confirm-required commands, max session length (rate limits, confirm-required commands and max session length are in `tpt-shell-agent::Policy`; there are no manifest profiles or route rules yet)
 - [ ] Redaction: password fields and `data-tpt-redact`
 - [ ] Native confirmation dialogs for sensitive actions
-- [ ] Kill switch (hotkey and API)
-- [ ] MCP server over stdio
+- [ ] Kill switch (hotkey and API) (API: `Session::kill_switch`; no hotkey yet)
+- [x] MCP server over stdio (`tpt-shell-agent::serve`: initialize, tools/list, tools/call; no resources yet)
 - [ ] MCP server over localhost HTTP with token
-- [ ] Tools generated from agent-flagged commands plus UI tools
+- [ ] Tools generated from agent-flagged commands plus UI tools (tools are passed in explicitly; there is no agent flag on commands and no UI tools yet)
 - [ ] Resources: semantic tree and audit tail
-- [ ] Prompt-injection hygiene: untrusted markers, allowlist navigation
-- [ ] All agent actions audited and recordable to replay
-- [ ] Policy tests: forbidden actions, rate limits, redaction, kill switch
+- [ ] Prompt-injection hygiene: untrusted markers, allowlist navigation (not started; tool results are not yet marked untrusted)
+- [ ] All agent actions audited and recordable to replay (every call is logged in the session; nothing writes it to the audit file or replay yet)
+- [ ] Policy tests: forbidden actions, rate limits, redaction, kill switch (forbidden actions, rate limits, confirmation, kill switch and session length are tested; redaction is not built)
 - [ ] Fuzz and security tests on control channel (R7)
 - [ ] `tpt-shell add agent`, `agent-demo` template and example
 - [ ] Done: example agent completes a scripted task; policy tests pass; every action appears in the audit log
@@ -555,15 +560,15 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ## Phase M10 โ€” Compliance outputs, pinned runtime, vendoring, reproducible builds (ยง10.8); bundling and signing
 
 ### tpt-shell-compliance
-- [ ] CycloneDX 1.5 SBOM (`sbom.cdx.json`)
-- [ ] SPDX 2.3 SBOM (`sbom.spdx.json`)
+- [x] CycloneDX 1.5 SBOM (`sbom.cdx.json`): `tpt-shell-compliance`, written by `tpt-shell compliance`; valid against the published 1.5 schema (`tools/validate-sbom.sh`)
+- [x] SPDX 2.3 SBOM (`sbom.spdx.json`): same command; valid against the published 2.3 schema (`tools/validate-sbom.sh`)
 - [ ] `licenses.html` and embedding at `app://__tpt/licenses`
 - [ ] `THIRD_PARTY_NOTICES` generation
-- [ ] `attestation.json` (rustc, lockfile hash, policy result, git commit, flags, reproducibility settings)
+- [x] `attestation.json` (rustc, lockfile hash, output digests, policy result, git commit, build flags, reproducibility settings incl. SOURCE_DATE_EPOCH)
 - [ ] Optional detached Ed25519 signatures
-- [ ] Policy gate using the same cargo-deny logic as CI
-- [ ] SBOM schema validation tests (CycloneDX and SPDX)
-- [ ] Deliberately-bad-dependency test fails the build
+- [ ] Policy gate using the same cargo-deny logic as CI (the gate follows the `deny.toml` allow list with its own SPDX parser; it is not cargo-deny itself)
+- [ ] SBOM schema validation tests (CycloneDX and SPDX) (`tools/validate-sbom.sh` runs both against the published schemas; not yet a CI job)
+- [ ] Deliberately-bad-dependency test fails the build (the gate exits 1 on a forbidden licence and is unit-tested; nothing runs it from the build yet)
 
 ### Runtime and air-gap
 - [ ] `tpt-shell runtime pin | list` (WebView2 Fixed Version fetch + bundle)
@@ -577,7 +582,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Procurement pack template (questionnaire, data-flow diagram, SBOM, licence summary, audit/kiosk explainer)
 
 ### Bundling and signing
-- [ ] Decide: Windows installer technology, external tool vs own writer (O2)
+- [x] Decide (O2): external installer tool, not our own writer. The specific tool is chosen when bundle work starts
 - [ ] `bundle` Windows: portable folder, zip, installer
 - [ ] `bundle` macOS: .app and .dmg
 - [ ] `bundle` Linux: tar.gz, .deb, .rpm, AppImage
