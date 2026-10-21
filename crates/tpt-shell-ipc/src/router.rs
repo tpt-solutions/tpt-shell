@@ -6,7 +6,10 @@
 //! and posts the returned text back to the page.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
+use crate::rate_limit::RateLimiter;
+use crate::schema::{self, validate, Schema};
 use crate::{
     err_response, ok_response, parse_error_response, parse_request, Limits, Request, Value,
 };
@@ -49,11 +52,48 @@ impl Router {
         self.handlers.insert(cmd.to_string(), Box::new(handler));
     }
 
+    /// Registers `handler` for `cmd`, guarded by `schema`. The arguments are checked first; a
+    /// bad value is answered with `IPC_INVALID_ARGS` and the handler never runs.
+    pub fn register_validated(
+        &mut self,
+        cmd: &str,
+        schema: Schema,
+        handler: impl Fn(&Value) -> Result<Value, CommandError> + 'static,
+    ) {
+        self.register(cmd, move |args| {
+            validate(&schema, args, "args")
+                .map_err(|e| CommandError::new(schema::INVALID_ARGS, &e.to_string()))?;
+            handler(args)
+        });
+    }
+
     /// Handles one raw message from the page and returns the response text to send back.
     /// Malformed messages get an error response with a null id; they are never dispatched.
     pub fn handle(&self, bytes: &[u8], limits: &Limits) -> String {
         let value = match parse_request(bytes, limits) {
             Ok(request) => self.dispatch(&request),
+            Err(err) => parse_error_response(&err),
+        };
+        encode(&value)
+    }
+
+    /// Like [`Router::handle`], but a well-formed request is refused with `IPC_RATE_LIMITED`
+    /// when `limiter` has no token left at `now`. Malformed messages do not use a token: the
+    /// size cap already bounds the cost of rejecting them.
+    pub fn handle_limited(
+        &self,
+        bytes: &[u8],
+        limits: &Limits,
+        limiter: &mut RateLimiter,
+        now: Duration,
+    ) -> String {
+        let value = match parse_request(bytes, limits) {
+            Ok(request) if limiter.allow(now) => self.dispatch(&request),
+            Ok(request) => err_response(
+                request.id,
+                "IPC_RATE_LIMITED",
+                "too many commands from this window; slow down and retry",
+            ),
             Err(err) => parse_error_response(&err),
         };
         encode(&value)
@@ -127,6 +167,89 @@ mod tests {
         let v = reply(&router(), r#"{"v":2,"id":1,"cmd":"echo"}"#);
         assert_eq!(v["id"], Value::Null);
         assert_eq!(v["error"]["code"], "IPC_UNSUPPORTED_VERSION");
+    }
+
+    #[test]
+    fn rate_limited_requests_get_an_error_with_their_id() {
+        use crate::rate_limit::{RateLimit, RateLimiter};
+        let mut limiter = RateLimiter::new(RateLimit {
+            burst: 1,
+            per_second: 1,
+        });
+        let r = router();
+        let msg = br#"{"v":1,"id":9,"cmd":"echo","args":{}}"#;
+        let limits = Limits::default();
+        let now = Duration::from_secs(1);
+
+        let first: Value =
+            serde_json::from_str(&r.handle_limited(msg, &limits, &mut limiter, now)).unwrap();
+        assert_eq!(first["ok"], true);
+
+        let second: Value =
+            serde_json::from_str(&r.handle_limited(msg, &limits, &mut limiter, now)).unwrap();
+        assert_eq!(second["id"], 9);
+        assert_eq!(second["error"]["code"], "IPC_RATE_LIMITED");
+    }
+
+    #[test]
+    fn malformed_messages_do_not_spend_tokens() {
+        use crate::rate_limit::{RateLimit, RateLimiter};
+        let mut limiter = RateLimiter::new(RateLimit {
+            burst: 1,
+            per_second: 1,
+        });
+        let r = router();
+        let limits = Limits::default();
+        let now = Duration::from_secs(1);
+        for _ in 0..5 {
+            let v: Value =
+                serde_json::from_str(&r.handle_limited(b"{nope", &limits, &mut limiter, now))
+                    .unwrap();
+            assert_eq!(v["error"]["code"], "IPC_MALFORMED");
+        }
+        let ok: Value = serde_json::from_str(&r.handle_limited(
+            br#"{"v":1,"id":1,"cmd":"echo"}"#,
+            &limits,
+            &mut limiter,
+            now,
+        ))
+        .unwrap();
+        assert_eq!(ok["ok"], true);
+    }
+
+    #[test]
+    fn validated_commands_reject_bad_args_before_the_handler() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let calls = Rc::new(Cell::new(0));
+        let seen = calls.clone();
+        let mut r = Router::new();
+        r.register_validated(
+            "set_volume",
+            Schema::Struct(&[schema::Field {
+                name: "level",
+                schema: Schema::Int { min: 0, max: 10 },
+            }]),
+            move |_| {
+                seen.set(seen.get() + 1);
+                Ok(json!(null))
+            },
+        );
+
+        let bad = reply(
+            &r,
+            r#"{"v":1,"id":3,"cmd":"set_volume","args":{"level":11}}"#,
+        );
+        assert_eq!(bad["error"]["code"], "IPC_INVALID_ARGS");
+        assert_eq!(calls.get(), 0);
+
+        let good = reply(
+            &r,
+            r#"{"v":1,"id":4,"cmd":"set_volume","args":{"level":5}}"#,
+        );
+        assert_eq!(good["ok"], true);
+        assert_eq!(calls.get(), 1);
     }
 
     #[test]

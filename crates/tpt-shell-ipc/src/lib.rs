@@ -14,7 +14,15 @@ use serde_json::{json, Map};
 pub use router::{encode, CommandError, Router};
 pub use serde_json::Value;
 
+pub mod blob;
+pub mod contract;
+pub mod jobs;
+pub mod rate_limit;
+pub mod reflect;
 pub mod router;
+pub mod schema;
+pub mod stream;
+pub mod typescript;
 
 /// The only envelope version this crate understands.
 pub const VERSION: u64 = 1;
@@ -344,5 +352,47 @@ mod tests {
         let v = parse_error_response(&ParseError::NotAnObject);
         assert_eq!(v["id"], Value::Null);
         assert_eq!(v["error"]["code"], "IPC_NOT_OBJECT");
+    }
+}
+
+#[cfg(test)]
+mod smoke_tests {
+    use super::*;
+
+    fn rng(seed: u64) -> impl FnMut() -> u64 {
+        let mut state = seed;
+        move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        }
+    }
+
+    #[test]
+    fn random_bytes_never_panic_the_parser() {
+        let mut next = rng(0x2545_F491_4F6C_DD1D);
+        let limits = Limits::default();
+        for _ in 0..50_000 {
+            let len = (next() % 200) as usize;
+            let bytes: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+            let _ = parse_request(&bytes, &limits);
+        }
+    }
+
+    #[test]
+    fn mutated_valid_envelopes_never_panic_the_parser() {
+        let base = br#"{"v":1,"id":7,"cmd":"list_dir","args":{"path":"C:/a","n":[1,[2,[3]]]}}"#;
+        let mut next = rng(0x8CB9_2BA7_2F3D_8DD7);
+        let limits = Limits::default();
+        for _ in 0..50_000 {
+            let mut bytes = base.to_vec();
+            for _ in 0..1 + (next() % 4) {
+                let at = (next() as usize) % bytes.len();
+                let alphabet: &[u8] = b"{}[]\":,0-x \\";
+                bytes[at] = alphabet[(next() as usize) % alphabet.len()];
+            }
+            let _ = parse_request(&bytes, &limits);
+        }
     }
 }
