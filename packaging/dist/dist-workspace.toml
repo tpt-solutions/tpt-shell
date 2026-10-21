@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# cargo-dist configuration for the tpt-shell CLI release binaries (todo M12 "cargo-dist binaries").
+# NOT RUN. cargo-dist reads this file from the workspace root, so the lead copies it to
+# C:\Programming\2 WIP\tpt-shell\dist-workspace.toml when the release work starts. Regenerate the
+# workflow with `dist generate` only after that copy; the generated release workflow then needs
+# review before any tag is pushed.
+#
+# Version of cargo-dist is PROPOSED and must be checked against the release of the day: this file
+# was written without running cargo-dist, and its keys follow the documented format of the 0.2x
+# series. `dist plan` (which uploads nothing) is the first check.
+#
+# Decisions recorded here:
+#   O4: no crates.io publish at M12 (publish-jobs is empty; the name check happens at release).
+#   Scope: the CLI binary only. Library crates are not distributed as binaries.
+#   Installers: shell and PowerShell scripts from cargo-dist. The winget, Scoop and Homebrew
+#   manifests are written by hand from packaging/winget, packaging/scoop and packaging/homebrew,
+#   because those are submitted to other repositories by a person.
+
+[workspace]
+members = ["cargo:crates/tpt-shell-cli"]
+
+[dist]
+cargo-dist-version = "0.28.0"
+ci = "github"
+# Only the release steps. The build matrix covers the three OSes and aarch64 where the runner exists
+# (spec §15).
+targets = [
+  "x86_64-pc-windows-msvc",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+]
+installers = ["shell", "powershell"]
+unix-archive = ".tar.gz"
+windows-archive = ".zip"
+install-path = "CARGO_HOME"
+# No crates.io publish at M12 (decision O4). Left empty on purpose.
+publish-jobs = []
+# Build provenance attestations for the artifacts, made by the release workflow.
+github-attestations = true
+# Pull requests only plan the release; they build nothing and publish nothing.
+pr-run-mode = "plan"
+# The release commit must have a committed lock file (spec §10.8, --locked).
+allow-dirty = []

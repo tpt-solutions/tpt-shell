@@ -1,0 +1,11 @@
+[Desktop Entry]
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+# Template filled by tools/bundle-linux.sh (@NAME@ placeholders).
+Type=Application
+Name=@APP_NAME@
+Comment=@APP_DESCRIPTION@
+Exec=@APP_BINARY@
+Icon=@APP_BINARY@
+Terminal=false
+Categories=Utility;

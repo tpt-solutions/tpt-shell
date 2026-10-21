@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# Example of the pinned-runtime record (todo "Runtime and air-gap"; spec §10.8). tools/runtime-pin.sh
+# writes the real file next to the unpacked runtime; this file documents every field and is the
+# target for the proposed manifest section below.
+#
+# Proposed app manifest section (tpt-shell.toml), read by `tpt-shell build` and `tpt-shell bundle`:
+#
+#   [runtime.webview2]
+#   mode = "fixed"                 # "evergreen" (default, uses the installed runtime) or "fixed"
+#   fixed_dir = "runtime/Microsoft.WebView2.FixedVersionRuntime.128.0.2739.42.x64"
+#   min_version = "128.0.2739.42"  # build fails if the folder is older than this
+#
+# The Windows backend then passes fixed_dir as browserFolder to
+# CreateCoreWebView2EnvironmentWithOptions (today it passes a null folder, which selects the
+# installed Evergreen runtime; see tpt-shell-platform-windows/src/loader.rs). That change is a crate
+# change and is listed in the packaging report.
+
+[runtime.webview2]
+mode = "fixed"
+# Version as Microsoft names it (four numbers). The folder name in the CAB carries the same number.
+version = "128.0.2739.42"
+# Folder that holds msedgewebview2.exe, relative to the directory this file sits in.
+folder = "Microsoft.WebView2.FixedVersionRuntime.128.0.2739.42.x64"
+executable = "msedgewebview2.exe"
+# SHA-256 of the CAB as downloaded. Recorded so a later pin of the same version can be compared.
+cab_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+# Where the CAB came from: the Microsoft download page URL, or "local file".
+source = "Microsoft WebView2 Fixed Version runtime, x64 (download page URL to be recorded)"
+# UTC time the CAB was fetched.
+fetched_utc = "1970-01-01T00:00:00Z"

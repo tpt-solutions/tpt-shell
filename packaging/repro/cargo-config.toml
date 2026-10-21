@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# Build config for reproducible builds (packaging/repro/REPRODUCIBLE.md). Copy to .cargo/config.toml
+# in an app's project, or merge the [build] section into the one it has. It does not set
+# SOURCE_DATE_EPOCH or the path remapping: those depend on the checkout and the commit, so
+# tools/repro-build.sh sets them for each build. Plain `cargo build` can use this file alone.
+
+[build]
+# No incremental state in the output (same as CARGO_INCREMENTAL=0).
+incremental = false
+
+[net]
+# A flaky network should not decide whether a build succeeds.
+retry = 3
+
+# For an air-gapped build, add the source replacement that tools/vendor.sh prints
+# (target/vendor.config.toml) and remove nothing else.

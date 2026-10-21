@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# Generates each project template with `tpt-shell new <template> <dir>`, then checks the result
+# with `tpt-shell manifest check` and `tpt-shell build` (spec §16 M11: every template is generated
+# and built in CI, then smoke-tested).
+#
+# A template is a directory under templates/. The CLI generates a template by its name, so the
+# directory name must match a `tpt-shell new` subcommand. None exist yet, so the script says so
+# and exits 0; the CI job then shows a clear skip. Running the generated app needs a desktop and
+# is not done here; it belongs to the M11 gate.
+#
+# usage: tools/template-build.sh [path-to-tpt-shell-binary]
+
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+templates_dir="$root/templates"
+
+names=()
+if [ -d "$templates_dir" ]; then
+  for dir in "$templates_dir"/*/; do
+    [ -d "$dir" ] || continue
+    names+=("$(basename "$dir")")
+  done
+fi
+
+if [ "${#names[@]}" -eq 0 ]; then
+  echo "no templates yet: templates/ has no template directories"
+  echo "skipping the template build"
+  exit 0
+fi
+
+cli="${1:-}"
+if [ -z "$cli" ]; then
+  cargo build --quiet --manifest-path "$root/Cargo.toml" -p tpt-shell-cli
+  cli="$root/target/debug/tpt-shell"
+  [ -x "$cli" ] || cli="$cli.exe"
+fi
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+status=0
+for name in "${names[@]}"; do
+  dest="$work/$name"
+  echo "== generate $name"
+  if ! "$cli" new "$name" "$dest"; then
+    echo "template $name did not generate" >&2
+    status=1
+    continue
+  fi
+  echo "== check $name"
+  if ! "$cli" manifest check "$dest/tpt-shell.toml"; then
+    echo "template $name has a manifest that does not check" >&2
+    status=1
+    continue
+  fi
+  echo "== build $name"
+  if ! "$cli" build "$dest"; then
+    echo "template $name did not build" >&2
+    status=1
+  fi
+done
+exit "$status"

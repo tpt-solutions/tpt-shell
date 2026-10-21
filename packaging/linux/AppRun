@@ -1,0 +1,7 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+# AppRun for the AppImage (copied into the AppDir by tools/bundle-linux.sh --appimage).
+# The app's files sit under usr/bin and usr/share; APPDIR is set by the AppImage runtime.
+here="$(dirname "$(readlink -f "$0")")"
+exec "$here/usr/bin/@APP_BINARY@" "$@"

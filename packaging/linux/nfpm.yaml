@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# nfpm configuration for the .deb and .rpm packages (todo O2 family; PROPOSED tool: nfpm, see
+# packaging/config.env). Run by tools/bundle-linux.sh, which exports every ${VAR} below.
+# Not run in this change: no .deb or .rpm has been built or installed yet.
+# nfpm expands ${VAR} from the environment when it reads this file.
+
+name: "${APP_BINARY}"
+arch: "amd64"
+platform: "linux"
+version: "${APP_VERSION}"
+section: "utils"
+priority: "optional"
+maintainer: "${PUBLISHER}"
+description: "${APP_DESCRIPTION}"
+homepage: "${APP_HOMEPAGE}"
+license: "${APP_LICENSE}"
+
+contents:
+  - src: "${STAGE_BINARY}"
+    dst: "/usr/bin/${APP_BINARY}"
+    file_info:
+      mode: 0755
+  - src: "${STAGE_APP_DIR}"
+    dst: "/usr/share/${APP_BINARY}/app"
+  - src: "${STAGE_DESKTOP}"
+    dst: "/usr/share/applications/${APP_BINARY}.desktop"
+  # Holds licenses/ and, when given, compliance/ (SBOMs and attestation).
+  - src: "${STAGE_DOC_DIR}"
+    dst: "/usr/share/doc/${APP_BINARY}"
+
+# The WebKitGTK package names differ by distribution family. Versions are not pinned here:
+# the minimum (MIN_WEBKITGTK in packaging/config.env) is proposed, not yet measured.
+overrides:
+  deb:
+    depends:
+      - "libwebkit2gtk-4.1-0"
+      - "libgtk-3-0"
+  rpm:
+    depends:
+      - "webkit2gtk4.1"
+      - "gtk3"

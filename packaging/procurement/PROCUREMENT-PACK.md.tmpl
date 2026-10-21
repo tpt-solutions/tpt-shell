@@ -1,0 +1,106 @@
+<!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
+<!-- Copyright (c) 2026 TPT Solutions -->
+
+# Procurement pack: {{APP_NAME}} {{VERSION}}
+
+Generated {{GENERATED_UTC}} by `tools/procurement-pack.py` from the compliance outputs of build
+`{{GIT_COMMIT}}`. Sections 2, 3, 7 and 8 are drafts written from the repository. A person at
+TPT Solutions must check every answer before the pack goes to a buyer. Text in **[brackets]** is
+still to be filled in.
+
+## 1. About this pack
+
+| Item | Value |
+| --- | --- |
+| Product | {{APP_NAME}} |
+| Version | {{VERSION}} |
+| Source commit | {{GIT_COMMIT}} |
+| Toolchain | {{RUSTC}} |
+| Lock file SHA-256 | {{LOCK_SHA256}} |
+| Licence policy result | {{POLICY_RESULT}} |
+| Supplier | TPT Solutions |
+| Contact for security questions | [name and address; see SECURITY.md] |
+
+## 2. Security questionnaire (draft answers)
+
+| # | Question | Answer | Evidence in the repository |
+| --- | --- | --- | --- |
+| 2.1 | Does the shipped shell open network sockets by default? | No. The shell opens no sockets unless a feature that needs one is enabled. | `crates/tpt-shell-compliance/tests/no_sockets.rs` checks the dependency graph |
+| 2.2 | Does the shipped app contact Microsoft (WebView2)? | [Not yet. The pinned Fixed Version runtime (`tpt-shell runtime pin`) is not built; until it is, the app uses the Evergreen runtime installed on the machine, which the operating system updates. Confirm after the pinned runtime is in place.] | `packaging/runtime/`, `crates/tpt-shell-platform-windows/src/loader.rs` |
+| 2.3 | Does the shell send telemetry or usage data? | No. CONTRIBUTING.md forbids telemetry and network access unless a feature is enabled. | `CONTRIBUTING.md`, "Code rules" |
+| 2.4 | Where is user data kept? | In the per-profile data folder of the operating system's webview (WebView2 user data folder; WebKit website data store). Ephemeral profiles leave no files behind. | Spec §10 profiles; conformance tests |
+| 2.5 | Is there an audit log, and can it be checked for tampering? | Yes. A hash-chained log with signed checkpoints. `tpt-shell audit verify <file> --key <public-key>` checks it. | `crates/tpt-shell-audit`, `tpt-shell audit verify` |
+| 2.6 | Does the app have a kiosk mode, and what does it lock down? | [Kiosk features and their limits, from the kiosk guide (M11). Recipes for each OS are not yet written.] | `crates/tpt-shell-kiosk` |
+| 2.7 | How are vulnerabilities reported and fixed? | Through SECURITY.md, not public issues. [Response times to be stated by the supplier.] | `SECURITY.md` |
+| 2.8 | Is the software signed, and is the signature checked? | [Signing status at this build: see section 6.] | `tools/sign.sh`, section 6 |
+| 2.9 | Does the software update itself? | No update channel is built into the shell. [Confirm for the application.] | [to confirm] |
+| 2.10 | Which operating systems and versions are supported? | Windows 10 build 1809 and later, and Windows 11. macOS and Linux minimums are proposed and not yet verified: see `packaging/config.env`. | spec §1; `packaging/config.env` |
+| 2.11 | Can it be used with no internet connection? | Yes for the shell and its documentation: `tools/vendor.sh` vendors the dependencies and `tools/docs-offline.sh` builds the docs bundle. The Windows pinned runtime is required for an air-gapped machine without Microsoft's runtime installed. | `tools/vendor.sh`, `tools/docs-offline.sh` |
+| 2.12 | Which licences apply to the code and its dependencies? | The shell is MIT OR Apache-2.0. Dependencies are limited by the licence policy (section 5). | `deny.toml`, section 5 |
+| 2.13 | Is the build reproducible? | [Result of `tools/repro-check.sh` for this commit, with any differences explained.] | `packaging/repro/REPRODUCIBLE.md` |
+
+## 3. Data-flow diagram
+
+[PLACEHOLDER: replace this diagram with the deployed topology of the application.]
+
+```
+ +-----------------------------+         typed IPC, capability-checked        +----------------------+
+ | Front end (HTML, JS)        | <-------------------------------------------> | Rust backend         |
+ | loaded from app:// only     |                                               | (the application)    |
+ +--------------+--------------+                                               +----+------+------+
+                |                                                                    |      |
+                | rendered by the operating system's webview                         |      |
+                v                                                                    v      v
+ +-----------------------------+                                       local files  audit log  devices
+ | WebView2 / WebKit / WebKitGTK|
+ +-----------------------------+
+ Network: none by default. [List any outbound connection the application itself adds.]
+```
+
+## 4. Software bill of materials (summary)
+
+The full SBOMs are `sbom.cdx.json` (CycloneDX 1.5) and `sbom.spdx.json` (SPDX 2.3), written by
+`tpt-shell compliance`. They validate against the published schemas (`tools/validate-sbom.sh`).
+
+Components in this build: **{{COMPONENT_COUNT}}**
+
+{{COMPONENT_TABLE}}
+
+## 5. Licence summary
+
+Licence policy result: **{{POLICY_RESULT}}**. The policy is the allow list in `deny.toml`
+(MIT, and the permissive extras with a recorded justification).
+
+{{LICENCE_TABLE}}
+
+Third-party notices: `THIRD_PARTY_NOTICES` (see the compliance outputs).
+
+## 6. Build, signing and provenance
+
+Release artifacts and their SHA-256 digests (from `SHA256SUMS` and `release-attestation.json`):
+
+{{ARTIFACT_TABLE}}
+
+- Signing: [Windows code signing: status]. [macOS notarisation: status]. [minisign signatures: status].
+  Signing runs only when credentials are supplied; see `tools/sign.sh`.
+- Build provenance: [CI attestation reference, when the release is made].
+- Reproducibility: builds take `SOURCE_DATE_EPOCH` from the commit and use `--locked`.
+  The rules and the known differences are in `packaging/repro/REPRODUCIBLE.md`.
+
+## 7. Audit and kiosk explainer
+
+- **Audit.** Every action a capability performs is written to a hash-chained log. Each entry
+  refers to the one before it, and signed checkpoints fix the chain head. Tampering breaks the chain
+  and `tpt-shell audit verify` reports it. Exports: CSV and JSON Lines.
+- **Kiosk.** Kiosk mode keeps the window full screen, restricts navigation to the app's own origin
+  and listed addresses, recovers from a crashed page, and can run under a locked-down operating
+  system account. [Describe the lock-down for each OS, and the limits, from the kiosk guide.]
+
+## 8. Open items for the supplier
+
+- [ ] Pinned WebView2 runtime built and verified (question 2.2)
+- [ ] Signing credentials in place and signatures verified (question 2.8)
+- [ ] Reproducibility result for this commit (question 2.13)
+- [ ] Minimum macOS and Linux versions measured on hardware (section 2.10)
+- [ ] Data-flow diagram replaced with the real topology (section 3)
+- [ ] Support and vulnerability response times stated (question 2.7)

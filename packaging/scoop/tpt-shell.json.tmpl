@@ -1,0 +1,28 @@
+{
+    "version": "@VERSION@",
+    "description": "Native desktop shell for web front ends, with a typed Rust backend",
+    "homepage": "@PROJECT_URL@",
+    "license": "MIT|Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "@RELEASE_URL@/tpt-shell-x86_64-pc-windows-msvc.zip",
+            "hash": "@SHA256@",
+            "extract_dir": "tpt-shell-x86_64-pc-windows-msvc"
+        }
+    },
+    "bin": "tpt-shell.exe",
+    "checkver": {
+        "github": "@PROJECT_URL@"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "@PROJECT_URL@/releases/download/v$version/tpt-shell-x86_64-pc-windows-msvc.zip",
+                "extract_dir": "tpt-shell-x86_64-pc-windows-msvc"
+            }
+        },
+        "hash": {
+            "url": "$url.sha256"
+        }
+    }
+}

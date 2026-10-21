@@ -1,0 +1,58 @@
+<!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
+<!-- Copyright (c) 2026 TPT Solutions -->
+
+# tpt-shell {{VERSION}}
+
+Released {{RELEASE_DATE}} from commit `{{GIT_COMMIT}}`.
+
+[One paragraph: what this release is for, in plain words. Do not claim "first" or "only" without
+evidence in docs/competitive-scan.md (CONTRIBUTING.md).]
+
+## Highlights
+
+- [Feature, with the support tag from the API docs: Full, Partial (gap stated) or Unsupported]
+
+## Platform support
+
+| Platform | Minimum | Engine | Support tag |
+| --- | --- | --- | --- |
+| Windows | 10 build 1809 (Windows 11 too) | WebView2 (Evergreen, or pinned Fixed Version) | [Full / Partial] |
+| macOS | {{MIN_MACOS}} | WKWebView (system engine, cannot be pinned) | [Full / Partial] |
+| Linux | [distribution list] | WebKitGTK 4.1 (system package, cannot be pinned) | [Full / Partial] |
+
+Minimum macOS and Linux versions are recorded in `packaging/config.env`. They are not measured
+on hardware until the O6 device runs are done; say so here if that is still the case.
+
+## Installing
+
+| Artifact | Use |
+| --- | --- |
+| `tpt-shell-x86_64-pc-windows-msvc.zip` | Windows, portable, or through winget and Scoop |
+| `tpt-shell-x86_64-apple-darwin.tar.gz`, `tpt-shell-aarch64-apple-darwin.tar.gz` | macOS, or through Homebrew |
+| `tpt-shell-x86_64-unknown-linux-gnu.tar.gz` | Linux |
+| `SHA256SUMS` | Checksums for every artifact |
+| `release-attestation.json`, `*.minisig` | Release record and signatures, when present |
+| `compliance/` | SBOMs (CycloneDX 1.5, SPDX 2.3), attestation.json, licence notices |
+
+Check a download with `sha256sum -c SHA256SUMS`, then `minisign -V` with the public key when a
+`.minisig` file is supplied.
+
+## Changes
+
+[From CHANGELOG.md, the section for this version. Group as: Added, Changed, Fixed, Removed,
+Security. Breaking changes to the typed IPC contract first, with the `tpt-shell contract diff`
+output.]
+
+## Known gaps
+
+- [Each item from the procurement pack's open list that is still open at release, with its reason]
+- Reproducibility: [result of tools/repro-check.sh for this commit]
+- Signing: [which artifacts are signed at this release, and which are not]
+
+## Security
+
+Report vulnerabilities through SECURITY.md, not public issues.
+
+## Licence
+
+tpt-shell is dual-licensed under MIT OR Apache-2.0. See LICENSE-MIT and LICENSE-APACHE.
