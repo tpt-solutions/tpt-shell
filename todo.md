@@ -190,7 +190,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] TypeScript client generator (types, JSDoc, runtime bindings): `tpt-shell-ipc::typescript`; wrappers return `Promise<unknown>` because contracts have no result schema yet
 - [x] Deterministic output
 - [x] Golden tests for contract and TS generation (both have golden tests; the TS output also passes strict `tsc` in a one-off check)
-- [x] JS runtime in `js/runtime/` (plain JS, <4 KB gzipped, size check in CI: `tools/check-runtime-size.sh` runs in the `runtime-size` job; currently 648 bytes gzipped; the job has not run on GitHub yet)
+- [x] JS runtime in `js/runtime/` (plain JS, <4 KB gzipped, size check in CI: `tools/check-runtime-size.sh` runs in the `runtime-size` job; currently 945 bytes gzipped, measured locally on 2026-10-22; the job has not run on GitHub yet)
 - [x] `tpt.on()` events and `tpt.caps` (`js/runtime/tpt-shell.js` with Node tests in `js/test/`; `Running::emit` sends a Rust event to a window's page, and a live test shows it reaching `tpt.on`; `tpt.caps` reports `webview2` and its version from the user agent. Still open: `emit` is only called from the UI thread, so a background thread needs the event-loop proxy, and `tpt.caps` does not list supported APIs)
 
 ### tpt-shell-manifest
@@ -540,7 +540,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Cargo feature gate; off unless build and manifest enable an agent profile
 - [x] Semantic tree from DOM + ARIA: roles, names, states, values, bounds, snapshot-scoped refs (`js/agent/agent.js` and `tpt-shell-agent::page`; a live test snapshots a real page)
 - [ ] Action API: click, type, select, scroll, focus, key, wait_for, read, invoke (click, focus, type, select, key, scroll and read work on a real page, and a stale reference is refused. `wait_for` and `invoke` are not built. Key events are synthetic, so they do not trigger the browser's own key handling)
-- [x] No raw JavaScript evaluation (the agent crate has no evaluation path; tools are the only callable surface)
+- [x] No raw JavaScript evaluation (the agent crate has no evaluation path, and its page scripts are fixed: `tpt-shell-agent::page` builds only the snapshot and action calls, never caller-supplied code; tools are the only callable surface)
 - [ ] `[agent]` profiles: actions, routes, rate limits, confirm-required commands, max session length (rate limits, confirm-required commands and max session length are in `tpt-shell-agent::Policy`; there are no manifest profiles or route rules yet)
 - [x] Redaction: password fields and `data-tpt-redact` (a password value and a redacted block never reach the snapshot or a read; live test)
 - [ ] Native confirmation dialogs for sensitive actions
@@ -551,7 +551,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Resources: semantic tree and audit tail (the snapshot exists; it is not yet an MCP resource, and the audit tail is not exposed)
 - [ ] Prompt-injection hygiene: untrusted markers, allowlist navigation (page text in a snapshot is wrapped in `<untrusted>` markers by `render`; that is a convention the model must follow, not a guarantee. Tool results are not yet marked, and navigation is not restricted for agents)
 - [ ] All agent actions audited and recordable to replay (every call is logged in the session; nothing writes it to the audit file or replay yet)
-- [ ] Policy tests: forbidden actions, rate limits, redaction, kill switch (forbidden actions, rate limits, confirmation, kill switch and session length are tested; redaction is not built)
+- [ ] Policy tests: forbidden actions, rate limits, redaction, kill switch (forbidden actions, rate limits, confirmation, kill switch and session length are tested; redaction is tested on a real page through `tpt-shell-agent::page` and the live agent test, not yet through the policy layer)
 - [ ] Fuzz and security tests on control channel (R7)
 - [ ] `tpt-shell add agent`, `agent-demo` template and example
 - [ ] Done: example agent completes a scripted task; policy tests pass; every action appears in the audit log
