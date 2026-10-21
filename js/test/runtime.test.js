@@ -38,7 +38,7 @@ function loadRuntime({ userAgent = 'Mozilla/5.0 Chrome/155.0 Safari/537.36 Edg/1
   });
   vm.runInContext(SOURCE, context);
   const fromRust = (data) => listeners.forEach((fn) => fn({ data }));
-  return { tpt: window.tpt, sent, fromRust };
+  return { tpt: window.tpt, sent, fromRust, window };
 }
 
 test('invoke sends a v1 envelope and resolves with the matching response', async () => {
@@ -93,16 +93,95 @@ test('a handler that removes itself during dispatch does not skip the next handl
 
 test('caps reports the engine and the WebView2 version from the user agent', () => {
   const { tpt } = loadRuntime();
-  assert.deepEqual({ ...tpt.caps }, { engine: 'webview2', version: '155.0.4283.62' });
+  assert.equal(tpt.caps.engine, 'webview2');
+  assert.equal(tpt.caps.version, '155.0.4283.62');
 });
 
 test('caps has a null version when the user agent does not name one', () => {
   const { tpt } = loadRuntime({ userAgent: 'Something/1.0' });
-  assert.deepEqual({ ...tpt.caps }, { engine: 'webview2', version: null });
+  assert.equal(tpt.caps.version, null);
 });
 
 test('the runtime does nothing without chrome.webview', () => {
   const context = vm.createContext({ window: {}, navigator: { userAgent: '' } });
   vm.runInContext(SOURCE, context);
   assert.equal(context.window.tpt, undefined);
+});
+
+test('caps lists the APIs the runtime provides', () => {
+  const { tpt } = loadRuntime();
+  assert.deepEqual([...tpt.caps.apis], ['invoke', 'on', 'job', 'normalize', 'compat.tauri']);
+});
+
+test('job.cancel sends the job.cancel command for that job', async () => {
+  const { tpt, sent, fromRust } = loadRuntime();
+  const handle = tpt.job(5);
+  assert.equal(handle.id, 5);
+  const stopping = handle.cancel();
+  assert.deepEqual(sent, [{ v: 1, id: 1, cmd: 'job.cancel', args: { job: 5 } }]);
+  fromRust({ id: 1, ok: true, data: { cancelled: true } });
+  assert.deepEqual(await stopping, { cancelled: true });
+});
+
+test('a job handle hears only the events of its own job', () => {
+  const { tpt, fromRust } = loadRuntime();
+  const mine = [];
+  tpt.job(2).on('job.progress', (data) => mine.push(data.done));
+  fromRust({ event: 'job.progress', data: { job: 1, done: 9, total: 10 } });
+  fromRust({ event: 'job.progress', data: { job: 2, done: 4, total: 10 } });
+  assert.deepEqual(mine, [4]);
+});
+
+test('the tauri shim maps invoke and event.listen onto the runtime, and installs only on request', async () => {
+  const { tpt, sent, fromRust, window } = loadRuntime();
+  assert.equal(window.__TAURI__, undefined);
+  const call = tpt.compat.tauri.invoke('greet', { name: 'a' });
+  assert.deepEqual(sent[0], { v: 1, id: 1, cmd: 'greet', args: { name: 'a' } });
+  fromRust({ id: 1, ok: true, data: 'hi' });
+  assert.equal(await call, 'hi');
+
+  const got = [];
+  const stop = await tpt.compat.tauri.event.listen('tick', (e) => got.push(e));
+  fromRust({ event: 'tick', data: 3 });
+  stop();
+  fromRust({ event: 'tick', data: 4 });
+  assert.deepEqual(JSON.parse(JSON.stringify(got)), [{ event: 'tick', payload: 3 }]);
+
+  tpt.compat.tauri.install();
+  assert.equal(typeof window.__TAURI__.core.invoke, 'function');
+  assert.equal(typeof window.__TAURI_INTERNALS__.invoke, 'function');
+});
+
+function fakeDocument() {
+  const head = { children: [], appendChild(node) { this.children.push(node); } };
+  const created = [];
+  return {
+    head,
+    created,
+    documentElement: { style: {} },
+    querySelector: () => null,
+    createElement(tag) {
+      const node = { tag, attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } };
+      created.push(node);
+      return node;
+    },
+  };
+}
+
+test('normalize does nothing until it is asked, then applies each option it is given', () => {
+  const { tpt, window } = loadRuntime();
+  window.document = fakeDocument();
+  assert.equal(window.document.created.length, 0);
+
+  assert.equal(tpt.normalize({ font: true, dragRegion: true, viewport: true }), true);
+  const [style, meta] = window.document.created;
+  assert.equal(style.tag, 'style');
+  assert.match(style.textContent, /-webkit-app-region:drag/);
+  assert.equal(meta.name, 'viewport');
+  assert.equal(window.document.documentElement.style.fontFamily.includes('system-ui'), true);
+});
+
+test('normalize without a document reports that it did nothing', () => {
+  const { tpt } = loadRuntime();
+  assert.equal(tpt.normalize({ viewport: true }), false);
 });
