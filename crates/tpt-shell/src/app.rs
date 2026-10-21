@@ -808,7 +808,7 @@ pub struct Running {
 
 /// The capture function, shared by the periodic save and the save at exit.
 #[cfg_attr(not(windows), allow(dead_code))]
-type SnapshotCapture =Rc<RefCell<Box<dyn FnMut() -> serde_json::Value>>>;
+type SnapshotCapture = Rc<RefCell<Box<dyn FnMut() -> serde_json::Value>>>;
 
 /// How a launch relates to a single-instance app.
 #[cfg(windows)]
