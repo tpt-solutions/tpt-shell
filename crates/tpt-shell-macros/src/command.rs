@@ -118,15 +118,15 @@ pub fn expand_command(attr: TokenStream2, item: ItemFn) -> syn::Result<TokenStre
 
     let fields = params.iter().map(|(_, ty, name)| {
         quote! {
-            ::tpt_shell_ipc::schema::Field {
+            ::tpt_shell::__private::ipc::schema::Field {
                 name: #name,
-                schema: <#ty as ::tpt_shell_ipc::reflect::ToSchema>::schema(),
+                schema: <#ty as ::tpt_shell::__private::ipc::reflect::ToSchema>::schema(),
             }
         }
     });
     let reads = params.iter().map(|(ident, ty, name)| {
         quote! {
-            let #ident: #ty = ::tpt_shell_ipc::reflect::__private::arg(args, #name)?;
+            let #ident: #ty = ::tpt_shell::__private::ipc::reflect::__private::arg(args, #name)?;
         }
     });
     let idents = params.iter().map(|(ident, _, _)| ident);
@@ -137,16 +137,36 @@ pub fn expand_command(attr: TokenStream2, item: ItemFn) -> syn::Result<TokenStre
         quote! { let out = #call; }
     };
 
+    // A command with a capability is registered behind its grant. The macro cannot know which
+    // part of the arguments it acts on, so the target is `None`: only an unrestricted grant
+    // lets it run. A command that acts on a path, device or URL is registered by hand with a
+    // target function (`App::command` in the facade).
+    let register_call = match &options.capability {
+        Some(c) => {
+            let c = LitStr::new(c, proc_macro2::Span::call_site());
+            quote! {
+                router.register_guarded_validated(
+                    command.name,
+                    #c,
+                    command.args,
+                    |_| ::tpt_shell::__private::ipc::Target::None,
+                    #handler_fn,
+                );
+            }
+        }
+        None => quote! { router.register_validated(command.name, command.args, #handler_fn); },
+    };
+
     Ok(quote! {
         #item
 
         #[doc(hidden)]
-        pub fn #command_fn() -> ::tpt_shell_ipc::contract::Command {
-            ::tpt_shell_ipc::contract::Command {
+        pub fn #command_fn() -> ::tpt_shell::__private::ipc::contract::Command {
+            ::tpt_shell::__private::ipc::contract::Command {
                 name: #command_name,
-                kind: ::tpt_shell_ipc::contract::Kind::Sync,
+                kind: ::tpt_shell::__private::ipc::contract::Kind::Sync,
                 capability: #capability,
-                args: ::tpt_shell_ipc::reflect::__private::struct_schema(
+                args: ::tpt_shell::__private::ipc::reflect::__private::struct_schema(
                     ::std::vec![#(#fields),*]
                 ),
             }
@@ -154,17 +174,17 @@ pub fn expand_command(attr: TokenStream2, item: ItemFn) -> syn::Result<TokenStre
 
         #[doc(hidden)]
         pub fn #handler_fn(
-            args: &::tpt_shell_ipc::Value,
-        ) -> ::core::result::Result<::tpt_shell_ipc::Value, ::tpt_shell_ipc::router::CommandError> {
+            args: &::tpt_shell::__private::ipc::Value,
+        ) -> ::core::result::Result<::tpt_shell::__private::ipc::Value, ::tpt_shell::__private::ipc::router::CommandError> {
             #(#reads)*
             #call
-            ::tpt_shell_ipc::reflect::__private::to_value(&out)
+            ::tpt_shell::__private::ipc::reflect::__private::to_value(&out)
         }
 
         #[doc(hidden)]
-        pub fn #register_fn(router: &mut ::tpt_shell_ipc::router::Router) {
+        pub fn #register_fn(router: &mut ::tpt_shell::__private::ipc::router::Router) {
             let command = #command_fn();
-            router.register_validated(command.name, command.args, #handler_fn);
+            #register_call
         }
     })
 }
@@ -181,7 +201,7 @@ pub fn expand_commands(input: TokenStream2) -> syn::Result<TokenStream2> {
         }
     });
     Ok(quote! {{
-        let mut contract = ::tpt_shell_ipc::contract::Contract::new();
+        let mut contract = ::tpt_shell::__private::ipc::contract::Contract::new();
         #(#adds)*
         contract
     }})
@@ -209,7 +229,7 @@ pub fn expand_register(input: TokenStream2) -> syn::Result<TokenStream2> {
         quote! { #register_fn(router); }
     });
     Ok(quote! {{
-        let router: &mut ::tpt_shell_ipc::router::Router = #router;
+        let router: &mut ::tpt_shell::__private::ipc::router::Router = #router;
         #(#registers)*
     }})
 }
