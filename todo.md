@@ -74,7 +74,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Jobs: fmt, clippy, tests, cargo-deny (and SPDX header check)
 - [ ] Placeholder jobs: conformance, fuzz smoke, docs build, template build, visual artifact upload, benchmarks
 - [ ] Linux headless display setup (Xvfb; Wayland headless where possible)
-- [ ] Cache and MSRV job
+- [ ] Cache and MSRV job (MSRV job added: `cargo check --workspace --locked` on Rust 1.90.0; caching not done; the job has not run on GitHub yet)
 - [x] Decide (O5): docs on GitHub Pages, built from the mdBook source in CI. Visual baselines in the repo via Git LFS, revisited if the store grows large
 - [x] Decide (O6): CI runners only for now. Real hardware is acquired per phase when that phase's gate needs it (M4, M5, M7)
 
@@ -84,7 +84,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] CODE_OF_CONDUCT.md (contact placeholder to set)
 - [x] Issue (bug report and feature request) and PR templates
 - [x] RFC process doc
-- [ ] MSRV policy
+- [x] MSRV policy (Rust 1.90, measured on 1.90.0; set in `[workspace.package]`, described in CONTRIBUTING.md)
 - [x] Semver and deprecation policy
 - [x] CHANGELOG.md
 - [x] Explicit no-telemetry statement in README and docs
@@ -113,7 +113,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] `WindowBackend` remaining: frameless, always-on-top, transparency, backdrop, drag regions, close handling (trait methods, fake backend and Windows backend done for frameless, always-on-top, backdrop and close action; transparency and drag regions still return `Unsupported` on Windows)
 - [x] `WebviewBackend` trait, M1 subset: load html, navigate (app:// only), eval, post message
 - [x] `WebviewBackend` crash callback and reload (verified by a renderer crash through DevTools), intercept (WebResourceRequested), nav policy hooks, doc-start script
-- [ ] `WebviewBackend` remaining: snapshot, devtools toggle, profile binding, a11y tree
+- [ ] `WebviewBackend` remaining: snapshot, devtools toggle, profile binding, a11y tree (devtools and context menu are set per window at creation, release off, debug on; no runtime toggle is exposed yet)
 - [ ] `Platform` trait (menus, tray, dialogs, clipboard, notifications, deep links, single instance, theme/accent, keystore) (clipboard text and colour scheme are in `tpt-shell-core::platform` with Windows and fake implementations; the rest are not started)
 - [x] `Clock` and `Rng` traits (system and fake/seeded implementations, unit tested)
 - [ ] Single UI thread model and `EventLoopProxy` (Send + Sync)
@@ -180,7 +180,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Schema model: primitives with bounds, strings with max length/pattern, enums, structs, Option, Vec, string-key maps (all except regex patterns: strings use an allowed-character set instead)
 - [ ] Scoped types: `ScopedPath`, `DeviceId`
 - [ ] Validator: unknown fields rejected, bounds checked, scope checked before handler runs (types, bounds, unknown fields and `register_validated` are done; the scope check is not wired to the capability engine yet)
-- [ ] `CmdError` with stable code, message, details
+- [x] `CmdError` with stable code, message, details (`CommandError::with_details` sends `error.details`; invalid args report the offending `path`)
 - [ ] Blob channel `app://__tpt/blob/<id>` (store, quota, id check and route parsing are in `tpt-shell-ipc::blob`; the platform does not serve the route yet)
 - [x] Stream channel with credit-based backpressure (`tpt-shell-ipc::stream`; not yet carried by a platform transport)
 - [ ] Fuzz target: validator (no-panic smoke tests exist; no cargo-fuzz target yet)
@@ -190,14 +190,14 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] TypeScript client generator (types, JSDoc, runtime bindings): `tpt-shell-ipc::typescript`; wrappers return `Promise<unknown>` because contracts have no result schema yet
 - [x] Deterministic output
 - [x] Golden tests for contract and TS generation (both have golden tests; the TS output also passes strict `tsc` in a one-off check)
-- [ ] JS runtime in `js/runtime/` (plain JS, <4 KB gzipped, size check in CI)
+- [x] JS runtime in `js/runtime/` (plain JS, <4 KB gzipped, size check in CI: `tools/check-runtime-size.sh` runs in the `runtime-size` job; currently 648 bytes gzipped; the job has not run on GitHub yet)
 - [ ] `tpt.on()` events and `tpt.caps`
 
 ### tpt-shell-manifest
 - [x] `tpt-shell.toml` parser with line-accurate errors (`TS0001`โ€“`TS0004`)
 - [x] Sections: app, windows, capabilities, kiosk, devices, audit, agent, replay, test, profiles, compliance (parse stubs for later phases)
 - [x] Published JSON Schema for the manifest (`crates/tpt-shell-manifest/schema/`; a test checks its sections against the parser)
-- [ ] Golden tests for manifest schema (consistency tests exist; no generated-schema golden yet)
+- [ ] Golden tests for manifest schema (consistency tests exist, now including app and window keys against the parser; no generated-schema golden yet, and the schema is hand-written)
 - [ ] Fuzz target: manifest parser (no-panic smoke tests exist; no cargo-fuzz target yet)
 
 ### tpt-shell-capabilities
@@ -212,15 +212,15 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Entry model: seq, wall time, monotonic time, actor, command, capability, parameter hash, optional redacted params, outcome, duration
 - [x] Canonical JSON for hashing
 - [x] SHA-256 hash chain
-- [ ] Redaction policy from manifest (the policy type exists; the manifest does not feed it yet)
+- [ ] Redaction policy from manifest (`[audit] store_params` and `redact` parse into `AuditSettings`, validated with the schema; no runtime writer uses them yet, so the mapping to `tpt_shell_audit::Policy` is still to do)
 - [x] Append-only file writer
 - [ ] Property tests for chain integrity (randomized and exhaustive single-byte tests exist; not a proptest suite)
 - [x] Golden tests for audit format
 
 ### Security defaults (ยง9)
 - [ ] Only `app://` loaded; remote navigation blocked unless allowlisted per window
-- [ ] Strict CSP injected on `app://` responses
-- [ ] Devtools, context menu, view-source disabled in release
+- [x] Strict CSP injected on `app://` responses (Windows: every response from the virtual origin carries `PAGE_CSP`, no inline script or style, verified by a runtime test; the origin is `https://tpt-app.localhost`, see the DEVIATION note above; macOS and Linux not done)
+- [ ] Devtools, context menu, view-source disabled in release (devtools and the default context menu are off in release builds on Windows, verified against WebView2 settings; view-source is not checked separately, and macOS and Linux are not done)
 - [ ] Release-build CSP override needs an audited manifest flag
 - [ ] Mock backend generated from contract (basic)
 - [ ] Tauri-style invoke shim `tpt.compat.tauri` (documented subset)
@@ -526,8 +526,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] HSM hook for key supply
 - [ ] External anchor hook: file on other volume, syslog, HTTP
 - [ ] Rotation and size limits
-- [ ] Export: JSON Lines, CSV
-- [ ] `tpt-shell audit verify | export | view`
+- [x] Export: JSON Lines, CSV (`tpt-shell audit export --format csv|jsonl`; both verify the chain first, and the CSV leaves out parameters and escapes formula-like cells)
+- [x] `tpt-shell audit verify | export | view` (`verify --key <public-key-file>` checks checkpoint signatures; without a key it says they were not checked)
 - [x] Verify reports first bad sequence number (`verify_file` and `verify_file_with_key`)
 - [ ] Devtools audit viewer panel
 - [ ] Tamper tests: flip, drop, swap, truncate all detected (flip, drop, swap, re-chain and forged signatures are tested; truncating the tail is a documented limit that needs an external anchor)

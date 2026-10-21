@@ -10,3 +10,9 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 - Licence and advisory policy in `deny.toml`.
 - Governance: SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, this changelog.
 - CI skeleton: fmt, clippy, test on three operating systems, cargo-deny, SPDX header check.
+- `tpt-shell audit verify | export | view`: checks the hash chain (and checkpoint signatures with `--key`), exports verified logs as CSV or JSON Lines, and prints a short table.
+- `[audit]` manifest section: `store_params` and `redact`, validated against the published schema.
+- Command errors can carry structured `details`; invalid arguments report the offending path.
+- MSRV is Rust 1.90, set in the workspace manifest and measured on 1.90.0.
+- Windows: release builds turn off the developer tools and the right-click menu for each page window (debug builds keep them on).
+- Windows: every page the shell serves carries a strict Content-Security-Policy (`script-src` and `style-src` limited to the app's own origin; inline script and style are blocked).
