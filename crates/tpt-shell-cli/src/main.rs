@@ -21,7 +21,9 @@ const USAGE: &str = "usage:
   tpt-shell compliance <output-directory>
   tpt-shell audit verify <audit.jsonl> [--key <public-key-file>]
   tpt-shell audit export <audit.jsonl> --format csv|jsonl
-  tpt-shell audit view <audit.jsonl>";
+  tpt-shell audit view <audit.jsonl>
+  tpt-shell install-service <name> <program>     start the program at sign-in (Windows)
+  tpt-shell uninstall-service <name>             remove that sign-in entry (Windows)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -51,8 +53,48 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["audit", "export", path, "--format", "csv"] => audit_export_csv(Path::new(path)),
         ["audit", "export", path, "--format", "jsonl"] => audit_export_jsonl(Path::new(path)),
         ["audit", "view", path] => audit_view(Path::new(path)),
+        ["install-service", name, program] => install_service(name, Path::new(program)),
+        ["uninstall-service", name] => uninstall_service(name),
         _ => Err(USAGE.to_string()),
     }
+}
+
+/// Adds a sign-in entry that starts `program` for the current user. The program must exist.
+fn install_service(name: &str, program: &Path) -> Result<ExitCode, String> {
+    if !program.is_file() {
+        return Err(format!("{} is not a file", program.display()));
+    }
+    let absolute = fs::canonicalize(program)
+        .map_err(|e| format!("cannot resolve {}: {e}", program.display()))?;
+    startup_entry(name, Some(&absolute))
+}
+
+/// Removes the sign-in entry `name`. Removing one that is not there is not an error.
+fn uninstall_service(name: &str) -> Result<ExitCode, String> {
+    startup_entry(name, None)
+}
+
+#[cfg(windows)]
+fn startup_entry(name: &str, program: Option<&Path>) -> Result<ExitCode, String> {
+    use tpt_shell_platform_windows::startup;
+    match program {
+        Some(program) => {
+            // The path is quoted, so spaces in it survive the shell's command line handling.
+            let command = format!("\"{}\"", program.display());
+            startup::enable(name, &command)?;
+            println!("{name} will start at sign-in: {command}");
+        }
+        None => {
+            startup::disable(name)?;
+            println!("{name} will no longer start at sign-in");
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(not(windows))]
+fn startup_entry(_name: &str, _program: Option<&Path>) -> Result<ExitCode, String> {
+    Err("sign-in entries are only supported on Windows for now".into())
 }
 
 /// A broken chain is a problem in the checked input (exit 1). Anything else is an I/O failure
@@ -687,5 +729,29 @@ mod template_tests {
             "a second run must not overwrite"
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod startup_tests {
+    use super::*;
+
+    #[test]
+    fn install_and_uninstall_a_sign_in_entry() {
+        let exe = std::env::current_exe().expect("current exe");
+        let name = format!("tpt-cli-test-{}", std::process::id());
+        assert!(run(&["install-service", &name, exe.to_str().unwrap()]).is_ok());
+        let command = tpt_shell_platform_windows::startup::command(&name).expect("entry");
+        assert!(
+            command.starts_with('"') && command.ends_with('"'),
+            "{command}"
+        );
+        assert!(run(&["uninstall-service", &name]).is_ok());
+        assert_eq!(tpt_shell_platform_windows::startup::command(&name), None);
+    }
+
+    #[test]
+    fn install_refuses_a_program_that_does_not_exist() {
+        assert!(run(&["install-service", "tpt-missing", r"C:\no\such\app.exe"]).is_err());
     }
 }
