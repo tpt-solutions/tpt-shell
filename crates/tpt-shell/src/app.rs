@@ -9,8 +9,10 @@
 //! user in a native dialog owned by the window; the default answer is No. On other platforms
 //! [`App::run`] and [`App::build`] return [`Error::Unsupported`].
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 #[cfg(windows)]
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -31,6 +33,8 @@ use tpt_shell_core::Result;
 #[cfg(windows)]
 use tpt_shell_ipc::Caller;
 use tpt_shell_ipc::{Router, Target, Value};
+#[cfg(windows)]
+use tpt_shell_kiosk::idle::IdleTimer;
 
 pub use tpt_shell_capabilities::Scope;
 pub use tpt_shell_ipc::CommandError;
@@ -115,6 +119,12 @@ pub struct App {
     /// The notification-area icon: tooltip, menu, and what a pick does.
     #[cfg_attr(not(windows), allow(dead_code))]
     tray: Option<(String, Vec<MenuItem>, TrayHandler)>,
+    /// What a signed kiosk config sets, if one was loaded.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    kiosk: Option<KioskSettings>,
+    /// Periodic saving of app state, if asked for.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    snapshot: Option<SnapshotPlan>,
     /// Where window positions are remembered between runs, if anywhere.
     #[cfg_attr(not(windows), allow(dead_code))]
     state_file: Option<PathBuf>,
@@ -123,8 +133,79 @@ pub struct App {
     deep_link: Option<String>,
 }
 
+/// What a kiosk config sets: the page the app returns to, and how long it may sit idle first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KioskSettings {
+    /// A path under the app origin, such as `index.html`.
+    pub home: String,
+    /// After this long with no page messages, the windows go back to `home`. `None` never resets.
+    pub idle: Option<Duration>,
+}
+
+/// Periodic saving of app state, and its restore at the next start.
+struct SnapshotPlan {
+    path: PathBuf,
+    every: Duration,
+    capture: Box<dyn FnMut() -> serde_json::Value>,
+    restore: Option<Box<dyn FnOnce(serde_json::Value)>>,
+}
+
 /// Receives the arguments of a later launch of a single-instance app.
 type ArgsHandler = Box<dyn FnMut(Vec<String>)>;
+
+/// Schedules the periodic save and restores the saved state, once, before the windows show.
+#[cfg(windows)]
+fn start_snapshots(
+    backend: &mut tpt_shell_platform_windows::backend::WindowsBackend,
+    plan: SnapshotPlan,
+) -> Result<(PathBuf, SnapshotCapture)> {
+    if let Some(restore) = plan.restore {
+        match tpt_shell_kiosk::state::restore::<serde_json::Value>(&plan.path) {
+            Ok(Some(value)) => restore(value),
+            Ok(None) => {}
+            Err(e) => eprintln!("tpt-shell: starting without the saved state: {e}"),
+        }
+    }
+    let capture: SnapshotCapture = Rc::new(RefCell::new(plan.capture));
+    let for_tick = capture.clone();
+    let path = plan.path.clone();
+    backend.every(plan.every, move || {
+        let value = (for_tick.borrow_mut())();
+        if let Err(e) = tpt_shell_kiosk::state::save(&path, &value) {
+            eprintln!("tpt-shell: cannot save the app state: {e}");
+        }
+    })?;
+    Ok((plan.path, capture))
+}
+
+/// Reads a kiosk config's settings. `home` must be a plain path under the app origin.
+fn kiosk_settings(config: &serde_json::Value) -> Result<KioskSettings> {
+    let home = match config.get("home") {
+        None => "index.html".to_string(),
+        Some(value) => value
+            .as_str()
+            .ok_or_else(|| Error::Backend("the kiosk home must be a path string".into()))?
+            .to_string(),
+    };
+    let plain = !home.is_empty()
+        && !home.starts_with('/')
+        && !home.contains("..")
+        && !home.contains(['\\', ':', '?', '#']);
+    if !plain {
+        return Err(Error::Backend(format!(
+            "{home:?} is not a plain path under the app"
+        )));
+    }
+    let idle = match config.get("idle_seconds") {
+        None => None,
+        Some(value) => Some(Duration::from_secs(
+            value.as_u64().filter(|s| *s > 0).ok_or_else(|| {
+                Error::Backend("idle_seconds must be a whole number above 0".into())
+            })?,
+        )),
+    };
+    Ok(KioskSettings { home, idle })
+}
 
 /// Reads the window placements saved by [`Running::save_window_state`]. Entries that do not parse
 /// are skipped, and a file that is missing or not JSON gives no placements.
@@ -196,6 +277,41 @@ impl App {
         let parsed = tpt_shell_manifest::parse(&text).map_err(|e| Error::Backend(e.to_string()))?;
         self.audit = Some((log.into(), Policy::from(&parsed.audit)));
         Ok(self)
+    }
+
+    /// Loads a kiosk config and checks its signature against `public_key` (hex). The config is a
+    /// JSON file with `home` (a path under the app origin, default `index.html`) and
+    /// `idle_seconds` (a whole number above 0, optional). Fails when the signature does not check
+    /// out, the file is not JSON, or a setting is out of range.
+    pub fn kiosk_config(
+        mut self,
+        config: &std::path::Path,
+        signature: &std::path::Path,
+        public_key: &str,
+    ) -> Result<Self> {
+        let value = tpt_shell_kiosk::config::load(config, signature, public_key)
+            .map_err(|e| Error::Backend(e.to_string()))?;
+        self.kiosk = Some(kiosk_settings(&value)?);
+        Ok(self)
+    }
+
+    /// Saves what `capture` returns to `path` every `every`, and at the end of the event loop.
+    /// At the next start, if the file is there, `restore` is called once with its value, before
+    /// the windows show. A snapshot that cannot be read is reported and skipped.
+    pub fn snapshot_state(
+        mut self,
+        path: impl Into<PathBuf>,
+        every: Duration,
+        capture: impl FnMut() -> serde_json::Value + 'static,
+        restore: impl FnOnce(serde_json::Value) + 'static,
+    ) -> Self {
+        self.snapshot = Some(SnapshotPlan {
+            path: path.into(),
+            every,
+            capture: Box::new(capture),
+            restore: Some(Box::new(restore)),
+        });
+        self
     }
 
     /// Writes every command call from the app's pages to an audit log at `path` (spec §10.3).
@@ -430,7 +546,14 @@ impl App {
 
         let assets = Rc::new(self.assets);
         let mut backend = WindowsBackend::new(&loader, &data_dir)?;
+        let kiosk = self.kiosk;
+        let snapshot = self.snapshot;
         let state_file = self.state_file;
+        // Any page message counts as activity for the idle reset.
+        let idle = kiosk
+            .as_ref()
+            .and_then(|k| k.idle)
+            .map(|limit| Rc::new(RefCell::new(IdleTimer::new(limit, Instant::now()))));
         let saved = state_file
             .as_deref()
             .map(load_window_state)
@@ -451,10 +574,14 @@ impl App {
             let router = router.clone();
             let engine = engine.clone();
             let audit = audit.clone();
+            let idle = idle.clone();
             backend.set_message_handler(
                 id,
                 Box::new(move |text| {
                     let mut prompt = NativeConsent::for_window(id);
+                    if let Some(idle) = &idle {
+                        idle.borrow_mut().touch(Instant::now());
+                    }
                     let started = Instant::now();
                     let reply = router.handle_authorized(
                         &caller,
@@ -484,12 +611,36 @@ impl App {
             backend.navigate(id, &format!("{APP_ORIGIN}/{}", window.page))?;
             windows.push((window.name, id));
         }
+        let window_ids: Vec<_> = windows.iter().map(|(_, id)| *id).collect();
+        if let (Some(settings), Some(idle)) = (&kiosk, idle) {
+            // Ticks a few times per idle period, so a reset happens soon after the limit.
+            let limit = settings.idle.unwrap_or_default();
+            let period = (limit / 4).clamp(Duration::from_millis(50), Duration::from_secs(1));
+            let home = format!("{APP_ORIGIN}/{}", settings.home);
+            backend.every(period, move || {
+                if idle.borrow().is_due(Instant::now()) {
+                    for id in &window_ids {
+                        let navigated =
+                            tpt_shell_platform_windows::backend::navigate_window(*id, &home);
+                        if let Err(e) = navigated {
+                            eprintln!("tpt-shell: cannot return to the home page: {e}");
+                        }
+                    }
+                    idle.borrow_mut().touch(Instant::now());
+                }
+            })?;
+        }
+        let snapshot_state = match snapshot {
+            Some(plan) => Some(start_snapshots(&mut backend, plan)?),
+            None => None,
+        };
         Ok(Running {
             backend,
             windows,
             _instance: instance,
             tray,
             state_file,
+            snapshot_state,
         })
     }
 }
@@ -558,7 +709,12 @@ pub struct Running {
     tray: Option<tpt_shell_platform_windows::tray::Tray>,
     /// Where window positions are saved when the event loop ends.
     state_file: Option<PathBuf>,
+    /// The state file and the capture, for the save at the end of the event loop.
+    snapshot_state: Option<(PathBuf, SnapshotCapture)>,
 }
+
+/// The capture function, shared by the periodic save and the save at exit.
+type SnapshotCapture = Rc<RefCell<Box<dyn FnMut() -> serde_json::Value>>>;
 
 /// How a launch relates to a single-instance app.
 #[cfg(windows)]
@@ -612,6 +768,12 @@ impl Running {
     /// Runs the event loop until the app quits.
     pub fn run(mut self) -> Result<()> {
         let result = self.backend.run_until_quit();
+        if let Some((path, capture)) = &self.snapshot_state {
+            let value = (capture.borrow_mut())();
+            if let Err(e) = tpt_shell_kiosk::state::save(path, &value) {
+                eprintln!("tpt-shell: cannot save the app state: {e}");
+            }
+        }
         if self.state_file.is_some() {
             if let Err(e) = self.save_window_state() {
                 eprintln!("tpt-shell: cannot save the window state: {e}");
@@ -680,6 +842,40 @@ mod tests {
         );
         assert_eq!(denied.outcome, Outcome::Err("CAP_DENIED".into()));
         assert_eq!(denied.capability.as_deref(), Some("fs.read"));
+    }
+
+    #[test]
+    fn a_signed_kiosk_config_sets_the_home_page_and_idle_limit() {
+        let dir = std::env::temp_dir().join(format!("tpt-app-kiosk-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let secret = [7u8; 32];
+        let public = tpt_shell_kiosk::config::public_key_hex(&secret);
+        let config = dir.join("kiosk.json");
+        let sig = dir.join("kiosk.json.sig");
+        let body = br#"{"home":"start.html","idle_seconds":90}"#;
+        std::fs::write(&config, body).expect("write config");
+        std::fs::write(&sig, tpt_shell_kiosk::config::sign(body, &secret)).expect("write sig");
+        let app = App::new()
+            .kiosk_config(&config, &sig, &public)
+            .expect("config");
+        assert_eq!(
+            app.kiosk,
+            Some(KioskSettings {
+                home: "start.html".into(),
+                idle: Some(Duration::from_secs(90)),
+            })
+        );
+
+        // An edited config no longer matches its signature.
+        std::fs::write(&config, br#"{"home":"x.html"}"#).expect("edit config");
+        assert!(App::new().kiosk_config(&config, &sig, &public).is_err());
+
+        // A home path that leaves the app is refused, even when it is signed.
+        let escape = br#"{"home":"../secret.html"}"#;
+        std::fs::write(&config, escape).expect("write escape");
+        std::fs::write(&sig, tpt_shell_kiosk::config::sign(escape, &secret)).expect("sign");
+        assert!(App::new().kiosk_config(&config, &sig, &public).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

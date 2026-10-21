@@ -17,6 +17,8 @@ pub use app::{App, CommandError, Scope, Window};
 pub use app::{MenuItem, TRAY_ACTIVATE};
 pub use tpt_shell_capabilities::{ConsentPrompt, Engine, Grant};
 pub use tpt_shell_core::{Error, Result};
+/// Device support: the hub that opens devices under a grant, and the virtual devices.
+pub use tpt_shell_devices as devices;
 pub use tpt_shell_ipc::{Caller, Limits, Router, Target, Value};
 pub use tpt_shell_macros::{command, commands, embed_dir, register_commands};
 

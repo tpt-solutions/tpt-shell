@@ -380,3 +380,211 @@ fn a_window_opens_where_it_was_saved_and_saves_where_it_is() {
         "{saved}"
     );
 }
+
+#[test]
+fn an_idle_kiosk_returns_to_its_home_page() {
+    let Some((loader, _serial)) = runtime_test_loader() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("tpt-app-idle-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let secret = [7u8; 32];
+    let public = tpt_shell_kiosk::config::public_key_hex(&secret);
+    let body = br#"{"home":"index.html","idle_seconds":1}"#;
+    let config = dir.join("kiosk.json");
+    let sig = dir.join("kiosk.json.sig");
+    std::fs::write(&config, body).expect("write config");
+    std::fs::write(&sig, tpt_shell_kiosk::config::sign(body, &secret)).expect("write sig");
+
+    // The window starts on another page, which sends nothing, so the kiosk goes home.
+    let running = App::new()
+        .name("app-idle-test")
+        .loader(loader)
+        .data_dir(&dir)
+        .kiosk_config(&config, &sig, &public)
+        .expect("kiosk config")
+        .asset(
+            "index.html",
+            "text/html",
+            "<!doctype html><title>home</title>",
+        )
+        .asset(
+            "other.html",
+            "text/html",
+            "<!doctype html><title>other</title>",
+        )
+        .window(
+            Window::new("main")
+                .title("app-idle-test")
+                .page("other.html"),
+        )
+        .build()
+        .expect("the app should start");
+    let id = running.window("main").expect("the main window");
+    let mut title = String::new();
+    let home = pump_until(Duration::from_secs(30), || {
+        title = running.backend().document_title(id).unwrap_or_default();
+        title == "home"
+    });
+    drop(running);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(home, "the kiosk did not return home; title was {title:?}");
+}
+
+#[test]
+fn app_state_is_saved_while_running_and_restored_at_the_next_start() {
+    let Some((loader, _serial)) = runtime_test_loader() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("tpt-app-snap-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    let state = dir.join("state.json");
+    let _ = std::fs::remove_file(&state);
+
+    // First run: the state is saved on a timer, and the file appears without any page.
+    let first = App::new()
+        .name("app-snap-test")
+        .loader(loader.clone())
+        .data_dir(&dir)
+        .snapshot_state(
+            &state,
+            Duration::from_millis(100),
+            || serde_json::json!({ "count": 42 }),
+            |_| panic!("nothing is saved yet, so nothing is restored"),
+        )
+        .asset("index.html", "text/html", "<!doctype html><title>x</title>")
+        .window(Window::new("main").title("app-snap-test"))
+        .build()
+        .expect("first start");
+    let saved = pump_until(Duration::from_secs(30), || state.exists());
+    drop(first);
+    assert!(saved, "the state was never saved");
+
+    // Second run: the saved value is handed to the restore callback before the windows show.
+    let restored: std::rc::Rc<std::cell::RefCell<Option<serde_json::Value>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(None));
+    let slot = restored.clone();
+    let second = App::new()
+        .name("app-snap-test")
+        .loader(loader)
+        .data_dir(&dir)
+        .snapshot_state(
+            &state,
+            Duration::from_secs(60),
+            || serde_json::json!({ "count": 0 }),
+            move |value| *slot.borrow_mut() = Some(value),
+        )
+        .asset("index.html", "text/html", "<!doctype html><title>x</title>")
+        .window(Window::new("main").title("app-snap-test"))
+        .build()
+        .expect("second start");
+    drop(second);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        restored.borrow().clone(),
+        Some(serde_json::json!({ "count": 42 }))
+    );
+}
+
+#[test]
+fn a_page_prints_through_a_granted_device_and_the_use_is_audited() {
+    use std::sync::{Arc, Mutex};
+    use tpt_shell::devices::escpos::{Align, Receipt};
+    use tpt_shell::devices::hub::{DeviceHub, EventKind};
+    use tpt_shell::devices::id::{DeviceId, DeviceScope};
+    use tpt_shell::devices::virtual_devices::VirtualPrinter;
+
+    let Some((loader, _serial)) = runtime_test_loader() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("tpt-app-device-{}", std::process::id()));
+    let printer_id: DeviceId = "usb:0416:5011".parse().expect("id");
+    let scope = DeviceScope::Usb {
+        vendor: Some(0x0416),
+        product: Some(0x5011),
+    };
+    let (printer, output) = VirtualPrinter::new(printer_id.clone());
+    let kinds: Arc<Mutex<Vec<EventKind>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = kinds.clone();
+    let hub = std::rc::Rc::new(std::cell::RefCell::new(DeviceHub::new(
+        vec![Box::new(printer)],
+        move |event| sink.lock().expect("kinds").push(event.kind),
+    )));
+    let for_command = hub.clone();
+
+    let running = App::new()
+        .name("app-device-test")
+        .loader(loader)
+        .data_dir(&dir)
+        .grant(Grant {
+            capability: "device.print".into(),
+            window: "main".into(),
+            origin: "https://tpt-app.localhost".into(),
+            scope: Scope::Devices(vec!["usb:0416:5011".into()]),
+            consent: false,
+        })
+        .command(
+            "print",
+            "device.print",
+            |args| match args["device"].as_str() {
+                Some(device) => Target::Device(device.to_string()),
+                None => Target::None,
+            },
+            move |_args| -> Result<Value, CommandError> {
+                let mut receipt = Receipt::new();
+                receipt
+                    .align(Align::Center)
+                    .bold(true)
+                    .line("SHOP")
+                    .expect("ascii")
+                    .bold(false)
+                    .align(Align::Left)
+                    .line("Tea 2.50")
+                    .expect("ascii")
+                    .cut(false);
+                let mut open = for_command
+                    .borrow_mut()
+                    .open(&printer_id, &scope)
+                    .map_err(|e| CommandError::new("DEVICE_OPEN", &e.to_string()))?;
+                open.write(&receipt.into_bytes())
+                    .map_err(|e| CommandError::new("DEVICE_WRITE", &e.to_string()))?;
+                Ok(Value::String("printed".into()))
+            },
+        )
+        .asset(
+            "index.html",
+            "text/html",
+            r#"<!doctype html><title>start</title><script src="app.js"></script>"#,
+        )
+        .asset(
+            "app.js",
+            "text/javascript",
+            r#"window.tpt.invoke('print', { device: 'usb:0416:5011' })
+                .then(function (r) { document.title = 'done ' + r; })
+                .catch(function (e) { document.title = 'error ' + JSON.stringify(e); });"#,
+        )
+        .window(Window::new("main").title("app-device-test"))
+        .build()
+        .expect("the app should start");
+    let id = running.window("main").expect("the main window");
+    let mut title = String::new();
+    let answered = pump_until(Duration::from_secs(30), || {
+        title = running.backend().document_title(id).unwrap_or_default();
+        title.starts_with("done") || title.starts_with("error")
+    });
+    drop(running);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(answered, "the page got no answer; title was {title:?}");
+    assert_eq!(title, "done printed");
+    let preview = output.preview();
+    assert!(
+        preview.contains("*SHOP*") && preview.contains("Tea 2.50"),
+        "{preview}"
+    );
+    let audited = kinds.lock().expect("kinds").clone();
+    assert_eq!(
+        audited,
+        vec![EventKind::Open, EventKind::Write, EventKind::Close]
+    );
+}
