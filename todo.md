@@ -179,7 +179,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ### Contract and validation (tpt-shell-ipc)
 - [ ] Schema model: primitives with bounds, strings with max length/pattern, enums, structs, Option, Vec, string-key maps (all except regex patterns: strings use an allowed-character set instead)
 - [ ] Scoped types: `ScopedPath`, `DeviceId`
-- [ ] Validator: unknown fields rejected, bounds checked, scope checked before handler runs (types, bounds, unknown fields and `register_validated` are done; the scope check is not wired to the capability engine yet)
+- [x] Validator: unknown fields rejected, bounds checked, scope checked before handler runs (`Router::register_guarded` names a capability and a target; `Router::handle_authorized` checks the window's grant before the handler, and the unauthorized entry points refuse guarded commands. Platform transports do not call `handle_authorized` yet)
 - [x] `CmdError` with stable code, message, details (`CommandError::with_details` sends `error.details`; invalid args report the offending `path`)
 - [ ] Blob channel `app://__tpt/blob/<id>` (store, quota, id check and route parsing are in `tpt-shell-ipc::blob`; the platform does not serve the route yet)
 - [x] Stream channel with credit-based backpressure (`tpt-shell-ipc::stream`; not yet carried by a platform transport)
