@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+/* Copyright (c) 2026 TPT Solutions */
+:root { color-scheme: light dark; }
+body { margin: 0; font-family: var(--tpt-font, system-ui, sans-serif); background: var(--tpt-bg, Canvas); color: var(--tpt-fg, CanvasText); }
+main { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 16px; }
+button { min-height: 44px; padding: 0 16px; margin: 4px; font: inherit; border-radius: 6px; border: 1px solid currentColor; background: transparent; color: inherit; }
+button:disabled { opacity: 0.5; }
+#products button { width: 100%; text-align: left; }
+#cart { list-style: none; padding: 0; }
+#cart li { display: flex; justify-content: space-between; padding: 4px 0; }
+.total { font-size: 1.5rem; font-weight: 600; display: flex; justify-content: space-between; }
+@media (max-width: 640px) { main { grid-template-columns: 1fr; } }

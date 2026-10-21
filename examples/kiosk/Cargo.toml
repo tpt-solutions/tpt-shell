@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+
+[package]
+name = "kiosk"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+
+[dependencies]
+tpt-shell = { path = "../../crates/tpt-shell" }

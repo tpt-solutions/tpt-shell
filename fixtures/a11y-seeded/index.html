@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accessibility seeded violations</title>
+<!--
+  A known-bad page for the accessibility audit (spec 10.6). Every element marked seed-* carries
+  one deliberate violation listed in expected.json. The element marked control-ok is correct
+  and must not be reported. Do not fix the seeded problems: the audit test depends on them.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 16px; background: #ffffff; color: #111111; }
+  .muted { color: #999999; font-size: 16px; }
+  .pulse { animation: pulse 600ms linear infinite; }
+  @keyframes pulse { from { opacity: 0.2; } to { opacity: 1; } }
+  .tiny { width: 16px; height: 16px; padding: 0; }
+  .ok-button { min-width: 44px; min-height: 44px; font-size: 16px; }
+  .row { display: flex; gap: 12px; margin: 12px 0; }
+  dialog { padding: 16px; }
+</style>
+</head>
+<body>
+  <h1>Settings</h1>
+
+  <p class="muted" id="seed-contrast">Last saved two minutes ago.</p>
+
+  <div class="row">
+    <button id="control-ok" class="ok-button">Save</button>
+    <button id="seed-name-role" class="tiny"></button>
+  </div>
+
+  <div class="row">
+    <button id="seed-target-size" class="tiny" aria-label="Help">?</button>
+    <a id="seed-focus-late" href="#later" tabindex="2">Skip ahead</a>
+  </div>
+
+  <p class="pulse" id="seed-reduced-motion">Syncing your changes</p>
+
+  <form>
+    <label for="labelled">Email</label>
+    <input id="labelled" type="email">
+    <input id="seed-form-label" type="text">
+  </form>
+
+  <h2 id="later">Trap</h2>
+  <button id="seed-trap-open" type="button">Open the dialog</button>
+  <dialog id="seed-trap-dialog" aria-labelledby="trap-title">
+    <h3 id="trap-title">Confirm</h3>
+    <button type="button" id="trap-a">First</button>
+    <button type="button" id="trap-b">Second</button>
+  </dialog>
+
+  <script>
+    // Keeps focus inside the dialog and never lets Tab leave it. This is the keyboard trap.
+    const dialog = document.getElementById('seed-trap-dialog');
+    document.getElementById('seed-trap-open').addEventListener('click', () => dialog.showModal());
+    dialog.addEventListener('keydown', (event) => {
+      if (event.key !== 'Tab') return;
+      event.preventDefault();
+      const first = document.getElementById('trap-a');
+      const second = document.getElementById('trap-b');
+      (document.activeElement === first ? second : first).focus();
+    });
+  </script>
+</body>
+</html>

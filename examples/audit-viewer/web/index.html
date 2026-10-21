@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
+<!-- Copyright (c) 2026 TPT Solutions -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audit viewer</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; margin: 16px; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+    td, th { border-bottom: 1px solid #8884; padding: 4px 6px; text-align: left; vertical-align: top; }
+    code { word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>Audit viewer</h1>
+  <p id="chain" role="status">Checking the chain...</p>
+  <table>
+    <thead><tr><th>Seq</th><th>Command</th><th>Outcome</th><th>Entry</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

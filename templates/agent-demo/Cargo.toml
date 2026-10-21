@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+
+[package]
+name = "my-agent"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+
+[dependencies]
+# The agent surface is not re-exported by the tpt-shell facade yet, so this template uses the
+# agent and IPC crates directly. Change the paths to where your checkout is.
+tpt-shell-agent = { path = "../../crates/tpt-shell-agent" }
+tpt-shell-ipc = { path = "../../crates/tpt-shell-ipc" }
+serde_json = "1"

@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
+<!-- Copyright (c) 2026 TPT Solutions -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My App</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>My App</h1>
+    <p id="status">Starting...</p>
+    <form id="task-form">
+      <input id="task-text" type="text" maxlength="120" placeholder="Add a task" required>
+      <button type="submit">Add</button>
+    </form>
+    <ul id="tasks"></ul>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

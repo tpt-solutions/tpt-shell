@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+
+[app]
+name = "my-audit-app"
+version = "0.1.0"
+
+[[windows]]
+name = "main"
+title = "Notes (audited)"
+width = 800
+height = 560
+
+[capabilities]
+grant = []
+
+[audit]
+# Keep only the hash of each call's parameters, and redact these names if they are ever stored.
+store_params = false
+redact = ["password", "token", "secret"]

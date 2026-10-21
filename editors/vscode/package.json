@@ -1,0 +1,239 @@
+{
+  "name": "tpt-shell-vscode",
+  "displayName": "tpt-shell",
+  "description": "Manifest completion and checks, contract explorer, run configurations, audit log viewer and error code hovers for tpt-shell apps.",
+  "version": "0.1.0",
+  "publisher": "tpt-solutions",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tpt-solutions/tpt-shell"
+  },
+  "private": true,
+  "engines": {
+    "vscode": "^1.138.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Other"
+  ],
+  "main": "./out/src/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/tpt-shell.toml",
+    "onLanguage:toml",
+    "onLanguage:rust",
+    "onLanguage:json",
+    "onLanguage:log",
+    "onCommand:tpt-shell.openContract",
+    "onCommand:tpt-shell.openAuditLog",
+    "onView:tptShell.contract"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "tpt-shell",
+      "properties": {
+        "tpt-shell.cliPath": {
+          "type": "string",
+          "default": "tpt-shell",
+          "description": "The tpt-shell command. Used for run configurations and audit verification. A bare name is looked up on PATH."
+        },
+        "tpt-shell.contractFile": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a contract.json produced by the app. When empty, the first contract.json in the workspace is used."
+        },
+        "tpt-shell.auditPublicKey": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the public key file passed to 'tpt-shell audit verify --key'. When empty, only the hash chain is checked."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "tpt-shell.openContract",
+        "title": "Open contract file",
+        "category": "tpt-shell"
+      },
+      {
+        "command": "tpt-shell.refreshContract",
+        "title": "Refresh contract",
+        "category": "tpt-shell",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "tpt-shell.copyCallJson",
+        "title": "Copy call JSON",
+        "category": "tpt-shell",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "tpt-shell.openAuditLog",
+        "title": "Open audit log",
+        "category": "tpt-shell"
+      },
+      {
+        "command": "tpt-shell.runDev",
+        "title": "Run dev preview",
+        "category": "tpt-shell"
+      },
+      {
+        "command": "tpt-shell.runBuild",
+        "title": "Build release",
+        "category": "tpt-shell"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "tptShell",
+          "title": "tpt-shell",
+          "icon": "media/tpt-shell.svg"
+        }
+      ]
+    },
+    "views": {
+      "tptShell": [
+        {
+          "id": "tptShell.contract",
+          "name": "Contract",
+          "contextualTitle": "tpt-shell contract"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "tpt-shell.refreshContract",
+          "when": "view == tptShell.contract",
+          "group": "navigation"
+        },
+        {
+          "command": "tpt-shell.openContract",
+          "when": "view == tptShell.contract",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "tpt-shell.copyCallJson",
+          "when": "view == tptShell.contract && viewItem == command",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "tpt-shell.copyCallJson",
+          "when": "false"
+        }
+      ]
+    },
+    "taskDefinitions": [
+      {
+        "type": "tpt-shell",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "dev",
+              "build"
+            ],
+            "description": "The tpt-shell subcommand to run."
+          },
+          "directory": {
+            "type": "string",
+            "description": "The app directory. Defaults to the workspace folder."
+          },
+          "port": {
+            "type": "number",
+            "description": "Port for 'dev'. Defaults to 8080."
+          }
+        }
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "tpt-shell",
+        "label": "tpt-shell run",
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "command"
+            ],
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "dev",
+                  "build"
+                ],
+                "description": "'dev' serves the app for preview. 'build' makes a release build."
+              },
+              "directory": {
+                "type": "string",
+                "description": "The app directory. Defaults to the workspace folder."
+              },
+              "port": {
+                "type": "number",
+                "description": "Port for 'dev'. Defaults to 8080."
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "tpt-shell",
+            "request": "launch",
+            "name": "tpt-shell: dev preview",
+            "command": "dev"
+          },
+          {
+            "type": "tpt-shell",
+            "request": "launch",
+            "name": "tpt-shell: release build",
+            "command": "build"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "tpt-shell: dev preview",
+            "description": "Serve the app on 127.0.0.1 and reload on change",
+            "body": {
+              "type": "tpt-shell",
+              "request": "launch",
+              "name": "tpt-shell: dev preview",
+              "command": "dev",
+              "port": 8080
+            }
+          },
+          {
+            "label": "tpt-shell: release build",
+            "description": "Run tpt-shell build",
+            "body": {
+              "type": "tpt-shell",
+              "request": "launch",
+              "name": "tpt-shell: release build",
+              "command": "build"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "sync": "node scripts/sync-data.js",
+    "compile": "npm run sync && tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test \"out/test/*.test.js\"",
+    "check": "npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "~24.19.2",
+    "@types/vscode": "~1.138.0",
+    "typescript": "~6.0.3"
+  }
+}

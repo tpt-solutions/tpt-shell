@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT OR Apache-2.0 -->
+<!-- Copyright (c) 2026 TPT Solutions -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notes (audited)</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+  </style>
+</head>
+<body>
+  <h1>Notes</h1>
+  <p>Every note you add is written to the audit log.</p>
+  <form id="add">
+    <input id="text" type="text" maxlength="200" required>
+    <button type="submit">Add note</button>
+  </form>
+  <ol id="notes"></ol>
+  <p id="status" role="status"></p>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

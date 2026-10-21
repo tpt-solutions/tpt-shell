@@ -1,0 +1,12 @@
+[app]
+name = "my-app"
+version = "0.1.0"
+
+[[windows]]
+name = "main"
+title = "My App"
+width = 960
+height = 640
+
+[capabilities]
+grant = []

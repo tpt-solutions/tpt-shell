@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+/* Copyright (c) 2026 TPT Solutions */
+:root { color-scheme: light dark; --gap: 0.75rem; }
+body { font-family: var(--tpt-font, system-ui, sans-serif); margin: 0; background: var(--tpt-bg, Canvas); color: var(--tpt-fg, CanvasText); }
+main { max-width: 40rem; margin: 0 auto; padding: 16px; }
+form { display: flex; gap: var(--gap); margin-block: var(--gap); }
+input { flex: 1; min-width: 0; padding: 0.5rem; font: inherit; }
+button { padding: 0.5rem 1rem; font: inherit; background: var(--tpt-accent, #2563eb); color: white; border: 0; border-radius: 4px; }
+li { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); }

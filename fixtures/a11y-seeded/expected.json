@@ -1,0 +1,15 @@
+{
+  "format": "tpt-shell-a11y-expected",
+  "version": 1,
+  "page": "index.html",
+  "violations": [
+    { "id": "seed-contrast", "rule": "contrast", "note": "#999 text on white is about 2.8:1" },
+    { "id": "seed-name-role", "rule": "name-role", "note": "icon button with no name" },
+    { "id": "seed-target-size", "rule": "target-size", "note": "16 x 16 px target" },
+    { "id": "seed-focus-late", "rule": "focus-order", "note": "positive tabindex" },
+    { "id": "seed-reduced-motion", "rule": "reduced-motion", "note": "600 ms pulse ignores prefers-reduced-motion" },
+    { "id": "seed-form-label", "rule": "form-label", "note": "text input with no label" },
+    { "id": "seed-trap-dialog", "rule": "keyboard-trap", "note": "Tab never leaves the dialog" }
+  ],
+  "clean": ["control-ok", "labelled"]
+}
