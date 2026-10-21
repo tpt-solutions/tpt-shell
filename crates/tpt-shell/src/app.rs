@@ -11,7 +11,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 #[cfg(windows)]
@@ -35,6 +35,8 @@ use tpt_shell_ipc::Caller;
 use tpt_shell_ipc::{Router, Target, Value};
 #[cfg(windows)]
 use tpt_shell_kiosk::idle::IdleTimer;
+#[cfg(windows)]
+use tpt_shell_platform_windows::webview2::default_user_data_dir;
 
 pub use tpt_shell_capabilities::Scope;
 pub use tpt_shell_ipc::CommandError;
@@ -125,6 +127,9 @@ pub struct App {
     /// Periodic saving of app state, if asked for.
     #[cfg_attr(not(windows), allow(dead_code))]
     snapshot: Option<SnapshotPlan>,
+    /// Which profile the windows use, if not the default folder.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    profile: Option<tpt_shell_profiles::Kind>,
     /// Where window positions are remembered between runs, if anywhere.
     #[cfg_attr(not(windows), allow(dead_code))]
     state_file: Option<PathBuf>,
@@ -176,6 +181,53 @@ fn start_snapshots(
         }
     })?;
     Ok((plan.path, capture))
+}
+
+/// The folder the windows keep their data in, and the ephemeral session guard when there is one.
+/// An explicit data folder wins, then the profile, then the app's default folder.
+#[cfg(windows)]
+fn resolve_data_dir(
+    data_dir: Option<&PathBuf>,
+    profile: Option<&tpt_shell_profiles::Kind>,
+    name: &str,
+) -> Result<(PathBuf, Option<tpt_shell_profiles::Ephemeral>)> {
+    if let Some(dir) = data_dir {
+        return Ok((dir.clone(), None));
+    }
+    let local = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::Backend("LOCALAPPDATA is not set".into()))?;
+    match profile {
+        None => Ok((
+            default_user_data_dir(&local, name).map_err(Error::Backend)?,
+            None,
+        )),
+        Some(kind) => profile_data_dir(&local, name, kind),
+    }
+}
+
+/// The data folder for a profile under `local` (the user's local app data), and the guard for an
+/// ephemeral session. Named profiles live under `tpt-shell\<app>\profiles`.
+fn profile_data_dir(
+    local: &Path,
+    app: &str,
+    kind: &tpt_shell_profiles::Kind,
+) -> Result<(PathBuf, Option<tpt_shell_profiles::Ephemeral>)> {
+    use tpt_shell_profiles::{profile_dir, Ephemeral, Kind};
+    match kind {
+        Kind::Ephemeral => {
+            let session = Ephemeral::create(&std::env::temp_dir())
+                .map_err(|e| Error::Backend(format!("cannot create the session folder: {e}")))?;
+            Ok((session.path().to_path_buf(), Some(session)))
+        }
+        Kind::Named(_) | Kind::Default => {
+            let base = local.join("tpt-shell").join(app).join("profiles");
+            let dir = profile_dir(&base, kind).map_err(|e| Error::Backend(e.to_string()))?;
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| Error::Backend(format!("cannot create {}: {e}", dir.display())))?;
+            Ok((dir, None))
+        }
+    }
 }
 
 /// Reads a kiosk config's settings. `home` must be a plain path under the app origin.
@@ -311,6 +363,14 @@ impl App {
             capture: Box::new(capture),
             restore: Some(Box::new(restore)),
         });
+        self
+    }
+
+    /// Chooses the profile the windows use (spec §10.7). `Named` keeps data until it is deleted.
+    /// `Ephemeral` uses a new folder that is wiped when the app stops. An explicit
+    /// [`App::data_dir`] wins over the profile.
+    pub fn profile(mut self, kind: tpt_shell_profiles::Kind) -> Self {
+        self.profile = Some(kind);
         self
     }
 
@@ -491,20 +551,13 @@ impl App {
         use tpt_shell_ipc::{Caller, Limits};
         use tpt_shell_platform_windows::backend::WindowsBackend;
         use tpt_shell_platform_windows::consent::NativeConsent;
-        use tpt_shell_platform_windows::webview2::{default_user_data_dir, APP_ORIGIN};
+        use tpt_shell_platform_windows::webview2::APP_ORIGIN;
 
         let loader = self.loader.ok_or_else(|| {
             Error::Backend("App needs a WebView2 loader path (App::loader)".into())
         })?;
-        let data_dir = match self.data_dir {
-            Some(dir) => dir,
-            None => {
-                let local = std::env::var_os("LOCALAPPDATA")
-                    .map(PathBuf::from)
-                    .ok_or_else(|| Error::Backend("LOCALAPPDATA is not set".into()))?;
-                default_user_data_dir(&local, &self.name).map_err(Error::Backend)?
-            }
-        };
+        let (data_dir, ephemeral) =
+            resolve_data_dir(self.data_dir.as_ref(), self.profile.as_ref(), &self.name)?;
 
         if let Some(scheme) = &self.deep_link {
             let exe = std::env::current_exe()
@@ -641,6 +694,7 @@ impl App {
             tray,
             state_file,
             snapshot_state,
+            _ephemeral: ephemeral,
         })
     }
 }
@@ -709,6 +763,8 @@ pub struct Running {
     tray: Option<tpt_shell_platform_windows::tray::Tray>,
     /// Where window positions are saved when the event loop ends.
     state_file: Option<PathBuf>,
+    /// The session folder of an ephemeral profile. Dropping the app wipes it.
+    _ephemeral: Option<tpt_shell_profiles::Ephemeral>,
     /// The state file and the capture, for the save at the end of the event loop.
     snapshot_state: Option<(PathBuf, SnapshotCapture)>,
 }
@@ -876,6 +932,31 @@ mod tests {
         std::fs::write(&sig, tpt_shell_kiosk::config::sign(escape, &secret)).expect("sign");
         assert!(App::new().kiosk_config(&config, &sig, &public).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn profiles_choose_their_folders_and_an_ephemeral_session_is_wiped_when_dropped() {
+        use tpt_shell_profiles::Kind;
+        let local = std::env::temp_dir().join(format!("tpt-app-profile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&local);
+        std::fs::create_dir_all(&local).expect("local");
+
+        let (named, guard) =
+            profile_data_dir(&local, "demo", &Kind::Named("work".into())).expect("named");
+        assert!(guard.is_none(), "a named profile is not temporary");
+        assert!(
+            named.is_dir() && named.starts_with(&local),
+            "{}",
+            named.display()
+        );
+
+        let (session, guard) = profile_data_dir(&local, "demo", &Kind::Ephemeral).expect("session");
+        let guard = guard.expect("an ephemeral session has a guard");
+        std::fs::write(session.join("cookie.db"), b"data").expect("write into the session");
+        assert!(session.is_dir());
+        drop(guard);
+        assert!(!session.exists(), "the session folder was not wiped");
+        let _ = std::fs::remove_dir_all(&local);
     }
 
     #[test]

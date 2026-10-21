@@ -627,6 +627,7 @@ dependencies = [
  "tpt-shell-macros",
  "tpt-shell-manifest",
  "tpt-shell-platform-windows",
+ "tpt-shell-profiles",
 ]
 
 [[package]]

@@ -21,6 +21,8 @@ pub use tpt_shell_core::{Error, Result};
 pub use tpt_shell_devices as devices;
 pub use tpt_shell_ipc::{Caller, Limits, Router, Target, Value};
 pub use tpt_shell_macros::{command, commands, embed_dir, register_commands};
+/// Where a window keeps its data: the default, a named profile, or an ephemeral session.
+pub use tpt_shell_profiles::Kind as ProfileKind;
 
 /// Paths the macros expand to. Not part of the API; app code uses the names above.
 #[doc(hidden)]
