@@ -618,6 +618,7 @@ name = "tpt-shell"
 version = "0.0.0"
 dependencies = [
  "serde_json",
+ "tpt-shell-audit",
  "tpt-shell-capabilities",
  "tpt-shell-core",
  "tpt-shell-ipc",
@@ -640,6 +641,7 @@ dependencies = [
  "ed25519-dalek",
  "serde_json",
  "sha2",
+ "tpt-shell-manifest",
 ]
 
 [[package]]
@@ -685,6 +687,15 @@ dependencies = [
  "serde",
  "serde_json",
  "tpt-shell-capabilities",
+]
+
+[[package]]
+name = "tpt-shell-kiosk"
+version = "0.0.0"
+dependencies = [
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -749,6 +760,9 @@ dependencies = [
 [[package]]
 name = "tpt-shell-supervisor"
 version = "0.0.0"
+dependencies = [
+ "tpt-shell-platform-windows",
+]
 
 [[package]]
 name = "typenum"

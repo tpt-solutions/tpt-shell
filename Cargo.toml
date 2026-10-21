@@ -11,6 +11,7 @@ members = [
     "crates/tpt-shell-devices",
     "crates/tpt-shell-errors",
     "crates/tpt-shell-ipc",
+    "crates/tpt-shell-kiosk",
     "crates/tpt-shell-macros",
     "crates/tpt-shell-manifest",
     "crates/tpt-shell-platform-linux",
