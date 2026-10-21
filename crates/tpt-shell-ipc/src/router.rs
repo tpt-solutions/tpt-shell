@@ -181,6 +181,12 @@ impl Router {
         encode(&value)
     }
 
+    /// The capability a command is registered behind, or `None` for an unguarded or unknown
+    /// command.
+    pub fn capability_of(&self, cmd: &str) -> Option<&str> {
+        self.guards.get(cmd).map(|guard| guard.capability.as_str())
+    }
+
     /// Like [`Router::handle`], but the message comes from `caller` and every command is
     /// capability-checked: the grant for `caller` must allow the call before its handler runs.
     /// A `consent` grant asks `prompt` the first time and then remembers the answer.
@@ -303,6 +309,16 @@ pub fn encode(value: &Value) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn capability_of_names_the_grant_a_guarded_command_needs() {
+        let mut router = Router::new();
+        router.register_guarded("read", "fs.read", |_| Target::None, |_| Ok(json!(null)));
+        router.register("ping", |_| Ok(json!("pong")));
+        assert_eq!(router.capability_of("read"), Some("fs.read"));
+        assert_eq!(router.capability_of("ping"), None);
+        assert_eq!(router.capability_of("missing"), None);
+    }
 
     fn router() -> Router {
         let mut r = Router::new();
