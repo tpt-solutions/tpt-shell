@@ -16,6 +16,7 @@ pub use serde_json::Value;
 
 pub mod blob;
 pub mod contract;
+pub mod contract_diff;
 pub mod jobs;
 pub mod rate_limit;
 pub mod reflect;

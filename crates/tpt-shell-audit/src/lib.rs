@@ -15,6 +15,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde_json::{json, Map, Value};
@@ -101,10 +102,16 @@ impl From<io::Error> for AuditError {
 /// Command name of checkpoint records. Their params hold `upto`, `hash` and `signature`.
 pub const CHECKPOINT_COMMAND: &str = "tpt.checkpoint";
 
-/// Signs a checkpoint every `every` records. The key signs the hash of the record it names.
+/// Signs checkpoints. The key signs the hash of the record a checkpoint names.
+///
+/// A checkpoint is written after an entry when `every` entries have been written since the
+/// last count-based interval, or when `every_secs` seconds have passed since the last
+/// checkpoint. The time check runs only when an entry is written, so a quiet log gets its
+/// next checkpoint with the next entry. Zero turns an interval off.
 pub struct Signing {
     pub key: SigningKey,
     pub every: u64,
+    pub every_secs: u64,
 }
 
 /// Writer for one audit file. Opening an existing file verifies it first.
@@ -116,6 +123,8 @@ pub struct AuditLog {
     next_seq: u64,
     /// Entries written, not counting checkpoints. Drives the checkpoint interval.
     entries: u64,
+    /// When the last checkpoint was written, or when the file was opened. Drives the time interval.
+    last_checkpoint: Instant,
     prev: String,
 }
 
@@ -160,6 +169,7 @@ impl AuditLog {
             signing,
             next_seq,
             entries,
+            last_checkpoint: Instant::now(),
             prev,
         })
     }
@@ -184,11 +194,17 @@ impl AuditLog {
         self.prev = self.write_record(record)?;
         self.next_seq += 1;
         self.entries += 1;
-        // The interval counts entries, not checkpoints, so a checkpoint never triggers another.
-        if let Some(every) = self.signing.as_ref().map(|s| s.every).filter(|e| *e > 0) {
-            if self.entries.is_multiple_of(every) {
-                self.append_checkpoint(seq, entry)?;
+        // The count interval counts entries, not checkpoints, so a checkpoint never triggers another.
+        let due = match &self.signing {
+            Some(s) => {
+                (s.every > 0 && self.entries.is_multiple_of(s.every))
+                    || (s.every_secs > 0
+                        && self.last_checkpoint.elapsed() >= Duration::from_secs(s.every_secs))
             }
+            None => false,
+        };
+        if due {
+            self.append_checkpoint(seq, entry)?;
         }
         Ok(seq)
     }
@@ -220,6 +236,7 @@ impl AuditLog {
         let record = build_record(seq, &self.prev, &checkpoint, &keep);
         self.prev = self.write_record(record)?;
         self.next_seq += 1;
+        self.last_checkpoint = Instant::now();
         Ok(())
     }
 
@@ -810,7 +827,11 @@ mod signed_tests {
     }
 
     fn write_signed(path: &Path, records: u64, every: u64) {
-        let signing = Signing { key: key(1), every };
+        let signing = Signing {
+            key: key(1),
+            every,
+            every_secs: 0,
+        };
         let mut log = AuditLog::open_signed(path, Policy::default(), signing).unwrap();
         for i in 0..records {
             log.append(&entry(i)).unwrap();
@@ -843,6 +864,36 @@ mod signed_tests {
     }
 
     #[test]
+    fn checkpoints_are_written_when_the_time_interval_passes() {
+        let path = temp_path("every-secs.jsonl");
+        let _ = std::fs::remove_file(&path);
+        let signing = Signing {
+            key: key(1),
+            every: 0,
+            every_secs: 1,
+        };
+        let mut log = AuditLog::open_signed(&path, Policy::default(), signing).unwrap();
+        for i in 0..3 {
+            log.append(&entry(i)).unwrap();
+        }
+        assert_eq!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .matches(CHECKPOINT_COMMAND)
+                .count(),
+            0,
+            "no checkpoint before the interval has passed"
+        );
+        std::thread::sleep(Duration::from_millis(1100));
+        log.append(&entry(3)).unwrap();
+        log.append(&entry(4)).unwrap();
+        drop(log);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text.matches(CHECKPOINT_COMMAND).count(), 1);
+        assert!(verify_file_with_key(&path, &key(1).verifying_key()).is_ok());
+    }
+
+    #[test]
     fn reopening_a_signed_log_continues_it() {
         let path = temp_path("reopen-signed.jsonl");
         write_signed(&path, 3, 2);
@@ -858,6 +909,7 @@ mod signed_tests {
         let wrong = Signing {
             key: key(2),
             every: 2,
+            every_secs: 0,
         };
         assert!(AuditLog::open_signed(&path, Policy::default(), wrong).is_err());
     }

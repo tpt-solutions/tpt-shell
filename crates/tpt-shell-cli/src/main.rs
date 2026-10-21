@@ -18,6 +18,8 @@ const USAGE: &str = "usage:
   tpt-shell explain <TS####>
   tpt-shell dev <directory> [--port <port>]   serve files on 127.0.0.1 and report changes
   tpt-shell manifest check <tpt-shell.toml>
+  tpt-shell contract diff <old-contract.json> <new-contract.json>
+  tpt-shell contract check <new-contract.json> --baseline <old-contract.json>
   tpt-shell new vanilla <directory>
   tpt-shell new typescript <directory>
   tpt-shell doctor
@@ -63,6 +65,10 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
     match args {
         ["explain", code] => Ok(explain(code)),
         ["manifest", "check", path] => manifest_check(Path::new(path)),
+        ["contract", "diff", old, new] => contract_compare(Path::new(old), Path::new(new), false),
+        ["contract", "check", new, "--baseline", old] => {
+            contract_compare(Path::new(old), Path::new(new), true)
+        }
         ["dev", dir] => dev_server(Path::new(dir), 8080),
         ["dev", dir, "--port", port] => {
             let port: u16 = port
@@ -84,6 +90,37 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["install-service", name, program] => install_service(name, Path::new(program)),
         ["uninstall-service", name] => uninstall_service(name),
         _ => Err(USAGE.to_string()),
+    }
+}
+
+/// Lists how `new` differs from `old`. With `check`, lists only breaking changes and exits 1
+/// when there is one, so a build can refuse a contract that breaks its callers.
+fn contract_compare(old: &Path, new: &Path, check: bool) -> Result<ExitCode, String> {
+    let read = |path: &Path| {
+        fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))
+    };
+    let changes = tpt_shell_ipc::contract_diff::diff(&read(old)?, &read(new)?)?;
+    if changes.is_empty() {
+        println!("no changes");
+        return Ok(ExitCode::SUCCESS);
+    }
+    let breaking = changes.iter().any(|c| c.breaking);
+    for change in changes.iter().filter(|c| c.breaking || !check) {
+        let tag = if change.breaking {
+            "breaking"
+        } else {
+            "compatible"
+        };
+        println!("{tag}  {}: {}", change.path, change.message);
+    }
+    if !check {
+        return Ok(ExitCode::SUCCESS);
+    }
+    if breaking {
+        Ok(ExitCode::from(1))
+    } else {
+        println!("no breaking changes");
+        Ok(ExitCode::SUCCESS)
     }
 }
 

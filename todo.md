@@ -203,7 +203,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ### tpt-shell-capabilities
 - [x] Permission engine, default deny (`tpt-shell-capabilities`)
 - [x] Per-window and per-origin capabilities
-- [ ] Scopes: path globs, device identifiers, URL patterns, size caps (path roots, device IDs, URL prefixes and size caps are done; path globs are not)
+- [x] Scopes: path globs, device identifiers, URL patterns, size caps (path globs: `*` and `?` within a segment, `**` across segments, normalized and validated when granted; path roots, device IDs, URL prefixes and size caps were already done)
 - [x] Native consent prompt abstraction (not web content): `ConsentPrompt` trait; the Windows implementation is a message box owned by the requesting window, default No (`tpt_shell_platform_windows::consent`). Its text is not localised yet, and macOS and Linux have no prompt
 - [x] Remember-per-profile hook (storage lands in M6): `ConsentStore` trait, in-memory store for now
 - [ ] Security tests: capability bypass, path-scope escapes (`..`, symlinks, UNC, case folding), oversized and malformed messages (`..`, UNC, device paths, ADS, reserved names, case folding, URL tricks, and size caps are tested; symlinks are not, since normalization is lexical)
@@ -237,7 +237,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Dev server (hand-rolled HTTP or licence-clean crate) (`tpt-shell dev` serves GET and HEAD on 127.0.0.1 only, refuses paths that leave the directory, and has tests with a real socket; the server answers one request at a time)
 - [ ] `build` (release build; compliance outputs added in M10)
 - [ ] `doctor` (WebView2 version, toolchain, licence policy): WebView2 version, rustc and cargo-deny presence are checked; the licence policy is not yet
-- [ ] `contract gen | check | diff` (breaking-change detection)
+- [ ] `contract gen | check | diff` (breaking-change detection: `tpt-shell contract diff <old> <new>` and `contract check <new> --baseline <old>` are done, in `tpt-shell-ipc::contract_diff`; they flag removed commands and fields, new required fields, capability changes, tighter limits, removed enum values and type changes. `gen` is not built: the contract is made inside the app by `commands![]`, and no app entry point writes it out yet)
 - [ ] `manifest check | explain` (`manifest check` done; `explain` is `tpt-shell explain`, see below)
 - [x] `explain <code>`
 - [x] Error code registry `TS####` with explanations and fix hints (`tpt-shell-errors`)
@@ -371,7 +371,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Secure erase (best-effort) with documented SSD/journaling limits (`wipe_dir` overwrites file contents before removal; the limits are in its doc comment)
 - [x] Quotas (`usage` and `enforce_quota`; not yet applied to a live WebView2 profile)
 - [ ] Profile manager API: create, list, switch, export (encrypted), delete (create, list and delete are done; switch and encrypted export are not)
-- [ ] Per-profile storage of consent decisions
+- [ ] Per-profile storage of consent decisions (`FileConsent` in `tpt-shell-capabilities` keeps answers in a file and survives a restart; the app still uses the in-memory store, so it does not yet put the file in the profile folder)
 - [ ] Conformance: isolation (A writes invisible in B) and no-residue for ephemeral (file-level tests pass; no WebView2 storage conformance test yet)
 - [ ] Done: isolation and no-residue tests pass on all three OSes
 
@@ -522,7 +522,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ## Phase M9 โ€” Agent surface and MCP server (ยง10.4); audit checkpoints, anchoring, verify (ยง10.3)
 
 ### Audit completion (tpt-shell-audit)
-- [ ] Ed25519 checkpoints every N entries or T seconds (entry-count interval done in `tpt-shell-audit`; the time interval is not, and the key comes from the caller, not a keystore)
+- [x] Ed25519 checkpoints every N entries or T seconds (both intervals in `tpt-shell-audit`; the time check runs when an entry is written, so a quiet log checkpoints with its next entry. The key still comes from the caller; the keystore item below covers that)
 - [ ] Keystore: DPAPI, Keychain, Secret Service (DPAPI on Windows: `tpt-shell-platform-windows::keystore` encrypts each secret for the current user and stores one file per name; tested. Keychain and Secret Service are not done, and the audit checkpoint key does not use the keystore yet)
 - [ ] HSM hook for key supply
 - [ ] External anchor hook: file on other volume, syslog, HTTP

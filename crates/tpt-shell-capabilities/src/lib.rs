@@ -9,15 +9,20 @@
 //!
 //! Scopes:
 //! - [`Scope::Paths`]: directory roots. Paths are normalized first (see [`normalize_path`]).
+//! - [`Scope::PathGlobs`]: path patterns, where `*` and `?` match within one segment and
+//!   `**` matches any number of segments.
 //! - [`Scope::Devices`]: exact device identifiers.
 //! - [`Scope::Urls`]: URL prefixes, matched on a path-segment boundary.
 //! - [`Scope::MaxBytes`]: a size cap.
 //!
 //! A grant with `consent: true` asks the user once per window and capability. The answer
-//! is kept in a [`ConsentStore`]. The default store is in memory; the profile store comes
-//! with M6.
+//! is kept in a [`ConsentStore`]. The default store is in memory. [`FileConsent`] keeps the
+//! answers in a file, which the app places in the profile folder.
 
 use std::collections::HashMap;
+use std::fs;
+use std::io;
+use std::path::PathBuf;
 
 /// What a grant lets through.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,6 +30,8 @@ pub enum Scope {
     Unrestricted,
     /// Directory roots such as `C:/Data`. A request must be the root or below it.
     Paths(Vec<String>),
+    /// Path patterns such as `C:/Data/**/*.txt`. A request must match one pattern in full.
+    PathGlobs(Vec<String>),
     /// Exact device identifiers such as `serial:COM3`.
     Devices(Vec<String>),
     /// URL prefixes such as `https://example.com/app`.
@@ -106,6 +113,75 @@ impl ConsentStore for MemoryConsent {
     }
 }
 
+/// Consent answers kept in a file, so the user is asked once per profile rather than once per
+/// run. The file is one line per answer: `allow` or `deny`, a tab, the window, a tab, and the
+/// capability. Each save writes a temporary file and renames it over the old one.
+///
+/// A save that fails keeps the answer for this run only, so the user may be asked again next
+/// start. Lines that do not parse are skipped, which asks again rather than allowing.
+pub struct FileConsent {
+    path: PathBuf,
+    answers: HashMap<(String, String), bool>,
+}
+
+impl FileConsent {
+    /// Opens the store at `path`. A missing file is an empty store.
+    pub fn open(path: impl Into<PathBuf>) -> io::Result<Self> {
+        let path = path.into();
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(e),
+        };
+        let answers = text
+            .lines()
+            .filter_map(|line| {
+                let mut parts = line.splitn(3, '\t');
+                let allowed = match parts.next()? {
+                    "allow" => true,
+                    "deny" => false,
+                    _ => return None,
+                };
+                let window = parts.next()?;
+                let capability = parts.next()?;
+                Some(((window.to_string(), capability.to_string()), allowed))
+            })
+            .collect();
+        Ok(FileConsent { path, answers })
+    }
+
+    fn save(&self) -> io::Result<()> {
+        let mut text = String::new();
+        for ((window, capability), allowed) in &self.answers {
+            let word = if *allowed { "allow" } else { "deny" };
+            text.push_str(&format!("{word}\t{window}\t{capability}\n"));
+        }
+        let mut tmp = self.path.as_os_str().to_owned();
+        tmp.push(".tmp");
+        let tmp = PathBuf::from(tmp);
+        fs::write(&tmp, text)?;
+        fs::rename(&tmp, &self.path)
+    }
+}
+
+impl ConsentStore for FileConsent {
+    fn get(&self, window: &str, capability: &str) -> Option<bool> {
+        self.answers
+            .get(&(window.to_string(), capability.to_string()))
+            .copied()
+    }
+
+    fn set(&mut self, window: &str, capability: &str, allowed: bool) {
+        // Tabs and newlines would break the line format; such a name is kept for this run only.
+        let storable = |s: &str| !s.contains(['\t', '\n', '\r']);
+        self.answers
+            .insert((window.to_string(), capability.to_string()), allowed);
+        if storable(window) && storable(capability) {
+            let _ = self.save();
+        }
+    }
+}
+
 /// Holds grants and checks requests against them.
 pub struct Engine {
     grants: Vec<Grant>,
@@ -146,6 +222,12 @@ impl Engine {
             for root in roots {
                 normalize_path(root)
                     .map_err(|why| GrantError(format!("path root `{root}`: {why}")))?;
+            }
+        }
+        if let Scope::PathGlobs(patterns) = &grant.scope {
+            for pattern in patterns {
+                normalize_path(pattern)
+                    .map_err(|why| GrantError(format!("path pattern `{pattern}`: {why}")))?;
             }
         }
         self.grants.push(grant);
@@ -260,6 +342,20 @@ fn in_scope(scope: &Scope, request: Request) -> Result<(), Denial> {
                 Err(outside("the path"))
             }
         }
+        Scope::PathGlobs(patterns) => {
+            let Request::Path(raw) = request else {
+                return Err(bad_request("this grant needs a path request"));
+            };
+            let path = normalize_path(raw).map_err(bad_request)?;
+            let inside = patterns.iter().any(|pattern| {
+                normalize_path(pattern).is_ok_and(|pattern| glob_matches(&pattern, &path))
+            });
+            if inside {
+                Ok(())
+            } else {
+                Err(outside("the path"))
+            }
+        }
         Scope::Devices(ids) => {
             let Request::Device(id) = request else {
                 return Err(bad_request("this grant needs a device request"));
@@ -366,6 +462,44 @@ pub fn normalize_path(raw: &str) -> Result<String, String> {
 
 /// Normalizes an absolute `http(s)` URL for prefix matching. Rejects userinfo (`@`),
 /// backslashes, and dot segments, including percent-encoded ones.
+/// Matches a normalized path against a normalized pattern, segment by segment.
+fn glob_matches(pattern: &str, path: &str) -> bool {
+    let pattern: Vec<&str> = pattern.split('/').collect();
+    let path: Vec<&str> = path.split('/').collect();
+    segments_match(&pattern, &path)
+}
+
+fn segments_match(pattern: &[&str], path: &[&str]) -> bool {
+    match pattern.split_first() {
+        None => path.is_empty(),
+        Some((&"**", rest)) => {
+            segments_match(rest, path)
+                || path
+                    .split_first()
+                    .is_some_and(|(_, tail)| segments_match(pattern, tail))
+        }
+        Some((segment, rest)) => path.split_first().is_some_and(|(first, tail)| {
+            wildcard_matches(segment.as_bytes(), first.as_bytes()) && segments_match(rest, tail)
+        }),
+    }
+}
+
+/// `*` matches any run of characters and `?` one character, within a single segment.
+fn wildcard_matches(pattern: &[u8], text: &[u8]) -> bool {
+    match (pattern.split_first(), text.split_first()) {
+        (None, None) => true,
+        (Some((b'*', rest)), _) => {
+            wildcard_matches(rest, text)
+                || text
+                    .split_first()
+                    .is_some_and(|(_, tail)| wildcard_matches(pattern, tail))
+        }
+        (Some((b'?', rest)), Some((_, tail))) => wildcard_matches(rest, tail),
+        (Some((p, rest)), Some((t, tail))) => p == t && wildcard_matches(rest, tail),
+        _ => false,
+    }
+}
+
 fn normalize_url(raw: &str) -> Result<String, String> {
     let lower = raw.to_ascii_lowercase();
     let scheme_ok = lower.starts_with("https://") || lower.starts_with("http://");
@@ -486,6 +620,84 @@ mod tests {
                 Decision::Allow,
                 "{ok}"
             );
+        }
+    }
+
+    #[test]
+    fn path_globs_match_a_whole_path() {
+        let e = engine_with(Scope::PathGlobs(vec!["C:/Data/*.txt".into()]));
+        assert_eq!(
+            e.check("main", ORIGIN, "fs.read", Request::Path("C:/Data/a.txt")),
+            Decision::Allow
+        );
+        for bad in [
+            "C:/Data/sub/a.txt",
+            "C:/Data/a.bin",
+            "C:/Data",
+            "C:/Data/a.txt.bak",
+        ] {
+            assert_eq!(
+                code(e.check("main", ORIGIN, "fs.read", Request::Path(bad))),
+                "CAP_OUT_OF_SCOPE",
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn double_star_matches_any_depth_and_question_mark_one_character() {
+        let e = engine_with(Scope::PathGlobs(vec![
+            "C:/Data/**".into(),
+            "C:/Logs/log?.csv".into(),
+        ]));
+        for ok in [
+            "C:/Data",
+            "C:/Data/a",
+            "C:/Data/x/y/z.bin",
+            "C:/Logs/log1.csv",
+        ] {
+            assert_eq!(
+                e.check("main", ORIGIN, "fs.read", Request::Path(ok)),
+                Decision::Allow,
+                "{ok}"
+            );
+        }
+        for bad in ["C:/Logs/log12.csv", "C:/Database/a", "D:/Data/a"] {
+            assert_eq!(
+                code(e.check("main", ORIGIN, "fs.read", Request::Path(bad))),
+                "CAP_OUT_OF_SCOPE",
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn globs_do_not_widen_the_path_rules() {
+        let e = engine_with(Scope::PathGlobs(vec!["C:/Data/**".into()]));
+        for bad in [
+            "C:/Data/../Secret/a",
+            "\\\\server\\share\\Data\\a",
+            "C:/Data/CON",
+        ] {
+            assert_ne!(
+                e.check("main", ORIGIN, "fs.read", Request::Path(bad)),
+                Decision::Allow,
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn bad_path_patterns_fail_when_the_grant_is_added() {
+        let mut e = Engine::new();
+        for bad in ["C:/Data/../x/*", "relative/*", "C:/Da\0ta/*", "\\\\?\\C:/*"] {
+            let result = e.add_grant(grant(
+                "main",
+                ORIGIN,
+                "fs.read",
+                Scope::PathGlobs(vec![bad.into()]),
+            ));
+            assert!(result.is_err(), "{bad}");
         }
     }
 
@@ -789,5 +1001,65 @@ mod tests {
             "CAP_OUT_OF_SCOPE"
         );
         assert_eq!(prompt.1, 0);
+    }
+
+    fn scratch_file(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tpt-consent-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
+
+    #[test]
+    fn file_consent_answers_survive_a_restart() {
+        let path = scratch_file("consent-restart.txt");
+        let _ = fs::remove_file(&path);
+        {
+            let mut store = FileConsent::open(&path).unwrap();
+            store.set("main", "device.serial", true);
+            store.set("other", "device.serial", false);
+        }
+        let store = FileConsent::open(&path).unwrap();
+        assert_eq!(store.get("main", "device.serial"), Some(true));
+        assert_eq!(store.get("other", "device.serial"), Some(false));
+        assert_eq!(store.get("main", "fs.read"), None);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn file_consent_skips_lines_it_cannot_read() {
+        let path = scratch_file("consent-bad-lines.txt");
+        fs::write(
+            &path,
+            "allow\tmain\tdevice.serial\nmaybe\tmain\tfs.read\nallow\tmain\n",
+        )
+        .unwrap();
+        let store = FileConsent::open(&path).unwrap();
+        assert_eq!(store.get("main", "device.serial"), Some(true));
+        assert_eq!(store.get("main", "fs.read"), None);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_remembered_answer_is_not_asked_again_after_restart() {
+        let path = scratch_file("consent-engine.txt");
+        let _ = fs::remove_file(&path);
+        {
+            let mut e = Engine::with_consent_store(Box::new(FileConsent::open(&path).unwrap()));
+            let mut g = grant("main", ORIGIN, "device.serial", Scope::Unrestricted);
+            g.consent = true;
+            e.add_grant(g).unwrap();
+            let mut prompt = Answer(true, 0);
+            e.authorize(&mut prompt, "main", ORIGIN, "device.serial", Request::None);
+            assert_eq!(prompt.1, 1);
+        }
+        let mut e = Engine::with_consent_store(Box::new(FileConsent::open(&path).unwrap()));
+        let mut g = grant("main", ORIGIN, "device.serial", Scope::Unrestricted);
+        g.consent = true;
+        e.add_grant(g).unwrap();
+        assert_eq!(
+            e.check("main", ORIGIN, "device.serial", Request::None),
+            Decision::Allow
+        );
+        let _ = fs::remove_file(&path);
     }
 }
