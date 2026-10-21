@@ -4,6 +4,8 @@ members = [
     "crates/tpt-shell",
     "crates/tpt-shell-audit",
     "crates/tpt-shell-capabilities",
+    "crates/tpt-shell-cli",
+    "crates/tpt-shell-compliance",
     "crates/tpt-shell-core",
     "crates/tpt-shell-devices",
     "crates/tpt-shell-errors",

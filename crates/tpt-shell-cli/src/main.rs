@@ -1,0 +1,534 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright (c) 2026 TPT Solutions
+
+//! `tpt-shell`: explain error codes, check manifests, and create starter projects.
+//!
+//! Exit codes: 0 success, 1 the checked input has problems, 2 bad usage or I/O failure.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use tpt_shell_errors::lookup;
+
+const USAGE: &str = "usage:
+  tpt-shell explain <TS####>
+  tpt-shell manifest check <tpt-shell.toml>
+  tpt-shell new vanilla <directory>
+  tpt-shell new typescript <directory>
+  tpt-shell doctor
+  tpt-shell compliance <output-directory>";
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    match run(&args) {
+        Ok(code) => code,
+        Err(message) => {
+            eprintln!("{message}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// Runs one command. `Err` means bad usage or an I/O failure (exit 2).
+fn run(args: &[&str]) -> Result<ExitCode, String> {
+    match args {
+        ["explain", code] => Ok(explain(code)),
+        ["manifest", "check", path] => manifest_check(Path::new(path)),
+        ["new", "vanilla", dir] => new_vanilla(Path::new(dir)).map(|()| ExitCode::SUCCESS),
+        ["new", "typescript", dir] => new_typescript(Path::new(dir)).map(|()| ExitCode::SUCCESS),
+        ["doctor"] => Ok(doctor()),
+        ["compliance", dir] => compliance(Path::new(dir)),
+        _ => Err(USAGE.to_string()),
+    }
+}
+
+fn explain(code: &str) -> ExitCode {
+    match lookup(code) {
+        Some(entry) => {
+            println!("{}: {}", entry.code, entry.title);
+            println!();
+            println!("{}", entry.explanation);
+            println!();
+            println!("Fix: {}", entry.fix);
+            ExitCode::SUCCESS
+        }
+        None => {
+            eprintln!("no entry for `{code}`");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn manifest_check(path: &Path) -> Result<ExitCode, String> {
+    let text =
+        fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    match tpt_shell_manifest::parse(&text) {
+        Ok(manifest) => {
+            println!(
+                "{}: ok ({} window(s), {} capability grant(s))",
+                path.display(),
+                manifest.windows.len(),
+                manifest.capabilities.len()
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(e) => {
+            println!("{}: {e}", path.display());
+            if let Some(entry) = lookup(e.code) {
+                println!("  {}", entry.fix);
+            }
+            Ok(ExitCode::from(1))
+        }
+    }
+}
+
+/// The starter manifest for `new vanilla`.
+const VANILLA_MANIFEST: &str = r#"[app]
+name = "my-app"
+version = "0.1.0"
+
+[[windows]]
+name = "main"
+title = "My App"
+width = 960
+height = 640
+
+[capabilities]
+grant = []
+"#;
+
+/// The starter page for `new vanilla`. It has no external scripts or styles.
+const VANILLA_PAGE: &str = r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My App</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+  </style>
+</head>
+<body>
+  <h1>My App</h1>
+  <p>Edit <code>index.html</code> to change this page.</p>
+</body>
+</html>
+"#;
+
+fn new_vanilla(dir: &Path) -> Result<(), String> {
+    if dir.exists() {
+        let mut entries =
+            fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
+        if entries.next().is_some() {
+            return Err(format!(
+                "{} is not empty; choose a new directory",
+                dir.display()
+            ));
+        }
+    } else {
+        fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    }
+    write(&dir.join("tpt-shell.toml"), VANILLA_MANIFEST)?;
+    write(&dir.join("index.html"), VANILLA_PAGE)?;
+    println!("created {}", dir.display());
+    Ok(())
+}
+
+fn write(path: &PathBuf, text: &str) -> Result<(), String> {
+    fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn scratch(name: &str) -> PathBuf {
+        static N: AtomicU32 = AtomicU32::new(0);
+        let n = N.fetch_add(1, Ordering::SeqCst);
+        std::env::temp_dir().join(format!("tpt-cli-{name}-{}-{n}", std::process::id()))
+    }
+
+    #[test]
+    fn every_manifest_code_is_explained() {
+        // The codes the manifest parser can produce must all be in the registry.
+        for code in [
+            tpt_shell_manifest::codes::SYNTAX,
+            tpt_shell_manifest::codes::UNKNOWN_KEY,
+            tpt_shell_manifest::codes::INVALID_VALUE,
+            tpt_shell_manifest::codes::MISSING_KEY,
+        ] {
+            assert!(lookup(code).is_some(), "{code} has no registry entry");
+        }
+    }
+
+    #[test]
+    fn new_vanilla_writes_a_manifest_that_checks_clean() {
+        let dir = scratch("new");
+        new_vanilla(&dir).unwrap();
+        assert!(dir.join("index.html").exists());
+        let text = fs::read_to_string(dir.join("tpt-shell.toml")).unwrap();
+        assert!(tpt_shell_manifest::parse(&text).is_ok());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn new_vanilla_refuses_a_non_empty_directory() {
+        let dir = scratch("busy");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("keep.txt"), "x").unwrap();
+        assert!(new_vanilla(&dir).is_err());
+        assert!(!dir.join("tpt-shell.toml").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn manifest_check_reports_problems_with_exit_code_one() {
+        let path = scratch("bad").with_extension("toml");
+        fs::write(&path, "[app]\nname = \"has space\"\n").unwrap();
+        let code = manifest_check(&path).unwrap();
+        assert_eq!(code, ExitCode::from(1));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn unknown_commands_are_usage_errors() {
+        assert!(run(&["bogus"]).is_err());
+        assert!(run(&["explain"]).is_err());
+    }
+}
+
+/// Install key of the WebView2 Evergreen runtime (the same GUID on every machine).
+const WEBVIEW2_CLIENT: &str =
+    r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+
+/// Reports what the build and run need. Exit 0 when the required parts are present, 1 when
+/// the WebView2 runtime is missing.
+fn doctor() -> ExitCode {
+    let mut ok = true;
+    println!("platform: {}", std::env::consts::OS);
+    match tool_version("rustc", &["--version"]) {
+        Some(v) => println!("rustc: {v}"),
+        None => println!("rustc: not found (install Rust from rustup.rs)"),
+    }
+    match tool_version("cargo", &["deny", "--version"]) {
+        Some(v) => println!("cargo-deny: {v}"),
+        None => println!("cargo-deny: not found (needed for the licence and advisory gate)"),
+    }
+    match webview2_version() {
+        Some(v) => println!("WebView2 runtime: {v}"),
+        None => {
+            ok = false;
+            println!("WebView2 runtime: not found (install the Evergreen runtime from Microsoft)");
+        }
+    }
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+/// First line of a tool's output, or `None` when the tool does not run.
+fn tool_version(program: &str, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .next()
+        .map(|line| line.trim().to_string())
+}
+
+/// The runtime version, from the per-machine or per-user install key. Windows only.
+fn webview2_version() -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+    for root in [
+        r"HKLM\SOFTWARE\WOW6432Node",
+        r"HKLM\SOFTWARE",
+        r"HKCU\SOFTWARE",
+    ] {
+        let key = format!(r"{root}\{WEBVIEW2_CLIENT}");
+        let Ok(out) = std::process::Command::new("reg")
+            .args(["query", &key, "/v", "pv"])
+            .output()
+        else {
+            continue;
+        };
+        if out.status.success() {
+            if let Some(version) = parse_reg_value(&String::from_utf8_lossy(&out.stdout)) {
+                return Some(version);
+            }
+        }
+    }
+    None
+}
+
+/// Reads the data of a `REG_SZ` line from `reg query` output.
+fn parse_reg_value(text: &str) -> Option<String> {
+    text.lines()
+        .find(|line| line.contains("REG_SZ"))
+        .and_then(|line| line.split_whitespace().last())
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
+#[cfg(test)]
+mod doctor_tests {
+    use super::*;
+
+    #[test]
+    fn reg_output_yields_the_version() {
+        let sample =
+            "\r\nHKEY_CURRENT_USER\\Software\\...\\{F30}\r\n    pv    REG_SZ    155.0.4283.62\r\n";
+        assert_eq!(parse_reg_value(sample).as_deref(), Some("155.0.4283.62"));
+    }
+
+    #[test]
+    fn missing_key_output_yields_nothing() {
+        assert_eq!(
+            parse_reg_value(
+                "ERROR: The system was unable to find the specified registry key or value."
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn doctor_runs_without_panicking() {
+        // The exit code depends on the machine; the point is that every check completes.
+        let _ = doctor();
+    }
+}
+
+/// Writes the SBOMs and the attestation for the application named `tpt-shell`, reading the
+/// lock file in the current directory. Exits 1 when the licence gate fails, after writing.
+fn compliance(out: &Path) -> Result<ExitCode, String> {
+    use tpt_shell_compliance as c;
+
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--format-version", "1", "--locked"])
+        .output()
+        .map_err(|e| format!("cannot run cargo metadata: {e}"))?;
+    if !output.status.success() {
+        return Err("cargo metadata failed; is Cargo.lock up to date?".into());
+    }
+    let metadata = String::from_utf8_lossy(&output.stdout).to_string();
+    let app = c::app_from_metadata(&metadata, "tpt-shell")?;
+    let components = c::components_from_metadata(&metadata)?;
+    let lock =
+        fs::read(Path::new("Cargo.lock")).map_err(|e| format!("cannot read Cargo.lock: {e}"))?;
+
+    let namespace = format!(
+        "https://tpt-solutions.example/spdx/{}-{}",
+        app.name, app.version
+    );
+    // SOURCE_DATE_EPOCH (reproducible builds) fixes the time; otherwise the current time is used.
+    let epoch = std::env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs())
+        });
+    let created = c::iso8601_utc(epoch);
+    let cdx = serde_json::to_string_pretty(&c::cyclonedx(&components, &app, Some(&created)))
+        .map_err(|e| e.to_string())?
+        + "\n";
+    let spdx =
+        serde_json::to_string_pretty(&c::spdx(&components, &app, &namespace, Some(&created)))
+            .map_err(|e| e.to_string())?
+            + "\n";
+    let violations = c::license_violations(&components);
+    let git_commit = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let rustc = tool_version("rustc", &["--version"]).unwrap_or_else(|| "unknown".into());
+    let attestation = c::attestation(
+        &app,
+        &rustc,
+        &c::digest(&lock),
+        &[
+            ("sbom.cdx.json", c::digest(cdx.as_bytes())),
+            ("sbom.spdx.json", c::digest(spdx.as_bytes())),
+        ],
+        &violations,
+        git_commit.as_deref(),
+        &c::Reproducibility {
+            source_date_epoch: std::env::var("SOURCE_DATE_EPOCH")
+                .ok()
+                .and_then(|v| v.trim().parse::<u64>().ok()),
+            locked: true,
+            cargo_flags: vec!["--locked".into()],
+        },
+    );
+    let attestation_text =
+        serde_json::to_string_pretty(&attestation).map_err(|e| e.to_string())? + "\n";
+
+    fs::create_dir_all(out).map_err(|e| format!("cannot create {}: {e}", out.display()))?;
+    write(&out.join("sbom.cdx.json"), &cdx)?;
+    write(&out.join("sbom.spdx.json"), &spdx)?;
+    write(&out.join("attestation.json"), &attestation_text)?;
+    println!("wrote {} components to {}", components.len(), out.display());
+
+    if violations.is_empty() {
+        println!("licence gate: pass");
+        Ok(ExitCode::SUCCESS)
+    } else {
+        println!("licence gate: fail");
+        for v in &violations {
+            println!("  {v}");
+        }
+        Ok(ExitCode::from(1))
+    }
+}
+
+/// Page for `new typescript`. It loads the compiled script and the page's own styles.
+const TS_PAGE: &str = r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My App</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+  </style>
+</head>
+<body>
+  <h1>My App</h1>
+  <p id="out">Starting…</p>
+  <script type="module" src="dist/main.js"></script>
+</body>
+</html>
+"#;
+
+/// Starter TypeScript. It calls the sample command through the generated client.
+const TS_MAIN: &str = r#"import { commands } from "./commands.js";
+
+const out = document.getElementById("out");
+
+commands
+  .greet({ name: "world" })
+  .then((reply) => {
+    if (out) out.textContent = String(reply);
+  })
+  .catch((error: { code: string; message: string }) => {
+    if (out) out.textContent = `${error.code}: ${error.message}`;
+  });
+"#;
+
+/// `tsconfig.json` for the starter. Strict; output goes to `dist/`, which `index.html` loads.
+const TS_CONFIG: &str = r#"{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "strict": true,
+    "noEmitOnError": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}
+"#;
+
+/// The sample command behind the starter client: `greet(name)` returns a greeting.
+fn sample_contract() -> tpt_shell_ipc::contract::Contract {
+    use tpt_shell_ipc::contract::{Command, Contract, Kind};
+    use tpt_shell_ipc::schema::{Field, Schema};
+    const FIELDS: &[Field] = &[Field {
+        name: "name",
+        schema: Schema::Str {
+            max_len: 64,
+            chars: None,
+        },
+    }];
+    let mut contract = Contract::new();
+    contract
+        .add(Command {
+            name: "greet",
+            kind: Kind::Sync,
+            capability: None,
+            args: Schema::Struct(FIELDS),
+        })
+        .expect("the sample contract has one command");
+    contract
+}
+
+fn new_typescript(dir: &Path) -> Result<(), String> {
+    prepare_dir(dir)?;
+    write(&dir.join("tpt-shell.toml"), VANILLA_MANIFEST)?;
+    write(&dir.join("index.html"), TS_PAGE)?;
+    write(&dir.join("tsconfig.json"), TS_CONFIG)?;
+    fs::create_dir_all(dir.join("src")).map_err(|e| format!("cannot create src: {e}"))?;
+    write(&dir.join("src").join("main.ts"), TS_MAIN)?;
+    write(&dir.join("src").join("tpt-shell.d.ts"), TS_RUNTIME_DECL)?;
+    write(
+        &dir.join("src").join("commands.ts"),
+        &tpt_shell_ipc::typescript::generate(&sample_contract()),
+    )?;
+    println!(
+        "created {} (build with: npx -p typescript tsc -p .)",
+        dir.display()
+    );
+    Ok(())
+}
+
+/// Creates `dir` if needed. Refuses a directory that already has files in it.
+fn prepare_dir(dir: &Path) -> Result<(), String> {
+    if dir.exists() {
+        let mut entries =
+            fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
+        if entries.next().is_some() {
+            return Err(format!(
+                "{} is not empty; choose a new directory",
+                dir.display()
+            ));
+        }
+        Ok(())
+    } else {
+        fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))
+    }
+}
+
+/// Declares the runtime object that `js/runtime/tpt-shell.js` adds before the page runs.
+const TS_RUNTIME_DECL: &str = r#"// The runtime object that tpt-shell adds at document start (js/runtime/tpt-shell.js).
+interface Window {
+  tpt: { invoke(cmd: string, args?: unknown): Promise<unknown> };
+}
+"#;
+
+#[cfg(test)]
+mod template_tests {
+    use super::*;
+
+    #[test]
+    fn typescript_template_writes_a_client_for_its_sample_command() {
+        let dir = std::env::temp_dir().join(format!("tpt-cli-ts-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        new_typescript(&dir).unwrap();
+        let client = fs::read_to_string(dir.join("src").join("commands.ts")).unwrap();
+        assert!(client.contains("greet(args: GreetArgs): Promise<unknown>"));
+        assert!(dir.join("tsconfig.json").exists());
+        assert!(dir.join("src").join("tpt-shell.d.ts").exists());
+        assert!(
+            new_typescript(&dir).is_err(),
+            "a second run must not overwrite"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
