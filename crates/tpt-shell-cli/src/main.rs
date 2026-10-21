@@ -659,7 +659,11 @@ fn prepare_dir(dir: &Path) -> Result<(), String> {
 /// Declares the runtime object that `js/runtime/tpt-shell.js` adds before the page runs.
 const TS_RUNTIME_DECL: &str = r#"// The runtime object that tpt-shell adds at document start (js/runtime/tpt-shell.js).
 interface Window {
-  tpt: { invoke(cmd: string, args?: unknown): Promise<unknown> };
+  tpt: {
+    invoke(cmd: string, args?: unknown): Promise<unknown>;
+    on(event: string, handler: (data: unknown) => void): () => void;
+    readonly caps: { readonly engine: "webview2"; readonly version: string | null };
+  };
 }
 "#;
 
@@ -675,7 +679,9 @@ mod template_tests {
         let client = fs::read_to_string(dir.join("src").join("commands.ts")).unwrap();
         assert!(client.contains("greet(args: GreetArgs): Promise<unknown>"));
         assert!(dir.join("tsconfig.json").exists());
-        assert!(dir.join("src").join("tpt-shell.d.ts").exists());
+        let decl = fs::read_to_string(dir.join("src").join("tpt-shell.d.ts")).unwrap();
+        assert!(decl.contains("on(event: string"));
+        assert!(decl.contains("readonly caps:"));
         assert!(
             new_typescript(&dir).is_err(),
             "a second run must not overwrite"

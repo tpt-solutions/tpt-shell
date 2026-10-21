@@ -10,6 +10,7 @@
 
   var nextId = 1;
   var pending = new Map();
+  var listeners = new Map();
 
   window.chrome.webview.addEventListener('message', function (event) {
     var msg;
@@ -18,7 +19,23 @@
     } catch (e) {
       return;
     }
-    // Events from Rust carry no id match here and are ignored until `tpt.on` exists.
+    // Events from Rust are {"event","data"} with no id.
+    if (msg && typeof msg.event === 'string') {
+      var subs = listeners.get(msg.event);
+      if (subs) {
+        subs.slice().forEach(function (handler) {
+          try {
+            handler(msg.data);
+          } catch (e) {
+            // Rethrow later so one bad handler does not stop the others.
+            setTimeout(function () {
+              throw e;
+            });
+          }
+        });
+      }
+      return;
+    }
     var entry = pending.get(msg && msg.id);
     if (!entry) {
       return;
@@ -31,6 +48,8 @@
     }
   });
 
+  var edge = /Edg\/([\d.]+)/.exec(navigator.userAgent);
+
   window.tpt = {
     invoke: function (cmd, args) {
       var id = nextId++;
@@ -40,6 +59,24 @@
           JSON.stringify({ v: 1, id: id, cmd: cmd, args: args || {} })
         );
       });
+    },
+    on: function (name, handler) {
+      var subs = listeners.get(name);
+      if (!subs) {
+        subs = [];
+        listeners.set(name, subs);
+      }
+      subs.push(handler);
+      return function () {
+        var i = subs.indexOf(handler);
+        if (i >= 0) {
+          subs.splice(i, 1);
+        }
+      };
+    },
+    caps: {
+      engine: 'webview2',
+      version: edge ? edge[1] : null
     }
   };
 })();
