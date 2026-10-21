@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/tpt-shell",
+    "crates/tpt-shell-agent",
     "crates/tpt-shell-audit",
     "crates/tpt-shell-capabilities",
     "crates/tpt-shell-cli",
