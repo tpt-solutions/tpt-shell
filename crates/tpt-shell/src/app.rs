@@ -5,9 +5,9 @@
 //!
 //! What runs today: Windows, with WebView2. Each window loads one of the app's assets from the
 //! app origin, so its pages are at the origin its grants name. Its page messages go through the
-//! capability-checked router with the window's own grants. Consent prompts are refused until the
-//! native consent dialog exists. On other platforms [`App::run`] and [`App::build`] return
-//! [`Error::Unsupported`].
+//! capability-checked router with the window's own grants. A grant that needs consent asks the
+//! user in a native dialog owned by the window; the default answer is No. On other platforms
+//! [`App::run`] and [`App::build`] return [`Error::Unsupported`].
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -203,6 +203,7 @@ impl App {
         use tpt_shell_core::backend::{WebviewBackend, WindowBackend};
         use tpt_shell_ipc::{Caller, Limits};
         use tpt_shell_platform_windows::backend::WindowsBackend;
+        use tpt_shell_platform_windows::consent::NativeConsent;
         use tpt_shell_platform_windows::webview2::{default_user_data_dir, APP_ORIGIN};
 
         let loader = self.loader.ok_or_else(|| {
@@ -244,7 +245,7 @@ impl App {
             backend.set_message_handler(
                 id,
                 Box::new(move |text| {
-                    let mut prompt = RefuseConsent;
+                    let mut prompt = NativeConsent::for_window(id);
                     Some(router.handle_authorized(
                         &caller,
                         &mut engine.borrow_mut(),
@@ -260,18 +261,6 @@ impl App {
             windows.push((window.name, id));
         }
         Ok(Running { backend, windows })
-    }
-}
-
-/// Refuses every consent prompt. A consent grant is refused until the native consent dialog
-/// exists on each platform.
-#[cfg(windows)]
-struct RefuseConsent;
-
-#[cfg(windows)]
-impl tpt_shell_capabilities::ConsentPrompt for RefuseConsent {
-    fn ask(&mut self, _window: &str, _capability: &str) -> bool {
-        false
     }
 }
 
