@@ -22,7 +22,7 @@ use tpt_shell_core::backend::{
     AssetSource, Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler,
     WebviewBackend, WindowBackend, WindowSpec,
 };
-use tpt_shell_core::theme::{injection_script, Signals, Theme};
+use tpt_shell_core::theme::{injection_script, settings_script, Theme};
 use tpt_shell_core::{Error, LogicalSize, PhysicalSize, Result, ScaleFactor};
 use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
@@ -44,11 +44,12 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     ShowWindow, TranslateMessage, CW_USEDEFAULT, GWL_STYLE, HWND_MESSAGE, HWND_NOTOPMOST, HWND_TOP,
     HWND_TOPMOST, MSG, PM_REMOVE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     SWP_NOZORDER, SW_HIDE, SW_SHOW, WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_DESTROY, WM_DPICHANGED,
-    WM_SIZE, WNDCLASSEXW, WS_CAPTION, WS_OVERLAPPEDWINDOW, WS_POPUP,
+    WM_SETTINGCHANGE, WM_SIZE, WNDCLASSEXW, WS_CAPTION, WS_OVERLAPPEDWINDOW, WS_POPUP,
 };
 
 use crate::com::{wide, HRESULT};
 use crate::loader::OfficialLoader;
+use crate::shim::SHIM_JS;
 use crate::webview2::{create_environment, Controller, Environment, WebView, APP_ORIGIN};
 use crate::window::{interactive_desktop_available, pump_until};
 
@@ -759,10 +760,12 @@ impl WindowsBackend {
             allowed_navigation(url, &for_frames.borrow(), &allow_frames)
         })
         .map_err(|hr| hr_error("frame NavigationStarting", hr))?;
-        // Accessibility signals are not read on Windows yet, so they default to off.
         let scheme = tpt_shell_core::ThemeBackend::color_scheme(self)?;
-        let script = injection_script(&self.theme, scheme, Signals::default())?;
+        let script = injection_script(&self.theme, scheme, crate::accessibility::current())?;
         web.add_document_start_script(&script, |_| {})
+            .map_err(|hr| hr_error("AddScriptToExecuteOnDocumentCreated", hr))?;
+        // The page runtime (`window.tpt`) goes in before any page script runs.
+        web.add_document_start_script(SHIM_JS, |_| {})
             .map_err(|hr| hr_error("AddScriptToExecuteOnDocumentCreated", hr))?;
         let bounds =
             client_rect(hwnd).ok_or_else(|| Error::Backend("GetClientRect failed".into()))?;
@@ -917,6 +920,11 @@ unsafe extern "system" fn wnd_proc(
             }
             0
         }
+        WM_SETTINGCHANGE => {
+            // Sent for theme, colour and accessibility changes. Open pages follow them.
+            push_settings_to_pages();
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_DPICHANGED => {
             // SAFETY: on this message lParam points at the suggested new window rectangle.
             let r = &*(lparam as *const RECT);
@@ -968,6 +976,25 @@ impl tpt_shell_core::ThemeBackend for WindowsBackend {
             tpt_shell_core::ColorScheme::Dark
         })
     }
+}
+
+/// Updates the colour scheme and accessibility attributes of every open page. A setting that
+/// cannot be read leaves the pages as they are.
+fn push_settings_to_pages() {
+    let Ok(light) = apps_use_light_theme() else {
+        return;
+    };
+    let scheme = if light {
+        tpt_shell_core::ColorScheme::Light
+    } else {
+        tpt_shell_core::ColorScheme::Dark
+    };
+    let script = settings_script(scheme, crate::accessibility::current());
+    WINDOWS.with(|w| {
+        for entry in w.borrow().values() {
+            let _ = entry.web.execute_script(&script, |_| {});
+        }
+    });
 }
 
 /// Reads the per-user "apps use light theme" setting. Returns `true` for light.
@@ -1337,6 +1364,79 @@ mod tests {
                 title = b.document_title(id).unwrap_or_default();
                 title == expected
             });
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(got, "expected title {expected:?}, last was {title:?}");
+        }
+
+        #[test]
+        fn accessibility_signals_and_the_page_runtime_reach_the_page() {
+            let Some((mut b, dir, _serial)) = start("signals") else {
+                return;
+            };
+            let signals = crate::accessibility::current();
+            let id = b.create(&spec("main")).expect("create");
+            b.load_html(
+                id,
+                "<!doctype html><title>x</title><script>document.addEventListener('DOMContentLoaded', function () { var d = document.documentElement.dataset; document.title = [d.highContrast, d.reducedMotion, d.reducedTransparency, typeof window.tpt.on, window.tpt.caps.engine].join('|'); });</script>",
+            )
+            .expect("load_html");
+            let expected = format!(
+                "{}|{}|{}|function|webview2",
+                signals.high_contrast, signals.reduced_motion, signals.reduced_transparency
+            );
+            let mut title = String::new();
+            let got = pump_until(Duration::from_secs(30), || {
+                title = b.document_title(id).unwrap_or_default();
+                title == expected
+            });
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(got, "expected title {expected:?}, last was {title:?}");
+        }
+
+        #[test]
+        fn open_pages_follow_a_settings_change() {
+            let Some((mut b, dir, _serial)) = start("settings-push") else {
+                return;
+            };
+            let id = b.create(&spec("main")).expect("create");
+            b.load_html(
+                id,
+                "<!doctype html><title>x</title><script>document.addEventListener('DOMContentLoaded', function () { document.title = 'ready'; });</script>",
+            )
+            .expect("load_html");
+            let mut title = String::new();
+            let mut wait_for = |b: &WindowsBackend, want: &str| {
+                pump_until(Duration::from_secs(30), || {
+                    title = b.document_title(id).unwrap_or_default();
+                    title == want
+                })
+            };
+            assert!(
+                wait_for(&b, "ready"),
+                "page never loaded; title was {title:?}"
+            );
+
+            // Spoil the attribute, then push the real settings and read them back.
+            b.eval(id, "document.documentElement.dataset.colorScheme = 'bogus'; document.title = 'spoiled';")
+                .expect("spoil");
+            assert!(
+                wait_for(&b, "spoiled"),
+                "spoil did not run; title was {title:?}"
+            );
+            push_settings_to_pages();
+            b.eval(
+                id,
+                "document.title = document.documentElement.dataset.colorScheme + '|' + document.documentElement.dataset.highContrast;",
+            )
+            .expect("read back");
+
+            let light = apps_use_light_theme().expect("theme setting");
+            let signals = crate::accessibility::current();
+            let scheme = if light { "light" } else { "dark" };
+            let expected = format!("{scheme}|{}", signals.high_contrast);
+            let got = wait_for(&b, &expected);
             drop(b);
             let _ = std::fs::remove_dir_all(&dir);
             assert!(got, "expected title {expected:?}, last was {title:?}");

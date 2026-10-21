@@ -124,9 +124,53 @@ pub fn injection_script(theme: &Theme, scheme: ColorScheme, signals: Signals) ->
     ))
 }
 
+/// The script that updates the colour scheme and accessibility attributes on a page that is
+/// already open, after the user changes a setting. Theme variables are not touched.
+pub fn settings_script(scheme: ColorScheme, signals: Signals) -> String {
+    let scheme = match scheme {
+        ColorScheme::Light => "light",
+        ColorScheme::Dark => "dark",
+    };
+    format!(
+        concat!(
+            "(function () {{
+",
+            "  var root = document.documentElement;
+",
+            "  if (!root) {{ return; }}
+",
+            "  root.style.setProperty('color-scheme', '{}');
+",
+            "  root.dataset.colorScheme = '{}';
+",
+            "  root.dataset.highContrast = '{}';
+",
+            "  root.dataset.reducedMotion = '{}';
+",
+            "  root.dataset.reducedTransparency = '{}';
+",
+            "}})();
+"
+        ),
+        scheme, scheme, signals.high_contrast, signals.reduced_motion, signals.reduced_transparency,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_script_sets_attributes_but_not_theme_variables() {
+        let signals = Signals {
+            high_contrast: true,
+            ..Signals::default()
+        };
+        let script = settings_script(ColorScheme::Dark, signals);
+        assert!(script.contains("root.dataset.colorScheme = 'dark'"));
+        assert!(script.contains("root.dataset.highContrast = 'true'"));
+        assert!(!script.contains("--tpt-"));
+    }
 
     #[test]
     fn default_theme_is_valid() {

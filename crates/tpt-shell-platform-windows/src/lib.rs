@@ -7,6 +7,8 @@
 //! this crate is empty.
 
 #[cfg(windows)]
+pub mod accessibility;
+#[cfg(windows)]
 pub mod backend;
 #[cfg(windows)]
 pub mod clipboard;
@@ -23,7 +25,15 @@ pub mod handler;
 #[cfg(windows)]
 pub mod loader;
 #[cfg(windows)]
+pub mod local_time;
+#[cfg(windows)]
+pub mod random;
+#[cfg(windows)]
 pub mod shim;
+#[cfg(windows)]
+pub mod single_instance;
+#[cfg(windows)]
+pub mod tray;
 #[cfg(windows)]
 pub mod webview2;
 #[cfg(windows)]
