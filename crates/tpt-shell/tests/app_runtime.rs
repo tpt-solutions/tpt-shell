@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use tpt_shell::{App, CommandError, Grant, Scope, Target, Value, Window};
+use tpt_shell::{embed_dir, App, CommandError, Grant, Scope, Target, Value, Window};
 use tpt_shell_platform_windows::window::{pump_until, runtime_test_loader};
 
 /// The start page. Its script is a separate asset, because the page policy blocks inline script.
@@ -78,4 +78,30 @@ fn an_app_window_calls_a_guarded_command_and_gets_the_reply() {
         second.contains(r#""code":"CAP_OUT_OF_SCOPE""#),
         "out of scope: {second}"
     );
+}
+
+#[test]
+fn files_embedded_with_embed_dir_load_from_the_app_origin() {
+    let Some((loader, _serial)) = runtime_test_loader() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("tpt-app-embed-{}", std::process::id()));
+    // fixtures/app: index.html loads app.js, which sets the title to "embedded-ok".
+    let running = App::new()
+        .name("embed-test")
+        .loader(loader)
+        .data_dir(&dir)
+        .assets(embed_dir!("../../fixtures/app"))
+        .window(Window::new("main").title("embed-test"))
+        .build()
+        .expect("the app should start");
+    let id = running.window("main").expect("the main window");
+    let mut title = String::new();
+    let got = pump_until(Duration::from_secs(30), || {
+        title = running.backend().document_title(id).unwrap_or_default();
+        title == "embedded-ok"
+    });
+    drop(running);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(got, "the embedded script never ran; title was {title:?}");
 }

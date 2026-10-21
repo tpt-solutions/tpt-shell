@@ -142,6 +142,21 @@ impl App {
         self
     }
 
+    /// Adds several files at once, such as the output of `embed_dir!`.
+    pub fn assets(mut self, files: &[(&str, &str, &[u8])]) -> Self {
+        for (path, content_type, body) in files {
+            self = self.asset(path, content_type, *body);
+        }
+        self
+    }
+
+    /// Runs `register` against the router. Use it for commands made with `#[command]`, for
+    /// example `app.register(|router| register_commands!(router, list_dir))`.
+    pub fn register(mut self, register: impl FnOnce(&mut Router) + 'static) -> Self {
+        self.commands.push(Box::new(register));
+        self
+    }
+
     /// Adds a grant. It applies to the window and origin it names, and to no other.
     pub fn grant(mut self, grant: Grant) -> Self {
         self.grants.push(grant);
@@ -307,6 +322,20 @@ mod tests {
     fn a_window_opens_index_html_unless_told_otherwise() {
         assert_eq!(Window::new("main").page, "index.html");
         assert_eq!(Window::new("main").page("start.html").page, "start.html");
+    }
+
+    #[test]
+    fn embedded_directories_become_assets() {
+        let app = App::new().assets(crate::embed_dir!("../../fixtures/app"));
+        assert_eq!(app.assets.len(), 2);
+        assert_eq!(
+            app.assets["index.html"].content_type,
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            app.assets["app.js"].content_type,
+            "text/javascript; charset=utf-8"
+        );
     }
 
     #[test]

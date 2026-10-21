@@ -15,6 +15,10 @@ rust-version.workspace = true
 tpt-shell-core = { path = "../tpt-shell-core", version = "0.0.0" }
 tpt-shell-ipc = { path = "../tpt-shell-ipc", version = "0.0.0" }
 tpt-shell-capabilities = { path = "../tpt-shell-capabilities", version = "0.0.0" }
+tpt-shell-macros = { path = "../tpt-shell-macros", version = "0.0.0" }
 
 [target.'cfg(windows)'.dependencies]
 tpt-shell-platform-windows = { path = "../tpt-shell-platform-windows", version = "0.0.0" }
+
+[dev-dependencies]
+serde_json = "1"

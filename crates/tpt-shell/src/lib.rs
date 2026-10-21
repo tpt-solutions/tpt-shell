@@ -11,6 +11,13 @@ pub mod app;
 #[cfg(windows)]
 pub use app::Running;
 pub use app::{App, CommandError, Scope, Window};
-pub use tpt_shell_capabilities::Grant;
+pub use tpt_shell_capabilities::{ConsentPrompt, Engine, Grant};
 pub use tpt_shell_core::{Error, Result};
-pub use tpt_shell_ipc::{Caller, Target, Value};
+pub use tpt_shell_ipc::{Caller, Limits, Router, Target, Value};
+pub use tpt_shell_macros::{command, commands, embed_dir, register_commands};
+
+/// Paths the macros expand to. Not part of the API; app code uses the names above.
+#[doc(hidden)]
+pub mod __private {
+    pub use tpt_shell_ipc as ipc;
+}

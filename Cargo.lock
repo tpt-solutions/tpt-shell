@@ -617,9 +617,11 @@ checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 name = "tpt-shell"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
  "tpt-shell-capabilities",
  "tpt-shell-core",
  "tpt-shell-ipc",
+ "tpt-shell-macros",
  "tpt-shell-platform-windows",
 ]
 
@@ -691,9 +693,7 @@ version = "0.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "serde_json",
  "syn 2.0.119",
- "tpt-shell-ipc",
 ]
 
 [[package]]
