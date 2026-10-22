@@ -96,7 +96,7 @@ The probe is `cold_start_probe` in `conformance/tests/conformance/windows.rs`, r
 
 - The budget is first paint within 500 ms. Neither step is first paint, and the page is parsed well after the window exists, so the budget is not met on either measure.
 - About a third of the time is the window and controller. The rest is WebView2 loading the document after the handover, which the probe does not split further.
-- **Probe limits.** Animation frames were not used: a window that is not visible does not run them, so the probe could not detect a painted frame. The probe now navigates to the app origin, as the app does, and loads an external script. An earlier version used an inline script, which never ran. That is the app's content security policy at work: it blocks inline scripts on the app origin, as the `csp` check confirms. It was not a defect in navigation. Timings are the same on the navigate path as before: a median of about 3 s to `DOMContentLoaded` in the earlier runs.
+- **Probe limits.** The probe stops at `DOMContentLoaded`, not at a painted frame. Its paint time is the screen measure in the section above. (The probe's window was hidden by the bug fixed above, so animation frames were never a fair test of it.) The probe navigates to the app origin, as the app does, and loads an external script. An earlier version used an inline script, which never ran. That is the app's content security policy at work: it blocks inline scripts on the app origin, as the `csp` check confirms. It was not a defect in navigation. Timings are the same on the navigate path as before: a median of about 3 s to `DOMContentLoaded` in the earlier runs.
 
 ## A bug found by looking at the screen: the shell's windows were blank (fixed, 2026-10-23)
 
