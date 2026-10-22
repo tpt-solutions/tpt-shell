@@ -680,7 +680,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [ ] Capability dry-run in `dev`: log would-be denials instead of failing, with a copy-paste manifest fix
 - [x] `tpt-shell audit explain`: plain-language summary of an audit log for non-technical reviewers (verifies the log first; the summary is unit-tested on synthetic records, not on a log written by an app)
 - [ ] `tpt-shell kiosk init`: signed kiosk config plus service install in one command
-- [ ] `tpt-shell report` output re-openable with `replay`
+- [x] `tpt-shell report` output re-openable with `replay` (`replay` opens a bundle's replay. A bundle has the replay text but not the asset bytes, only their names and sizes, so an app with assets cannot replay all of it. A bundle made without `--replay` says so)
 
 ---
 

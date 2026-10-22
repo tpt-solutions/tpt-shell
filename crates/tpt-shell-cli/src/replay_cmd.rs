@@ -46,6 +46,11 @@ pub fn replay(args: &[&str]) -> Result<ExitCode, String> {
     }
     let path = path.ok_or_else(|| REPLAY_USAGE.to_string())?;
     let text = fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+    // A bug-report bundle from `tpt-shell report` carries its replay; open that instead.
+    let text = match report_replay(&text)? {
+        Some(replay) => replay,
+        None => text,
+    };
 
     let recording = match tpt_shell_replay::read(&text, mode) {
         Ok(recording) => recording,
@@ -189,6 +194,21 @@ pub fn report(args: &[&str]) -> Result<ExitCode, String> {
         .map_err(|e| format!("cannot write {}: {e}", out.display()))?;
     println!("wrote {}", out.display());
     Ok(ExitCode::SUCCESS)
+}
+
+/// The replay inside a `tpt-shell report` bundle. `None` when `text` is not a bundle. A bundle
+/// made without a replay is an error, since there is nothing to open.
+fn report_replay(text: &str) -> Result<Option<String>, String> {
+    let Ok(bundle) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Ok(None);
+    };
+    if bundle.get("format").and_then(serde_json::Value::as_str) != Some("tpt-shell-report") {
+        return Ok(None);
+    }
+    match bundle.get("replay") {
+        Some(serde_json::Value::String(replay)) => Ok(Some(replay.clone())),
+        _ => Err("this report has no replay: it was made without --replay".into()),
+    }
 }
 
 fn file_name(path: &Path) -> String {
@@ -367,5 +387,65 @@ mod tests {
         assert!(report(&[out.to_str().unwrap(), "--log", "no-such.log"]).is_err());
         assert!(!out.exists());
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod reopen_tests {
+    use super::*;
+    use tpt_shell_replay::report::{build, DefaultRedactor, Inputs};
+    use tpt_shell_replay::{Header, Recorder};
+
+    fn recording() -> String {
+        let mut r = Recorder::new(Header {
+            app: "demo".into(),
+            platform: "linux".into(),
+        });
+        r.record(
+            0,
+            "ipc_request",
+            serde_json::json!({ "id": 1, "cmd": "ping" }),
+        )
+        .unwrap();
+        r.record(
+            5,
+            "ipc_response",
+            serde_json::json!({ "id": 1, "ok": true }),
+        )
+        .unwrap();
+        r.finish()
+    }
+
+    #[test]
+    fn a_report_opens_its_replay_and_a_report_without_one_says_so() {
+        let text = recording();
+        let inputs = Inputs {
+            replay: Some(&text),
+            logs: Vec::new(),
+            versions: Vec::new(),
+            audit_tail: Vec::new(),
+        };
+        let bundle = build(&inputs, &DefaultRedactor::default()).unwrap();
+        let replay = report_replay(&bundle).unwrap().expect("a report");
+        let read = tpt_shell_replay::read(&replay, tpt_shell_replay::Mode::Strict)
+            .expect("the bundled replay reads back");
+        assert_eq!(read.header.app, "demo");
+
+        let bare = build(
+            &Inputs {
+                replay: None,
+                logs: Vec::new(),
+                versions: Vec::new(),
+                audit_tail: Vec::new(),
+            },
+            &DefaultRedactor::default(),
+        )
+        .unwrap();
+        assert!(report_replay(&bare).is_err());
+        assert_eq!(
+            report_replay(&text).unwrap(),
+            None,
+            "a plain recording is not a report"
+        );
     }
 }
