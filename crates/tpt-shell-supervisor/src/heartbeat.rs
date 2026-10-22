@@ -11,10 +11,14 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 /// Environment variable that names the heartbeat file for the app.
+///
+/// Support: Full.
 pub const ENV: &str = "TPT_HEARTBEAT_FILE";
 
 /// Records that the app is alive, by writing the current Unix time (in milliseconds) to `path`.
 /// Writing the time, not only touching the file, makes each beat change the contents as well.
+///
+/// Support: Full.
 pub fn beat(path: &Path) -> io::Result<()> {
     let millis = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -29,6 +33,8 @@ pub fn beat(path: &Path) -> io::Result<()> {
 }
 
 /// How long ago the last beat was, or `None` when the file does not exist yet.
+///
+/// Support: Full.
 pub fn age(path: &Path) -> Option<Duration> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
     Some(

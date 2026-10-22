@@ -9,6 +9,8 @@ const ESC: u8 = 0x1B;
 const GS: u8 = 0x1D;
 
 /// Horizontal alignment for the next lines.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Align {
     Left,
@@ -17,6 +19,8 @@ pub enum Align {
 }
 
 /// Accumulates ESC/POS bytes for one receipt. Starts with a printer reset (`ESC @`).
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Receipt {
     bytes: Vec<u8>,
@@ -29,6 +33,7 @@ impl Default for Receipt {
 }
 
 impl Receipt {
+    /// Support: Full.
     pub fn new() -> Self {
         Receipt {
             bytes: vec![ESC, b'@'],
@@ -36,6 +41,8 @@ impl Receipt {
     }
 
     /// Prints `text` followed by a line feed.
+    ///
+    /// Support: Full.
     pub fn line(&mut self, text: &str) -> Result<&mut Self, UnsupportedText> {
         check_ascii(text)?;
         self.bytes.extend_from_slice(text.as_bytes());
@@ -44,18 +51,24 @@ impl Receipt {
     }
 
     /// Feeds `lines` blank lines.
+    ///
+    /// Support: Full.
     pub fn feed(&mut self, lines: u8) -> &mut Self {
         self.bytes.extend_from_slice(&[ESC, b'd', lines]);
         self
     }
 
     /// Turns emphasis on or off (`ESC E`).
+    ///
+    /// Support: Full.
     pub fn bold(&mut self, on: bool) -> &mut Self {
         self.bytes.extend_from_slice(&[ESC, b'E', u8::from(on)]);
         self
     }
 
     /// Sets alignment for following lines (`ESC a`).
+    ///
+    /// Support: Full.
     pub fn align(&mut self, align: Align) -> &mut Self {
         let n = match align {
             Align::Left => 0,
@@ -67,12 +80,15 @@ impl Receipt {
     }
 
     /// Cuts the paper. `partial` leaves a small tab (`GS V 1`); otherwise a full cut (`GS V 0`).
+    ///
+    /// Support: Full.
     pub fn cut(&mut self, partial: bool) -> &mut Self {
         let mode = if partial { 1 } else { 0 };
         self.bytes.extend_from_slice(&[GS, b'V', mode]);
         self
     }
 
+    /// Support: Full.
     pub fn into_bytes(self) -> Vec<u8> {
         self.bytes
     }

@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Why a snapshot could not be restored. A missing snapshot is not an error; see [`restore`].
+///
+/// Support: Full.
 #[derive(Debug)]
 pub enum StateError {
     Io(io::Error),
@@ -31,6 +33,8 @@ impl std::fmt::Display for StateError {
 impl std::error::Error for StateError {}
 
 /// Writes `value` to `path`, replacing any earlier snapshot.
+///
+/// Support: Full.
 pub fn save<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
     let text = serde_json::to_string_pretty(value).map_err(io::Error::other)?;
     let tmp = temp_name(path);
@@ -41,6 +45,8 @@ pub fn save<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
 /// Reads the snapshot at `path`. Returns `Ok(None)` when there is none yet, so a first start
 /// begins from the app's defaults. A snapshot that cannot be read is `Err`, so the caller can
 /// fall back to its defaults and log the problem.
+///
+/// Support: Full.
 pub fn restore<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, StateError> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,

@@ -10,6 +10,8 @@ use std::fmt;
 use crate::id::DeviceId;
 
 /// Why a device operation failed.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeviceError {
     /// The device was closed, or its peer went away.
@@ -40,6 +42,8 @@ impl fmt::Display for DeviceError {
 impl std::error::Error for DeviceError {}
 
 /// A byte stream to one device.
+///
+/// Support: Full.
 pub trait Transport: Send {
     /// The device's identifier.
     fn id(&self) -> &DeviceId;
@@ -60,6 +64,8 @@ pub trait Transport: Send {
 }
 
 /// A control transfer (USB setup packet).
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ControlRequest {
     /// True for device-to-host (the data stage is read).

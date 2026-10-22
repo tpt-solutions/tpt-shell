@@ -18,6 +18,8 @@ use std::fmt;
 use std::str::FromStr;
 
 /// One device, identified by what the bus or network reports.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeviceId {
     Serial { port: String },
@@ -27,6 +29,8 @@ pub enum DeviceId {
 }
 
 /// Why an identifier string was refused.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParseError(pub String);
 
@@ -147,6 +151,8 @@ fn parse_vid_pid(rest: &str, whole: &str) -> Result<(u16, u16), ParseError> {
 }
 
 /// Which devices a grant covers.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeviceScope {
     /// Serial ports whose names match the glob, for example `COM*`.
@@ -167,6 +173,8 @@ pub enum DeviceScope {
 
 impl DeviceScope {
     /// Whether `id` falls inside this scope. A scope never matches another kind of device.
+    ///
+    /// Support: Full.
     pub fn matches(&self, id: &DeviceId) -> bool {
         match (self, id) {
             (DeviceScope::Serial { port }, DeviceId::Serial { port: p }) => {
@@ -196,6 +204,8 @@ impl DeviceScope {
 }
 
 /// Glob match: `*` matches any run (including none), `?` matches one character.
+///
+/// Support: Full.
 pub fn glob_match(pattern: &str, text: &str) -> bool {
     let p: Vec<char> = pattern.chars().collect();
     let t: Vec<char> = text.chars().collect();

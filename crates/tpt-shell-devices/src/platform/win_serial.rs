@@ -99,6 +99,8 @@ extern "system" {
 }
 
 /// An open serial port. Dropping it closes the handle.
+///
+/// Support: Full.
 pub struct WinSerial {
     id: DeviceId,
     handle: Handle,
@@ -132,6 +134,8 @@ fn device_path(port: &str) -> Result<Vec<u16>, DeviceError> {
 }
 
 /// Opens `port` (for example `COM3`) at `baud`, 8 data bits, no parity, one stop bit.
+///
+/// Support: Full.
 pub fn open(id: &DeviceId, port: &str, baud: u32) -> Result<WinSerial, DeviceError> {
     let path = device_path(port)?;
     // SAFETY: `path` is a NUL-terminated UTF-16 string that lives for the call. No security

@@ -11,6 +11,7 @@ use std::path::Path;
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 
+/// Support: Full.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ConfigError {
     /// The public key or the signature is not the right hex length.
@@ -37,6 +38,8 @@ impl fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 /// Checks `body` against the hex `signature` under the hex `public_key`.
+///
+/// Support: Full.
 pub fn verify(body: &[u8], signature: &str, public_key: &str) -> Result<(), ConfigError> {
     let key_bytes: [u8; 32] = decode_hex(public_key, "the public key")?;
     let key = VerifyingKey::from_bytes(&key_bytes)
@@ -48,6 +51,8 @@ pub fn verify(body: &[u8], signature: &str, public_key: &str) -> Result<(), Conf
 }
 
 /// Reads the config and its signature from disk, verifies them, and parses the config as JSON.
+///
+/// Support: Full.
 pub fn load(
     config: &Path,
     signature: &Path,
@@ -62,12 +67,16 @@ pub fn load(
 
 /// Signs `body` with a 32-byte secret key and returns the signature as hex. Used by the tool
 /// that writes configs, and by the tests.
+///
+/// Support: Full.
 pub fn sign(body: &[u8], secret_key: &[u8; 32]) -> String {
     let key = SigningKey::from_bytes(secret_key);
     encode_hex(&key.sign(body).to_bytes())
 }
 
 /// The public key for a 32-byte secret key, as hex.
+///
+/// Support: Full.
 pub fn public_key_hex(secret_key: &[u8; 32]) -> String {
     encode_hex(
         &SigningKey::from_bytes(secret_key)

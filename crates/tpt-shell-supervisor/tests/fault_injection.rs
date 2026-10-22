@@ -84,9 +84,6 @@ fn fault_app_child() {
 
 /// A spawner that runs this test binary as the app, with the given fault script.
 fn child_spawner(dir: &Path, script: &str, scheduled: Option<Scheduled>) -> ProcessSpawner {
-    // SAFETY-free: these are plain environment variables read by the child process only.
-    std::env::set_var("TPT_FAULT_SCRIPT", script);
-    std::env::set_var("TPT_FAULT_COUNTER", dir.join("counter"));
     ProcessSpawner {
         program: std::env::current_exe().expect("this test binary"),
         args: [
@@ -98,6 +95,10 @@ fn child_spawner(dir: &Path, script: &str, scheduled: Option<Scheduled>) -> Proc
         .iter()
         .map(Into::into)
         .collect(),
+        env: vec![
+            ("TPT_FAULT_SCRIPT".into(), script.into()),
+            ("TPT_FAULT_COUNTER".into(), dir.join("counter").into()),
+        ],
         heartbeat_file: dir.join("heartbeat"),
         heartbeat: Heartbeat {
             timeout: Duration::from_secs(1),

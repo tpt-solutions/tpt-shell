@@ -14,6 +14,8 @@
 use crate::id::DeviceId;
 
 /// One change in the set of present devices.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Change {
     Added(DeviceId),
@@ -21,6 +23,9 @@ pub enum Change {
 }
 
 /// Remembers the devices seen at the last poll and reports the difference.
+///
+/// Support: Partial. The diff is complete, but no platform listing feeds it yet (the Win32, IOKit,
+/// hidraw and usbfs enumerations are not built), so a caller supplies the list.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Watch {
     enabled: bool,
@@ -29,11 +34,15 @@ pub struct Watch {
 
 impl Watch {
     /// A watcher that reports nothing. The default.
+    ///
+    /// Support: Full.
     pub fn disabled() -> Self {
         Self::default()
     }
 
     /// A watcher that reports changes. Use it only when the app asks for hotplug events.
+    ///
+    /// Support: Full.
     pub fn opted_in() -> Self {
         Watch {
             enabled: true,
@@ -41,12 +50,16 @@ impl Watch {
         }
     }
 
+    /// Support: Full.
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
 
     /// Compares `present` with the last poll. A disabled watcher returns nothing and keeps no
     /// state. The first poll of an enabled watcher reports every device as added.
+    ///
+    /// Support: Partial. The diff is complete, but no platform listing feeds it yet (the Win32,
+    /// IOKit, hidraw and usbfs enumerations are not built), so a caller supplies the list.
     pub fn update(&mut self, present: &[DeviceId]) -> Vec<Change> {
         if !self.enabled {
             return Vec::new();

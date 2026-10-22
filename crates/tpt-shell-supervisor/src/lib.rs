@@ -12,13 +12,22 @@
 
 use std::time::{Duration, Instant};
 
+/// Support: Full.
 pub mod alert;
+/// Support: Full.
 pub mod heartbeat;
+/// Support: Partial. The Windows Task Scheduler path is tested on Windows. The macOS LaunchAgent
+/// and Linux systemd output is not run on those systems here (compile-checked only).
 pub mod install;
+/// Support: Full.
 pub mod log;
+/// Support: Partial. Spawning and stopping is tested on Windows only; on macOS and Linux it is
+/// compile-checked, not run here.
 pub mod process;
 
 /// Exponential backoff: `initial`, then `initial * factor`, and so on, never above `max`.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Backoff {
     pub initial: Duration,
@@ -38,6 +47,8 @@ impl Default for Backoff {
 
 impl Backoff {
     /// Delay before restart number `attempt` (0 is the first restart).
+    ///
+    /// Support: Full.
     pub fn delay(&self, attempt: u32) -> Duration {
         let mut delay = self.initial;
         for _ in 0..attempt {
@@ -51,6 +62,8 @@ impl Backoff {
 }
 
 /// What to do after a crash.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
     /// Restart after this delay.
@@ -60,6 +73,8 @@ pub enum Decision {
 }
 
 /// Counts recent crashes. A crash older than `window` no longer counts.
+///
+/// Support: Full.
 #[derive(Clone, Debug)]
 pub struct CrashLoopGuard {
     pub window: Duration,
@@ -69,6 +84,7 @@ pub struct CrashLoopGuard {
 }
 
 impl CrashLoopGuard {
+    /// Support: Full.
     pub fn new(window: Duration, max_crashes: u32, backoff: Backoff) -> Self {
         CrashLoopGuard {
             window,
@@ -79,6 +95,8 @@ impl CrashLoopGuard {
     }
 
     /// Records a crash at `now` and returns the decision.
+    ///
+    /// Support: Full.
     pub fn record_crash(&mut self, now: Instant) -> Decision {
         let window = self.window;
         self.crashes
@@ -95,18 +113,23 @@ impl CrashLoopGuard {
 }
 
 /// Heartbeat watch: the app must report at least once per `timeout`.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Heartbeat {
     pub timeout: Duration,
 }
 
 impl Heartbeat {
+    /// Support: Full.
     pub fn is_hung(&self, last_beat: Instant, now: Instant) -> bool {
         now.saturating_duration_since(last_beat) > self.timeout
     }
 }
 
 /// A restart at a fixed time of day, in minutes after midnight (0-1439).
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Scheduled {
     pub minute_of_day: u16,
@@ -115,6 +138,8 @@ pub struct Scheduled {
 impl Scheduled {
     /// Whether a restart is due, given the previous minute-of-day and the current one.
     /// Works across midnight.
+    ///
+    /// Support: Full.
     pub fn is_due(&self, previous: u16, current: u16) -> bool {
         if previous == current {
             return false;
@@ -129,6 +154,8 @@ impl Scheduled {
 }
 
 /// How one run of the app ended.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Exit {
     /// Exited with success. The loop stops.
@@ -142,6 +169,8 @@ pub enum Exit {
 }
 
 /// Starts the app and reports how it ended. Platforms implement this with real processes.
+///
+/// Support: Full.
 pub trait Spawner {
     fn run_once(&mut self) -> Exit;
 }
@@ -149,6 +178,8 @@ pub trait Spawner {
 /// Runs the app until it exits cleanly or the guard gives up. Every restart and the give-up
 /// are passed to `log` as they happen, and `alert` is called once when the loop gives up.
 /// `sleep` waits for the backoff. Returns the number of runs.
+///
+/// Support: Full.
 pub fn supervise(
     spawner: &mut dyn Spawner,
     guard: &mut CrashLoopGuard,

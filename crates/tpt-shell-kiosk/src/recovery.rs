@@ -8,6 +8,8 @@
 use std::time::{Duration, Instant};
 
 /// What the window should do after a page failure.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Recovery {
     /// Load this URL (the last good page, or home when there is none yet).
@@ -16,6 +18,7 @@ pub enum Recovery {
     Home,
 }
 
+/// Support: Full.
 #[derive(Clone, Debug)]
 pub struct CrashRecovery {
     home: String,
@@ -28,6 +31,8 @@ pub struct CrashRecovery {
 impl CrashRecovery {
     /// `home` is the full URL of the home page. More than `max_failures` in `window` sends the
     /// window home.
+    ///
+    /// Support: Full.
     pub fn new(home: impl Into<String>, window: Duration, max_failures: u32) -> Self {
         CrashRecovery {
             home: home.into(),
@@ -39,11 +44,15 @@ impl CrashRecovery {
     }
 
     /// Records that `url` finished loading without a failure.
+    ///
+    /// Support: Full.
     pub fn page_loaded(&mut self, url: &str) {
         self.last_good = Some(url.to_string());
     }
 
     /// Records a renderer failure at `now` and returns what to load.
+    ///
+    /// Support: Full.
     pub fn page_failed(&mut self, now: Instant) -> Recovery {
         let window = self.window;
         self.failures

@@ -12,10 +12,13 @@ use crate::transport::DeviceError;
 
 /// The name of an installed printer. Validated when it is made, so it is safe to pass to the
 /// spooler: printable ASCII, no leading dash, at most 128 characters.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrinterName(String);
 
 impl PrinterName {
+    /// Support: Full.
     pub fn new(name: &str) -> Result<Self, DeviceError> {
         let ok = !name.is_empty()
             && name.len() <= 128
@@ -33,12 +36,16 @@ impl PrinterName {
         }
     }
 
+    /// Support: Full.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
 /// The default printer, if the system has one.
+///
+/// Support: Partial. Windows: the winspool RAW datatype, tested. macOS and Linux go through CUPS lp
+/// with -o raw; not run on those systems from this workspace. Other platforms return NotSupported.
 pub fn default_printer() -> Option<PrinterName> {
     let name = platform_default()?;
     PrinterName::new(&name).ok()
@@ -46,6 +53,9 @@ pub fn default_printer() -> Option<PrinterName> {
 
 /// Sends `bytes` to `printer` as one raw job named `job`. The job name is printable ASCII, up
 /// to 128 characters.
+///
+/// Support: Partial. Windows: the winspool RAW datatype, tested. macOS and Linux go through CUPS lp
+/// with -o raw; not run on those systems from this workspace. Other platforms return NotSupported.
 pub fn send_raw(printer: &PrinterName, job: &str, bytes: &[u8]) -> Result<(), DeviceError> {
     let ok = !job.is_empty()
         && job.len() <= 128

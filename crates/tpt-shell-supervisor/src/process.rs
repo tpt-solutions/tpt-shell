@@ -12,9 +12,13 @@ use std::time::{Duration, Instant};
 
 use crate::{heartbeat, Exit, Heartbeat, Scheduled, Spawner};
 
+/// Support: Partial. Tested on Windows only; on macOS and Linux it is compile-checked, not run
+/// here.
 pub struct ProcessSpawner {
     pub program: PathBuf,
     pub args: Vec<OsString>,
+    /// Environment variables for the child only. The supervisor's own environment is not changed.
+    pub env: Vec<(OsString, OsString)>,
     pub heartbeat_file: PathBuf,
     pub heartbeat: Heartbeat,
     /// How long a new run may take to send its first beat.
@@ -42,6 +46,7 @@ impl Spawner for ProcessSpawner {
         let _ = std::fs::remove_file(&self.heartbeat_file);
         let mut child = match Command::new(&self.program)
             .args(&self.args)
+            .envs(self.env.iter().map(|(k, v)| (k, v)))
             .env(heartbeat::ENV, &self.heartbeat_file)
             .spawn()
         {

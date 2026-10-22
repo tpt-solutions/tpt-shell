@@ -79,6 +79,8 @@ fn open_printer(name: &str) -> Result<OpenPrinter, DeviceError> {
 }
 
 /// The name of the default printer, if Windows has one.
+///
+/// Support: Full.
 pub fn default_printer() -> Option<String> {
     let mut chars: u32 = 0;
     // SAFETY: a null buffer with a size pointer asks for the length needed.
@@ -97,6 +99,8 @@ pub fn default_printer() -> Option<String> {
 }
 
 /// Sends `bytes` to `printer` as one RAW document named `job`.
+///
+/// Support: Full.
 pub fn send_raw(printer: &str, job: &str, bytes: &[u8]) -> Result<(), DeviceError> {
     let handle = open_printer(printer)?;
     let job = wide(job);

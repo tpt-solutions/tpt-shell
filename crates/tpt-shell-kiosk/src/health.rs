@@ -14,6 +14,8 @@ use std::time::{Duration, SystemTime};
 use crate::http::{serve, Handler, Request, Response, Server};
 
 /// Whether a heartbeat file is fresh: it exists and was written within `max_age`.
+///
+/// Support: Full.
 pub fn is_healthy(heartbeat: &Path, max_age: Duration) -> bool {
     let Ok(modified) = std::fs::metadata(heartbeat).and_then(|m| m.modified()) else {
         return false;
@@ -26,6 +28,8 @@ pub fn is_healthy(heartbeat: &Path, max_age: Duration) -> bool {
 }
 
 /// Starts the health endpoint at `addr` (must be loopback), reading `heartbeat`.
+///
+/// Support: Full. Built only with the health-endpoint feature, which is off by default.
 pub fn start(addr: SocketAddr, heartbeat: PathBuf, max_age: Duration) -> std::io::Result<Server> {
     let handler: Handler = Arc::new(move |request: &Request| {
         if request.method != "GET" || request.path != "/healthz" {

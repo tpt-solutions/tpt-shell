@@ -6,6 +6,8 @@
 use crate::{check_ascii, UnsupportedText};
 
 /// Builds one ZPL label.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Label {
     body: String,
@@ -18,6 +20,7 @@ impl Default for Label {
 }
 
 impl Label {
+    /// Support: Full.
     pub fn new() -> Self {
         Label {
             body: String::new(),
@@ -27,6 +30,8 @@ impl Label {
     /// Prints `text` at (`x`, `y`) dots, in a font `height` dots high.
     ///
     /// `^` and `~` are ZPL command characters, so they are written as hex escapes with `^FH`.
+    ///
+    /// Support: Full.
     pub fn text(
         &mut self,
         x: u32,
@@ -44,6 +49,8 @@ impl Label {
     }
 
     /// Prints a Code 128 barcode of `data` at (`x`, `y`), `height` dots high.
+    ///
+    /// Support: Full.
     pub fn code128(
         &mut self,
         x: u32,
@@ -61,6 +68,8 @@ impl Label {
     }
 
     /// Renders the complete label, from `^XA` to `^XZ`.
+    ///
+    /// Support: Full.
     pub fn render(&self) -> String {
         format!("^XA\n{}^XZ\n", self.body)
     }

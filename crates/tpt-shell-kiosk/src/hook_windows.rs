@@ -27,12 +27,17 @@ const LLKHF_ALTDOWN: u32 = 0x20;
 const VK_CONTROL: i32 = 0x11;
 
 /// Keeps the hook installed. Dropping it removes the hook and stops its thread.
+///
+/// Support: Full. Windows only. The test installs and removes the hook.
 pub struct KeyboardHook {
     thread_id: u32,
     thread: Option<JoinHandle<()>>,
 }
 
 /// Installs the hook. Fails when Windows refuses it, with the OS error.
+///
+/// Support: Partial. Windows only. The test installs and removes the hook, but that a real key
+/// press is blocked is not automated, and Ctrl+Alt+Del cannot be blocked from user space.
 pub fn install() -> io::Result<KeyboardHook> {
     let (tx, rx) = mpsc::channel::<Result<u32, u32>>();
     let thread = std::thread::Builder::new()

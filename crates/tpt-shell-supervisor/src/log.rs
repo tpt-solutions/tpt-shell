@@ -9,12 +9,14 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+/// Support: Full.
 pub struct FileLog {
     path: PathBuf,
     max_bytes: u64,
 }
 
 impl FileLog {
+    /// Support: Full.
     pub fn new(path: impl Into<PathBuf>, max_bytes: u64) -> Self {
         FileLog {
             path: path.into(),
@@ -23,6 +25,8 @@ impl FileLog {
     }
 
     /// Appends one line, rotating first when the file is full.
+    ///
+    /// Support: Full.
     pub fn line(&self, text: &str) -> io::Result<()> {
         let secs = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -55,6 +59,8 @@ impl FileLog {
 }
 
 /// `app.log` becomes `app.log.1`.
+///
+/// Support: Full.
 pub fn rotated_name(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push(".1");

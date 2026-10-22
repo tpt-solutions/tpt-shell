@@ -16,6 +16,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// A program to start at login, with its arguments.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ServiceSpec {
     /// Short name: letters, digits, `-`, `_` or `.`, 1 to 64 characters.
@@ -26,6 +28,8 @@ pub struct ServiceSpec {
 
 impl ServiceSpec {
     /// Checks the name. Fails with `InvalidInput` when it would not be a safe file or task name.
+    ///
+    /// Support: Full.
     pub fn new(name: &str, program: impl Into<PathBuf>, args: Vec<String>) -> io::Result<Self> {
         let ok = !name.is_empty()
             && name.len() <= 64
@@ -48,16 +52,22 @@ impl ServiceSpec {
     }
 
     /// The LaunchAgent label, and the file name without `.plist`.
+    ///
+    /// Support: Full.
     pub fn label(&self) -> String {
         format!("com.tpt-shell.{}", self.name)
     }
 
     /// The scheduled task name on Windows.
+    ///
+    /// Support: Full.
     pub fn task_name(&self) -> String {
         format!("tpt-shell-{}", self.name)
     }
 
     /// The systemd unit name, without the folder.
+    ///
+    /// Support: Full.
     pub fn unit_name(&self) -> String {
         format!("tpt-shell-{}.service", self.name)
     }
@@ -71,17 +81,24 @@ impl ServiceSpec {
 }
 
 /// The LaunchAgents folder under a home folder.
+///
+/// Support: Full.
 pub fn launch_agents_dir(home: &Path) -> PathBuf {
     home.join("Library").join("LaunchAgents")
 }
 
 /// The systemd user unit folder under a home folder.
+///
+/// Support: Full.
 pub fn systemd_user_dir(home: &Path) -> PathBuf {
     home.join(".config").join("systemd").join("user")
 }
 
 /// The LaunchAgent property list for `spec`. It starts at login, and launchd restarts it when
 /// it exits with a failure.
+///
+/// Support: Partial. The plist text is checked by tests on Windows; that launchd loads it and
+/// restarts the app is not run on macOS here (compile-checked only).
 pub fn launch_agent_plist(spec: &ServiceSpec) -> String {
     let mut args = String::new();
     for part in spec.command() {
@@ -114,6 +131,8 @@ pub fn launch_agent_plist(spec: &ServiceSpec) -> String {
 
 /// Writes the LaunchAgent for `spec` into `dir` (normally [`launch_agents_dir`]). Creates the
 /// folder if needed. Returns the path written.
+///
+/// Support: Full.
 pub fn write_launch_agent(dir: &Path, spec: &ServiceSpec) -> io::Result<PathBuf> {
     fs::create_dir_all(dir)?;
     let path = dir.join(format!("{}.plist", spec.label()));
@@ -122,6 +141,9 @@ pub fn write_launch_agent(dir: &Path, spec: &ServiceSpec) -> io::Result<PathBuf>
 }
 
 /// The systemd user unit for `spec`. It starts with the user's session and restarts on failure.
+///
+/// Support: Partial. The unit text is checked by tests on Windows; that systemd starts and restarts
+/// the app is not run on Linux here (compile-checked only).
 pub fn systemd_unit(spec: &ServiceSpec) -> String {
     let exec = spec
         .command()
@@ -146,6 +168,8 @@ WantedBy=default.target\n",
 }
 
 /// Writes the systemd user unit for `spec` into `dir` (normally [`systemd_user_dir`]).
+///
+/// Support: Full.
 pub fn write_systemd_unit(dir: &Path, spec: &ServiceSpec) -> io::Result<PathBuf> {
     fs::create_dir_all(dir)?;
     let path = dir.join(spec.unit_name());
@@ -154,6 +178,8 @@ pub fn write_systemd_unit(dir: &Path, spec: &ServiceSpec) -> io::Result<PathBuf>
 }
 
 /// Arguments for `schtasks` that create a logon task for `spec`. Run them with [`run_schtasks`].
+///
+/// Support: Full.
 pub fn schtasks_create_args(spec: &ServiceSpec) -> Vec<OsString> {
     let command = spec
         .command()
@@ -179,6 +205,8 @@ pub fn schtasks_create_args(spec: &ServiceSpec) -> Vec<OsString> {
 }
 
 /// Arguments for `schtasks` that delete the task for `spec`.
+///
+/// Support: Full.
 pub fn schtasks_delete_args(spec: &ServiceSpec) -> Vec<OsString> {
     ["/Delete", "/TN", &spec.task_name(), "/F"]
         .iter()
@@ -187,6 +215,9 @@ pub fn schtasks_delete_args(spec: &ServiceSpec) -> Vec<OsString> {
 }
 
 /// Runs `schtasks` with `args`. Windows only; elsewhere it is an `Unsupported` error.
+///
+/// Support: Partial. Windows only: it runs schtasks, which no test runs. On macOS and Linux it
+/// returns an Unsupported error.
 pub fn run_schtasks(args: &[OsString]) -> io::Result<()> {
     #[cfg(windows)]
     {

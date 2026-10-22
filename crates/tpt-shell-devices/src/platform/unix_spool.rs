@@ -14,6 +14,9 @@ use std::process::{Command, Stdio};
 use crate::transport::DeviceError;
 
 /// Sends `bytes` to `printer` as one raw job named `job`.
+///
+/// Support: Partial. Goes through CUPS lp with -o raw, which needs CUPS installed; not run on
+/// macOS/Linux here; compile-checked.
 pub fn send_raw(printer: &str, job: &str, bytes: &[u8]) -> Result<(), DeviceError> {
     let mut child = Command::new("lp")
         .args(["-d", printer, "-o", "raw", "-t", job, "-"])
@@ -44,6 +47,9 @@ pub fn send_raw(printer: &str, job: &str, bytes: &[u8]) -> Result<(), DeviceErro
 }
 
 /// The default printer, as `lpstat -d` names it, if CUPS has one.
+///
+/// Support: Partial. Goes through CUPS lp with -o raw, which needs CUPS installed; not run on
+/// macOS/Linux here; compile-checked.
 pub fn default_printer() -> Option<String> {
     let output = Command::new("lpstat").arg("-d").output().ok()?;
     if !output.status.success() {

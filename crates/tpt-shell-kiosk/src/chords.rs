@@ -6,13 +6,21 @@
 //! platform. The Windows low-level keyboard hook (see `hook_windows`) calls it.
 
 /// Virtual-key codes (Windows `VK_*` values).
+///
+/// Support: Full.
 pub const VK_TAB: u32 = 0x09;
+/// Support: Full.
 pub const VK_ESCAPE: u32 = 0x1B;
+/// Support: Full.
 pub const VK_F4: u32 = 0x73;
+/// Support: Full.
 pub const VK_LWIN: u32 = 0x5B;
+/// Support: Full.
 pub const VK_RWIN: u32 = 0x5C;
 
 /// Whether a key-down with this key and modifier state is blocked.
+///
+/// Support: Full.
 pub fn is_blocked(vk: u32, alt: bool, ctrl: bool) -> bool {
     match vk {
         VK_LWIN | VK_RWIN => true,

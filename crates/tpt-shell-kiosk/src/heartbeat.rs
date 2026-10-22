@@ -12,9 +12,13 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 /// The environment variable that names the heartbeat file.
+///
+/// Support: Partial. No test reads the environment variable name through from_env.
 pub const ENV: &str = "TPT_HEARTBEAT_FILE";
 
 /// The heartbeat path from the environment, or `None` when the app is not supervised.
+///
+/// Support: Partial. No test sets TPT_HEARTBEAT_FILE, so the lookup is not checked here.
 pub fn from_env() -> Option<PathBuf> {
     std::env::var_os(ENV)
         .filter(|v| !v.is_empty())
@@ -22,6 +26,8 @@ pub fn from_env() -> Option<PathBuf> {
 }
 
 /// Records that the app is alive by writing the current Unix time in milliseconds to `path`.
+///
+/// Support: Full.
 pub fn beat(path: &Path) -> io::Result<()> {
     let millis = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)

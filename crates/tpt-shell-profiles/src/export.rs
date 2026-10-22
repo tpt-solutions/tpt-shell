@@ -32,9 +32,13 @@ const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
 const HEADER_LEN: usize = MAGIC.len() + 4 + SALT_LEN + NONCE_LEN;
 /// Shortest passphrase accepted. Shorter ones are refused, so a weak export is not written.
+///
+/// Support: Full.
 pub const MIN_PASSPHRASE: usize = 8;
 
 /// One file in an export: its path under the profile and its bytes.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedFile {
     pub path: String,
@@ -42,6 +46,8 @@ pub struct ExportedFile {
 }
 
 /// Writes the files under `dir` to `out`, encrypted with `passphrase`.
+///
+/// Support: Full.
 pub fn export_dir(dir: &Path, out: &Path, passphrase: &str) -> io::Result<()> {
     export_with_iterations(dir, out, passphrase, ITERATIONS)
 }
@@ -96,6 +102,8 @@ fn export_with_iterations(
 
 /// Opens an export written by [`export_dir`]. A wrong passphrase or a changed file is an
 /// `InvalidData` error, and no partial result is returned.
+///
+/// Support: Full.
 pub fn read_export(file: &Path, passphrase: &str) -> io::Result<Vec<ExportedFile>> {
     let bytes = fs::read(file)?;
     if bytes.len() < HEADER_LEN + 16 || &bytes[..MAGIC.len()] != MAGIC {

@@ -21,6 +21,8 @@ use std::time::Duration;
 use serde_json::Value;
 
 /// Whether the kiosk is locked to one app or behaves like a browser.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     /// Full-screen, single window, and navigation only inside the allowlist.
@@ -30,6 +32,8 @@ pub enum Mode {
 }
 
 /// Features a kiosk turns off. Each `true` field is a feature that is disabled.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Lockdown {
     pub devtools: bool,
@@ -47,6 +51,8 @@ pub struct Lockdown {
 
 impl Lockdown {
     /// Everything a single-app kiosk turns off by default.
+    ///
+    /// Support: Full.
     pub fn single_app() -> Self {
         Lockdown {
             devtools: true,
@@ -62,6 +68,8 @@ impl Lockdown {
     }
 
     /// Nothing is turned off.
+    ///
+    /// Support: Full.
     pub fn none() -> Self {
         Lockdown {
             devtools: false,
@@ -78,6 +86,8 @@ impl Lockdown {
 }
 
 /// Window placement the policy asks for.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Windows {
     pub fullscreen: bool,
@@ -85,6 +95,8 @@ pub struct Windows {
 }
 
 /// A parsed kiosk config.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KioskPolicy {
     pub mode: Mode,
@@ -99,6 +111,8 @@ pub struct KioskPolicy {
 }
 
 /// Why a kiosk config was refused. The message names the key.
+///
+/// Support: Full.
 #[derive(Debug, PartialEq, Eq)]
 pub struct PolicyError(pub String);
 
@@ -114,6 +128,8 @@ impl KioskPolicy {
     /// Whether the windows may navigate to `url`. `app_origin` is the origin the app's own pages
     /// are served from. Browser mode allows everything; single-app mode allows the app origin
     /// and the `allow` entries. Anything else, including a non-URL, is refused.
+    ///
+    /// Support: Full.
     pub fn allows_navigation(&self, app_origin: &str, url: &str) -> bool {
         if self.mode == Mode::Browser {
             return true;
@@ -153,6 +169,8 @@ fn resolve(entry: &str, app: &str) -> String {
 }
 
 /// Parses a kiosk config. Fails on a bad value, naming the key that is wrong.
+///
+/// Support: Full.
 pub fn parse(config: &Value) -> Result<KioskPolicy, PolicyError> {
     let mode = match config.get("mode").map(|v| v.as_str()) {
         None => Mode::SingleApp,

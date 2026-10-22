@@ -16,6 +16,8 @@
 use crate::transport::{DeviceError, Transport};
 
 /// A unit a scale reports in.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unit {
     Gram,
@@ -25,6 +27,8 @@ pub enum Unit {
 }
 
 /// A weight in thousandths of its unit, so `1.250 kg` is `1250` thousandths of a kilogram.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Weight {
     pub thousandths: i64,
@@ -32,6 +36,8 @@ pub struct Weight {
 }
 
 /// One reading from a scale.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Reading {
     pub weight: Weight,
@@ -40,6 +46,8 @@ pub struct Reading {
 }
 
 /// Why a line was refused.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScaleError {
     /// The line had no words in it.
@@ -72,6 +80,9 @@ impl std::fmt::Display for ScaleError {
 impl std::error::Error for ScaleError {}
 
 /// Parses one reading line.
+///
+/// Support: Partial. The line shape is generic; a scale that sends a different shape needs its own
+/// parser.
 pub fn parse_line(line: &str) -> Result<Reading, ScaleError> {
     let mut weight: Option<i64> = None;
     let mut unit: Option<Unit> = None;
@@ -156,6 +167,9 @@ fn parse_thousandths(text: &str) -> Result<i64, ScaleError> {
 /// Reads whatever the scale has sent and returns the readings it completed. Lines are split on
 /// carriage return or line feed. A refused line is returned as an error and does not stop the
 /// lines after it.
+///
+/// Support: Partial. The line shape is generic; a scale that sends a different shape needs its own
+/// parser.
 pub fn read_readings(
     transport: &mut dyn Transport,
     pending: &mut Vec<u8>,

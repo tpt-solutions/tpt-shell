@@ -79,6 +79,7 @@ fn run(options: Options) -> bool {
         inner: ProcessSpawner {
             program: PathBuf::from(&options.program),
             args: options.args,
+            env: Vec::new(),
             heartbeat_file: heartbeat_file.clone(),
             heartbeat: Heartbeat {
                 timeout: options.heartbeat_timeout,

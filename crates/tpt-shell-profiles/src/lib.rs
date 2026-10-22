@@ -22,9 +22,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+/// Support: Full.
 pub mod export;
 
 /// Which storage a window uses.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Kind {
     /// The app's default profile.
@@ -36,6 +39,8 @@ pub enum Kind {
 }
 
 /// Why a profile name was refused.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NameError(pub String);
 
@@ -49,6 +54,8 @@ impl std::error::Error for NameError {}
 
 /// A profile name: 1-64 ASCII letters, digits, `-` or `_`. The reserved name `default` is not
 /// allowed as a named profile, because it means the default profile.
+///
+/// Support: Full.
 pub fn check_name(name: &str) -> Result<(), NameError> {
     let ok = !name.is_empty()
         && name.len() <= 64
@@ -69,6 +76,8 @@ pub fn check_name(name: &str) -> Result<(), NameError> {
 }
 
 /// Folder for a profile under `base`. `Ephemeral` has no fixed folder; see [`Ephemeral`].
+///
+/// Support: Full.
 pub fn profile_dir(base: &Path, kind: &Kind) -> Result<PathBuf, NameError> {
     match kind {
         Kind::Default => Ok(base.join("default")),
@@ -85,16 +94,21 @@ pub fn profile_dir(base: &Path, kind: &Kind) -> Result<PathBuf, NameError> {
 const ACTIVE_FILE: &str = "active.txt";
 
 /// Named profiles under one base folder.
+///
+/// Support: Full.
 pub struct ProfileStore {
     base: PathBuf,
 }
 
 impl ProfileStore {
+    /// Support: Full.
     pub fn new(base: impl Into<PathBuf>) -> Self {
         ProfileStore { base: base.into() }
     }
 
     /// Creates the profile's folder. Returns an error if it already exists.
+    ///
+    /// Support: Full.
     pub fn create(&self, name: &str) -> io::Result<PathBuf> {
         let dir = profile_dir(&self.base, &Kind::Named(name.into()))
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.0))?;
@@ -109,6 +123,8 @@ impl ProfileStore {
     }
 
     /// Names of the existing profiles, sorted.
+    ///
+    /// Support: Full.
     pub fn list(&self) -> io::Result<Vec<String>> {
         let root = self.base.join("profiles");
         if !root.exists() {
@@ -131,6 +147,8 @@ impl ProfileStore {
 
     /// The profile chosen with [`ProfileStore::switch`], or `None` for the default profile.
     /// The choice is kept in a file in the store, so it survives a restart.
+    ///
+    /// Support: Full.
     pub fn active(&self) -> io::Result<Option<String>> {
         match fs::read_to_string(self.base.join(ACTIVE_FILE)) {
             Ok(text) => {
@@ -151,6 +169,8 @@ impl ProfileStore {
     /// Makes `name` the active profile, or the default profile when `name` is `None`. The
     /// profile must exist. A running app keeps the folder it started with; the new choice is
     /// used by the next start, which reads it through [`ProfileStore::active`].
+    ///
+    /// Support: Full.
     pub fn switch(&self, name: Option<&str>) -> io::Result<Kind> {
         let kind = match name {
             None => Kind::Default,
@@ -179,6 +199,8 @@ impl ProfileStore {
     }
 
     /// Size of a named profile, in bytes.
+    ///
+    /// Support: Full.
     pub fn usage(&self, name: &str) -> io::Result<u64> {
         let dir = profile_dir(&self.base, &Kind::Named(name.into()))
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.0))?;
@@ -186,6 +208,8 @@ impl ProfileStore {
     }
 
     /// Fails when the named profile is over `limit_bytes`.
+    ///
+    /// Support: Full.
     pub fn enforce_quota(&self, name: &str, limit_bytes: u64) -> io::Result<()> {
         let dir = profile_dir(&self.base, &Kind::Named(name.into()))
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.0))?;
@@ -193,6 +217,8 @@ impl ProfileStore {
     }
 
     /// Writes the named profile to `out` as an encrypted file (see [`export`]).
+    ///
+    /// Support: Full.
     pub fn export(&self, name: &str, out: &Path, passphrase: &str) -> io::Result<()> {
         let dir = profile_dir(&self.base, &Kind::Named(name.into()))
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.0))?;
@@ -207,6 +233,8 @@ impl ProfileStore {
 
     /// Deletes a named profile, overwriting its files first. Refuses names that do not pass
     /// [`check_name`], so the call cannot reach outside the store.
+    ///
+    /// Support: Full.
     pub fn delete(&self, name: &str) -> io::Result<()> {
         let dir = profile_dir(&self.base, &Kind::Named(name.into()))
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.0))?;
@@ -220,6 +248,8 @@ impl ProfileStore {
 
 /// A temporary session folder. It is wiped when dropped, and [`Ephemeral::wipe`] does the same
 /// earlier, for example on window close or after idle time.
+///
+/// Support: Full.
 pub struct Ephemeral {
     dir: PathBuf,
     wiped: bool,
@@ -229,6 +259,8 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl Ephemeral {
     /// Creates a new empty session folder under `base`.
+    ///
+    /// Support: Full.
     pub fn create(base: &Path) -> io::Result<Self> {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
         let dir = base
@@ -238,11 +270,14 @@ impl Ephemeral {
         Ok(Ephemeral { dir, wiped: false })
     }
 
+    /// Support: Full.
     pub fn path(&self) -> &Path {
         &self.dir
     }
 
     /// Overwrites and deletes everything in the session folder now.
+    ///
+    /// Support: Full.
     pub fn wipe(&mut self) -> io::Result<()> {
         if self.wiped {
             return Ok(());
@@ -264,6 +299,9 @@ impl Drop for Ephemeral {
 ///
 /// This is best effort. Copy-on-write file systems, SSD wear levelling, journals and backups
 /// can keep old data, so this does not guarantee erasure. Use full-disk encryption for that.
+///
+/// Support: Partial. Best effort, as the doc says: copy-on-write file systems, SSD wear levelling,
+/// journals and backups can keep old data, so erasure is not guaranteed.
 pub fn wipe_dir(dir: &Path) -> io::Result<()> {
     if !dir.exists() {
         return Ok(());
@@ -296,6 +334,8 @@ fn overwrite_files(dir: &Path) -> io::Result<()> {
 }
 
 /// Total size of the files under `dir`, in bytes.
+///
+/// Support: Full.
 pub fn usage(dir: &Path) -> io::Result<u64> {
     let mut total = 0;
     if !dir.exists() {
@@ -314,6 +354,8 @@ pub fn usage(dir: &Path) -> io::Result<u64> {
 }
 
 /// Fails when `dir` is over `limit_bytes`.
+///
+/// Support: Full.
 pub fn enforce_quota(dir: &Path, limit_bytes: u64) -> io::Result<()> {
     let used = usage(dir)?;
     if used > limit_bytes {
@@ -326,6 +368,8 @@ pub fn enforce_quota(dir: &Path, limit_bytes: u64) -> io::Result<()> {
 }
 
 /// When an ephemeral session should be wiped without waiting for close.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IdlePolicy {
     /// Wipe after this much time without activity. `None` means never.
@@ -333,6 +377,7 @@ pub struct IdlePolicy {
 }
 
 impl IdlePolicy {
+    /// Support: Full.
     pub fn should_wipe(&self, last_activity: Instant, now: Instant) -> bool {
         match self.after {
             Some(limit) => now.saturating_duration_since(last_activity) >= limit,

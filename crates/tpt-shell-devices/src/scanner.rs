@@ -17,9 +17,13 @@
 use crate::transport::{DeviceError, Transport};
 
 /// Longest scan the framer accepts. A longer run without a terminator is dropped, not split.
+///
+/// Support: Full.
 pub const MAX_SCAN_LEN: usize = 256;
 
 /// Why a piece of scanner input was refused.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScanError {
     /// A byte that is not printable ASCII, tab, or a terminator.
@@ -47,6 +51,8 @@ impl std::error::Error for ScanError {}
 
 /// Splits a text stream into scans. Carriage return and line feed end a scan; empty scans
 /// (such as the line feed after a carriage return) are dropped.
+///
+/// Support: Full.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ScanFramer {
     pending: Vec<u8>,
@@ -57,11 +63,14 @@ pub struct ScanFramer {
 }
 
 impl ScanFramer {
+    /// Support: Full.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Feeds bytes and returns each completed scan, or the error for a refused run.
+    ///
+    /// Support: Full.
     pub fn push(&mut self, bytes: &[u8]) -> Vec<Result<String, ScanError>> {
         let mut out = Vec::new();
         for &b in bytes {
@@ -105,18 +114,25 @@ impl ScanFramer {
 
 /// Reads the input reports of a HID POS scanner. Boot-protocol keyboard layout: byte 0 holds
 /// modifiers, byte 1 is reserved, bytes 2 to 7 hold up to six key codes that are down.
+///
+/// Support: Partial. HID POS decodes only boot-protocol keyboard reports, so a scanner that needs
+/// its own report descriptor is not handled.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct KeyboardReportDecoder {
     previous: [u8; 6],
 }
 
 impl KeyboardReportDecoder {
+    /// Support: Full.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Returns the characters typed by a report. A key is typed when it goes down, so a key
     /// that is still held in the next report is not typed again.
+    ///
+    /// Support: Partial. HID POS decodes only boot-protocol keyboard reports, so a scanner that
+    /// needs its own report descriptor is not handled.
     pub fn push_report(&mut self, report: &[u8]) -> Result<String, ScanError> {
         if report.len() < 8 {
             return Err(ScanError::BadReport);
@@ -197,6 +213,8 @@ fn usage_to_char(usage: u8, shift: bool) -> Option<char> {
 
 /// Reads whatever a serial scanner has sent and returns the scans it completed. Errors from the
 /// framer are returned in place, so a bad byte does not hide the scans around it.
+///
+/// Support: Full.
 pub fn read_scans(
     transport: &mut dyn Transport,
     framer: &mut ScanFramer,
@@ -206,6 +224,9 @@ pub fn read_scans(
 }
 
 /// Reads HID POS input reports from `transport` and returns the scans they completed.
+///
+/// Support: Partial. HID POS decodes only boot-protocol keyboard reports, so a scanner that needs
+/// its own report descriptor is not handled.
 pub fn read_hid_pos_scans(
     transport: &mut dyn Transport,
     decoder: &mut KeyboardReportDecoder,

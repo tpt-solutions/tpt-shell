@@ -16,6 +16,8 @@ use std::time::Duration;
 const MAX_HEAD: usize = 8 * 1024;
 
 /// A parsed request. Only the parts the endpoints use are kept.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
     pub method: String,
@@ -25,6 +27,8 @@ pub struct Request {
 }
 
 /// A response to write back.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Response {
     pub status: u16,
@@ -33,6 +37,8 @@ pub struct Response {
 }
 
 impl Response {
+    /// Support: Partial. No test calls it; the admin and health endpoints, which use it, are off by
+    /// default.
     pub fn json(status: u16, body: impl Into<String>) -> Self {
         Response {
             status,
@@ -41,6 +47,7 @@ impl Response {
         }
     }
 
+    /// Support: Full.
     pub fn text(status: u16, body: impl Into<String>) -> Self {
         Response {
             status,
@@ -51,9 +58,13 @@ impl Response {
 }
 
 /// Answers requests. Called on the server thread.
+///
+/// Support: Full.
 pub type Handler = Arc<dyn Fn(&Request) -> Response + Send + Sync>;
 
 /// A running server. Dropping it stops the thread.
+///
+/// Support: Full.
 pub struct Server {
     addr: SocketAddr,
     stop: Arc<AtomicBool>,
@@ -62,6 +73,8 @@ pub struct Server {
 
 impl Server {
     /// The address the server is listening on (useful when port 0 was asked for).
+    ///
+    /// Support: Full.
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }
@@ -77,6 +90,8 @@ impl Drop for Server {
 }
 
 /// Starts a server on `addr`. Refuses any address that is not loopback.
+///
+/// Support: Full.
 pub fn serve(addr: SocketAddr, handler: Handler) -> io::Result<Server> {
     if !is_loopback(addr.ip()) {
         return Err(io::Error::new(
@@ -205,6 +220,8 @@ fn write_response(stream: &mut TcpStream, response: &Response) -> io::Result<()>
 }
 
 /// Compares two strings in time that depends only on their lengths.
+///
+/// Support: Full.
 pub fn constant_time_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
     if a.len() != b.len() {

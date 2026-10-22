@@ -20,6 +20,7 @@ fn child(mode: &str, timeout: Duration, grace: Duration) -> ProcessSpawner {
     ProcessSpawner {
         program: PathBuf::from(env!("CARGO_BIN_EXE_supervisor-child")),
         args: vec![mode.into()],
+        env: Vec::new(),
         heartbeat_file: dir.join(format!("{mode}.beat")),
         heartbeat: Heartbeat { timeout },
         startup_grace: grace,

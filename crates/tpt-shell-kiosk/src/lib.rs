@@ -34,20 +34,31 @@
 //! The key-chord hook blocks only the chords it knows about. Ctrl+Alt+Del is handled by Windows
 //! itself and cannot be blocked from user space.
 
+/// Support: Full.
 pub mod chords;
+/// Support: Full.
 pub mod config;
+/// Support: Full.
 pub mod heartbeat;
+/// Support: Full.
 pub mod idle;
+/// Support: Full.
 pub mod policy;
+/// Support: Full.
 pub mod recovery;
+/// Support: Full.
 pub mod state;
 
+/// Support: Partial. Windows only. Its own test installs and removes the hook; see hook_windows.
 #[cfg(windows)]
 pub mod hook_windows;
 
+/// Support: Full. Built only with the admin-endpoint feature, which is off by default.
 #[cfg(feature = "admin-endpoint")]
 pub mod admin;
+/// Support: Full. Built only with the health-endpoint feature, which is off by default.
 #[cfg(feature = "health-endpoint")]
 pub mod health;
+/// Support: Full. Built only when an endpoint feature is on, and both are off by default.
 #[cfg(any(feature = "admin-endpoint", feature = "health-endpoint"))]
 pub mod http;

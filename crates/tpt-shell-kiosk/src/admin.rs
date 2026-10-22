@@ -14,15 +14,21 @@ use std::sync::Arc;
 use crate::http::{constant_time_eq, serve, Handler, Request, Response, Server};
 
 /// Shortest token accepted. A shorter token is refused at start-up.
+///
+/// Support: Full.
 pub const MIN_TOKEN: usize = 24;
 
 /// What the admin endpoint can do, supplied by the app.
+///
+/// Support: Full.
 pub struct Actions {
     pub status: Arc<dyn Fn() -> String + Send + Sync>,
     pub reset: Arc<dyn Fn() + Send + Sync>,
 }
 
 /// Starts the admin endpoint at `addr` (must be loopback). Fails when the token is too short.
+///
+/// Support: Full. Built only with the admin-endpoint feature, which is off by default.
 pub fn start(addr: SocketAddr, token: &str, actions: Actions) -> std::io::Result<Server> {
     if token.len() < MIN_TOKEN {
         return Err(std::io::Error::new(

@@ -25,12 +25,15 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// A serial port that sends back what it is given. Writes go to its own read queue.
+///
+/// Support: Full.
 pub struct VirtualSerial {
     id: DeviceId,
     queue: Bytes,
 }
 
 impl VirtualSerial {
+    /// Support: Full.
     pub fn loopback(id: DeviceId) -> Self {
         VirtualSerial {
             id,
@@ -61,17 +64,23 @@ impl Transport for VirtualSerial {
 }
 
 /// A printer. Everything written to it is kept for the preview.
+///
+/// Support: Full.
 pub struct VirtualPrinter {
     id: DeviceId,
     output: Arc<Mutex<Vec<u8>>>,
 }
 
 /// The printer's paper, seen from outside the device.
+///
+/// Support: Full.
 #[derive(Clone)]
 pub struct PrinterOutput(Arc<Mutex<Vec<u8>>>);
 
 impl VirtualPrinter {
     /// The printer and the handle that reads its output.
+    ///
+    /// Support: Full.
     pub fn new(id: DeviceId) -> (Self, PrinterOutput) {
         let output = Arc::new(Mutex::new(Vec::new()));
         (
@@ -104,6 +113,8 @@ const COLUMNS: usize = 42;
 
 impl PrinterOutput {
     /// The bytes printed so far.
+    ///
+    /// Support: Full.
     pub fn bytes(&self) -> Vec<u8> {
         lock(&self.0).clone()
     }
@@ -111,6 +122,8 @@ impl PrinterOutput {
     /// The receipt as text, one line per printed line. A line printed in bold is wrapped in `*`,
     /// centred and right-aligned lines are padded to the preview width, and each cut shows as a
     /// rule. Bytes this interpreter does not know are skipped.
+    ///
+    /// Support: Full.
     pub fn preview(&self) -> String {
         let bytes = self.bytes();
         let mut out = String::new();
@@ -186,16 +199,21 @@ fn flush_line(out: &mut String, line: &mut String, bold: bool, align: u8) {
 
 /// A scanner that sends each scan as its text followed by a carriage return, the way a
 /// keyboard-wedge scanner types a barcode.
+///
+/// Support: Full.
 pub struct VirtualScanner {
     id: DeviceId,
     queue: Bytes,
 }
 
 /// The scanner's trigger, seen from outside the device.
+///
+/// Support: Full.
 #[derive(Clone)]
 pub struct ScannerInput(Bytes);
 
 impl VirtualScanner {
+    /// Support: Full.
     pub fn new(id: DeviceId) -> (Self, ScannerInput) {
         let queue: Bytes = Arc::new(Mutex::new(VecDeque::new()));
         (
@@ -210,6 +228,8 @@ impl VirtualScanner {
 
 impl ScannerInput {
     /// Scans `code`. It is read from the device as `code` followed by a carriage return.
+    ///
+    /// Support: Full.
     pub fn scan(&self, code: &str) {
         let mut queue = lock(&self.0);
         queue.extend(code.bytes());
@@ -234,6 +254,8 @@ impl Transport for VirtualScanner {
 }
 
 /// A HID device: input reports go in one direction and output reports in the other.
+///
+/// Support: Full.
 pub struct VirtualHid {
     id: DeviceId,
     inbox: Arc<Mutex<VecDeque<Vec<u8>>>>,
@@ -241,6 +263,8 @@ pub struct VirtualHid {
 }
 
 /// The HID device's other side: send input reports, and read the output reports it received.
+///
+/// Support: Full.
 #[derive(Clone)]
 pub struct HidHandle {
     inbox: Arc<Mutex<VecDeque<Vec<u8>>>>,
@@ -248,6 +272,7 @@ pub struct HidHandle {
 }
 
 impl VirtualHid {
+    /// Support: Full.
     pub fn new(id: DeviceId) -> (Self, HidHandle) {
         let inbox = Arc::new(Mutex::new(VecDeque::new()));
         let outbox = Arc::new(Mutex::new(Vec::new()));
@@ -264,11 +289,15 @@ impl VirtualHid {
 
 impl HidHandle {
     /// Queues one input report for the device to read.
+    ///
+    /// Support: Full.
     pub fn send_report(&self, report: &[u8]) {
         lock(&self.inbox).push_back(report.to_vec());
     }
 
     /// The output reports the device has written, in order.
+    ///
+    /// Support: Full.
     pub fn output_reports(&self) -> Vec<Vec<u8>> {
         lock(&self.outbox).clone()
     }
@@ -306,6 +335,8 @@ impl Transport for VirtualHid {
 /// - `hid@hid:1234:5678`: a generic HID device
 ///
 /// An empty spec gives no devices. Used with the `TPT_VIRTUAL_DEVICES` environment variable.
+///
+/// Support: Full.
 pub fn from_spec(spec: &str) -> Result<Vec<Box<dyn Transport>>, String> {
     let mut devices: Vec<Box<dyn Transport>> = Vec::new();
     for entry in spec.split(';').map(str::trim).filter(|e| !e.is_empty()) {

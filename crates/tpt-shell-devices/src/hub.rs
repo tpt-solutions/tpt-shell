@@ -14,6 +14,8 @@ use crate::id::{DeviceId, DeviceScope};
 use crate::transport::{DeviceError, Transport};
 
 /// What happened to a device, for the audit log.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
     pub kind: EventKind,
@@ -23,6 +25,7 @@ pub struct Event {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Support: Full.
 pub enum EventKind {
     Open,
     Write,
@@ -32,6 +35,8 @@ pub enum EventKind {
 type Sink = Arc<Mutex<dyn FnMut(&Event) + Send>>;
 
 /// The devices that are present, and the audit sink for their use.
+///
+/// Support: Full.
 pub struct DeviceHub {
     available: Vec<Box<dyn Transport>>,
     sink: Sink,
@@ -39,6 +44,8 @@ pub struct DeviceHub {
 
 impl DeviceHub {
     /// A hub over `devices`. `audit` is called for every open, write and close.
+    ///
+    /// Support: Full.
     pub fn new(
         devices: Vec<Box<dyn Transport>>,
         audit: impl FnMut(&Event) + Send + 'static,
@@ -50,6 +57,8 @@ impl DeviceHub {
     }
 
     /// The identifiers of the present devices that `scope` covers.
+    ///
+    /// Support: Full.
     pub fn list(&self, scope: &DeviceScope) -> Vec<DeviceId> {
         self.available
             .iter()
@@ -59,6 +68,8 @@ impl DeviceHub {
     }
 
     /// Opens the device `id`, if the caller's `scope` covers it and it is present and free.
+    ///
+    /// Support: Full.
     pub fn open(&mut self, id: &DeviceId, scope: &DeviceScope) -> Result<OpenDevice, DeviceError> {
         if !scope.matches(id) {
             return Err(DeviceError::Denied(format!(
@@ -80,17 +91,22 @@ impl DeviceHub {
 }
 
 /// An open device. Dropping it closes the device, and the close is audited.
+///
+/// Support: Full.
 pub struct OpenDevice {
     transport: Box<dyn Transport>,
     sink: Sink,
 }
 
 impl OpenDevice {
+    /// Support: Full.
     pub fn id(&self) -> &DeviceId {
         self.transport.id()
     }
 
     /// Sends `bytes`, and audits the number of bytes that were taken.
+    ///
+    /// Support: Full.
     pub fn write(&mut self, bytes: &[u8]) -> Result<(), DeviceError> {
         self.transport.write(bytes)?;
         record(
@@ -103,6 +119,8 @@ impl OpenDevice {
     }
 
     /// Reads up to `max` bytes. Reads are not audited.
+    ///
+    /// Support: Full.
     pub fn read(&mut self, max: usize) -> Result<Vec<u8>, DeviceError> {
         self.transport.read(max)
     }

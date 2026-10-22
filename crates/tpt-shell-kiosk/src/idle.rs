@@ -6,6 +6,7 @@
 
 use std::time::{Duration, Instant};
 
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IdleTimer {
     limit: Duration,
@@ -14,6 +15,8 @@ pub struct IdleTimer {
 
 impl IdleTimer {
     /// A timer that becomes due `limit` after `now`, unless it is touched first.
+    ///
+    /// Support: Full.
     pub fn new(limit: Duration, now: Instant) -> Self {
         IdleTimer {
             limit,
@@ -22,16 +25,22 @@ impl IdleTimer {
     }
 
     /// Records user input at `now`.
+    ///
+    /// Support: Full.
     pub fn touch(&mut self, now: Instant) {
         self.last_activity = now;
     }
 
     /// How long there has been no input at `now`.
+    ///
+    /// Support: Full.
     pub fn idle_for(&self, now: Instant) -> Duration {
         now.saturating_duration_since(self.last_activity)
     }
 
     /// Whether the kiosk should reset at `now`.
+    ///
+    /// Support: Full.
     pub fn is_due(&self, now: Instant) -> bool {
         self.idle_for(now) >= self.limit
     }

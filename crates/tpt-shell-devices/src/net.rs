@@ -30,6 +30,10 @@ fn target(scope: &DeviceScope, id: &DeviceId) -> Result<(String, u16), DeviceErr
 }
 
 /// Opens a raw TCP connection to a network device.
+///
+/// Support: Partial. A timeout during a write that has already sent some bytes is an error, not
+/// busy, because the bytes cannot be taken back. Name resolution uses the system resolver, which
+/// can block for as long as the system takes to answer.
 #[cfg(feature = "net-devices")]
 pub fn open_tcp(
     scope: &DeviceScope,
@@ -53,6 +57,10 @@ pub fn open_tcp(
 }
 
 /// Opens a UDP socket connected to a network device. Each write is one datagram.
+///
+/// Support: Partial. A timeout during a write that has already sent some bytes is an error, not
+/// busy, because the bytes cannot be taken back. Name resolution uses the system resolver, which
+/// can block for as long as the system takes to answer.
 #[cfg(feature = "net-devices")]
 pub fn open_udp(
     scope: &DeviceScope,
@@ -215,6 +223,9 @@ impl Transport for UdpDevice {
 }
 
 /// Without the `net-devices` feature no socket is opened.
+///
+/// Support: Unsupported. Returns NotSupported unless the net-devices feature is on, so no socket is
+/// opened.
 #[cfg(not(feature = "net-devices"))]
 pub fn open_tcp(
     scope: &DeviceScope,
@@ -228,6 +239,9 @@ pub fn open_tcp(
 }
 
 /// Without the `net-devices` feature no socket is opened.
+///
+/// Support: Unsupported. Returns NotSupported unless the net-devices feature is on, so no socket is
+/// opened.
 #[cfg(not(feature = "net-devices"))]
 pub fn open_udp(
     scope: &DeviceScope,

@@ -9,6 +9,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Alert {
     /// Run this program with the message as its only argument.
@@ -19,6 +20,8 @@ pub enum Alert {
 
 impl Alert {
     /// Raises the alert. Failures are returned, so the caller can log them.
+    ///
+    /// Support: Full.
     pub fn raise(&self, message: &str) -> io::Result<()> {
         match self {
             Alert::Command(program) => {

@@ -15,10 +15,14 @@ use crate::transport::{DeviceError, Transport};
 use crate::{check_ascii, zpl, UnsupportedText};
 
 /// Columns on a receipt: a common 80 mm roll in a standard font.
+///
+/// Support: Full.
 pub const RECEIPT_COLUMNS: usize = 42;
 
 /// Lays out a receipt: a centred bold title, one line per item with its price right-aligned,
 /// a bold total, three blank lines, and a full cut. Names too long for the price column are cut.
+///
+/// Support: Full.
 pub fn receipt(
     title: &str,
     items: &[(&str, &str)],
@@ -44,6 +48,8 @@ pub fn receipt(
 }
 
 /// The bytes for one label: the ZPL block the builder renders.
+///
+/// Support: Full.
 pub fn label(label: &zpl::Label) -> Vec<u8> {
     label.render().into_bytes()
 }
@@ -57,6 +63,8 @@ const CHUNK: usize = 512;
 
 /// Sends `bytes` to the device in chunks. A chunk the device refuses as busy is retried; if it
 /// stays busy, the error is returned and the chunks before it have been sent.
+///
+/// Support: Full.
 pub fn send_all(transport: &mut dyn Transport, bytes: &[u8]) -> Result<(), DeviceError> {
     for chunk in bytes.chunks(CHUNK) {
         let mut attempts = 0;

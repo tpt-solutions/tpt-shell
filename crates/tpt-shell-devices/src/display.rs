@@ -14,6 +14,8 @@ use crate::transport::{DeviceError, Transport};
 const CLEAR: u8 = 0x0C;
 
 /// Why a frame was refused or not sent.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DisplayError {
     /// The width is outside 1 to 40 columns.
@@ -48,6 +50,10 @@ impl From<DeviceError> for DisplayError {
 }
 
 /// A two-line customer display, `columns` wide.
+///
+/// Support: Partial. The profile is the common plain-text one. Displays that need their own command
+/// set (brightness, cursor, custom characters) are not supported, and a display that does not move
+/// to the second line on line feed shows the bottom line in the wrong place.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomerDisplay {
     columns: usize,
@@ -61,6 +67,9 @@ impl Default for CustomerDisplay {
 }
 
 impl CustomerDisplay {
+    /// Support: Partial. The profile is the common plain-text one. Displays that need their own
+    /// command set (brightness, cursor, custom characters) are not supported, and a display that
+    /// does not move to the second line on line feed shows the bottom line in the wrong place.
     pub fn new(columns: usize) -> Result<Self, DisplayError> {
         if (1..=40).contains(&columns) {
             Ok(CustomerDisplay { columns })
@@ -71,6 +80,10 @@ impl CustomerDisplay {
 
     /// The bytes for one frame. Text longer than the width is cut; shorter text is padded so the
     /// old characters are cleared.
+    ///
+    /// Support: Partial. The profile is the common plain-text one. Displays that need their own
+    /// command set (brightness, cursor, custom characters) are not supported, and a display that
+    /// does not move to the second line on line feed shows the bottom line in the wrong place.
     pub fn frame(&self, top: &str, bottom: &str) -> Result<Vec<u8>, DisplayError> {
         let mut out = vec![CLEAR];
         out.extend(self.line(top)?);
@@ -80,6 +93,10 @@ impl CustomerDisplay {
     }
 
     /// Sends one frame to the display.
+    ///
+    /// Support: Partial. The profile is the common plain-text one. Displays that need their own
+    /// command set (brightness, cursor, custom characters) are not supported, and a display that
+    /// does not move to the second line on line feed shows the bottom line in the wrong place.
     pub fn show(
         &self,
         transport: &mut dyn Transport,

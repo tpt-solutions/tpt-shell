@@ -14,6 +14,10 @@ use crate::id::{DeviceId, DeviceScope};
 use crate::transport::{DeviceError, Transport};
 
 /// Opens the serial port `id` at `baud` if `scope` covers it.
+///
+/// Support: Partial. Windows only, for COM1 to COM999 at a given baud rate, 8 data bits, no parity,
+/// one stop bit. Port discovery is not built, so the caller names the port. macOS and Linux return
+/// NotSupported: the termios backend is not written.
 pub fn open(
     scope: &DeviceScope,
     id: &DeviceId,
