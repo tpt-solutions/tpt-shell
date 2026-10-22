@@ -25,8 +25,15 @@ The `tpt-shell new` command creates a starter project from a template. These exi
 - `vanilla`: one HTML page and a manifest. `tpt-shell new vanilla my-app`.
 - `typescript`: a page with a TypeScript source file and a typed runtime declaration.
   `tpt-shell new typescript my-app`.
+- `rust`: a Cargo project that opens one window. `tpt-shell new rust my-app`. Its path
+  dependency on tpt-shell points at the checkout the CLI was built from; pass
+  `--tpt-shell <path to crates/tpt-shell>` to use another.
+- The Rust starters `pos`, `kiosk`, `audit-app`, `agent-demo` and `appfront-dom`:
+  `tpt-shell new --template pos my-app`.
 
-A scaffolded project does not open a window by itself. See the [Quickstart](quickstart.md).
+The `vanilla` and `typescript` projects are pages only. Build a window around them with the
+`rust` starter or the [Quickstart](quickstart.md). `tpt-shell run` builds and launches a Rust
+project.
 
 ## Planned
 

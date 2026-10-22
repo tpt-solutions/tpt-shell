@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+
+[package]
+name = "{{name}}"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+
+# This project is its own workspace, so it builds on its own.
+[workspace]
+
+[dependencies]
+# Points at the tpt-shell checkout the project was made from. Change the path if the checkout moves.
+tpt-shell = { path = "{{tpt_shell_path}}" }

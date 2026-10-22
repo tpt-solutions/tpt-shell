@@ -35,6 +35,10 @@ The folder must be new or empty:
 tpt-shell new vanilla my-app
 ```
 
+To make a project that opens a window, use `tpt-shell new rust my-app` instead, then
+`tpt-shell run my-app`. Copy `WebView2Loader.dll` into `my-app/target/debug/` first, because the
+program looks for it next to itself.
+
 Check its manifest:
 
 ```sh
@@ -59,6 +63,8 @@ commands will not run there. The preview shows the layout and nothing more.
 
 ## Not yet
 
-The scaffolded project does not open a window by itself. Putting it in one needs a Rust program
-that builds a `tpt_shell::App` from the project's files, the way the hello example does. The
-example's source is `crates/tpt-shell/examples/hello.rs`.
+The `vanilla` and `typescript` projects do not open a window by themselves. Use the `rust`
+starter (`tpt-shell new rust my-app`), which builds the window from the project's files. Its
+window needs `WebView2Loader.dll` beside the built program, or its path as the first argument;
+the loader still has to be copied from the WebView2 SDK by hand. The example's source is
+`crates/tpt-shell/examples/hello.rs`.

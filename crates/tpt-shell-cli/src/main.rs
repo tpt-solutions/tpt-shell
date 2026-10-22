@@ -33,6 +33,9 @@ const USAGE: &str = "usage:
   tpt-shell contract check <new-contract.json> --baseline <old-contract.json>
   tpt-shell new vanilla <directory>
   tpt-shell new typescript <directory>
+  tpt-shell new rust <directory> [--tpt-shell <path to crates/tpt-shell>]
+  tpt-shell new --template <pos|kiosk|audit-app|agent-demo|appfront-dom> <directory> [--tpt-shell <path>]
+  tpt-shell run [directory]                   build and launch the Rust project (cargo run)
   tpt-shell doctor
   tpt-shell compliance <output-directory> [--key <signing-key-file>]
   tpt-shell audit verify <audit.jsonl> [--key <public-key-file>] [--anchors <anchor-file>]
@@ -111,6 +114,19 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         }
         ["new", "vanilla", dir] => new_vanilla(Path::new(dir)).map(|()| ExitCode::SUCCESS),
         ["new", "typescript", dir] => new_typescript(Path::new(dir)).map(|()| ExitCode::SUCCESS),
+        ["new", "rust", dir] => new_rust(Path::new(dir), None).map(|()| ExitCode::SUCCESS),
+        ["new", "rust", dir, "--tpt-shell", checkout] => {
+            new_rust(Path::new(dir), Some(Path::new(checkout))).map(|()| ExitCode::SUCCESS)
+        }
+        ["new", "--template", name, dir] => {
+            new_from_template(name, Path::new(dir), None).map(|()| ExitCode::SUCCESS)
+        }
+        ["new", "--template", name, dir, "--tpt-shell", checkout] => {
+            new_from_template(name, Path::new(dir), Some(Path::new(checkout)))
+                .map(|()| ExitCode::SUCCESS)
+        }
+        ["run"] => run_project(Path::new(".")),
+        ["run", dir] => run_project(Path::new(dir)),
         ["doctor"] => Ok(doctor()),
         ["build"] => build(Path::new(".")),
         ["build", dir] => build(Path::new(dir)),
@@ -1017,6 +1033,154 @@ fn new_typescript(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The Cargo manifest for `new rust` (templates/rust/Cargo.toml.tmpl).
+const RUST_CARGO: &str = include_str!("../../../templates/rust/Cargo.toml.tmpl");
+
+/// The entry point for `new rust` (templates/rust/src/main.rs.tmpl).
+const RUST_MAIN: &str = include_str!("../../../templates/rust/src/main.rs.tmpl");
+
+/// The page for `new rust` (templates/rust/index.html.tmpl).
+const RUST_PAGE: &str = include_str!("../../../templates/rust/index.html.tmpl");
+
+/// The manifest for `new rust` (templates/rust/tpt-shell.toml.tmpl).
+const RUST_MANIFEST: &str = include_str!("../../../templates/rust/tpt-shell.toml.tmpl");
+
+/// Writes a Cargo project that opens one window. The project depends on the tpt-shell crate by
+/// path, because the crates are not published. `checkout` is the `crates/tpt-shell` folder; by
+/// default it is the one this CLI was built from.
+fn new_rust(dir: &Path, checkout: Option<&Path>) -> Result<(), String> {
+    let name = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("{} has no usable name", dir.display()))?;
+    if !valid_crate_name(name) {
+        return Err(format!(
+            "{name:?} is not a valid crate name: use lowercase letters, digits, `-` or `_`, starting with a letter"
+        ));
+    }
+    let checkout = crate_dir(checkout)?;
+    // Forward slashes need no escaping inside a TOML string.
+    let checkout = without_verbatim_prefix(&checkout.display().to_string()).replace('\\', "/");
+    let render = |template: &str| {
+        template
+            .replace("{{name}}", name)
+            .replace("{{tpt_shell_path}}", &checkout)
+    };
+    prepare_dir(dir)?;
+    fs::create_dir_all(dir.join("src")).map_err(|e| format!("cannot create src: {e}"))?;
+    write(&dir.join("Cargo.toml"), &render(RUST_CARGO))?;
+    write(&dir.join("src").join("main.rs"), &render(RUST_MAIN))?;
+    write(&dir.join("index.html"), &render(RUST_PAGE))?;
+    write(&dir.join("tpt-shell.toml"), &render(RUST_MANIFEST))?;
+    println!(
+        "created {} (run with: cargo run, from inside it)",
+        dir.display()
+    );
+    Ok(())
+}
+
+/// The Rust starter projects in templates/, by the name `new --template` takes.
+const RUST_TEMPLATES: &[&str] = &["pos", "kiosk", "audit-app", "agent-demo", "appfront-dom"];
+
+/// Writes a copy of one starter project from templates/. Its path dependencies point at the
+/// checkout's crates, so the copy builds on its own.
+fn new_from_template(name: &str, dir: &Path, checkout: Option<&Path>) -> Result<(), String> {
+    if !RUST_TEMPLATES.contains(&name) {
+        return Err(format!(
+            "unknown template {name:?}; choose one of: {}",
+            RUST_TEMPLATES.join(", ")
+        ));
+    }
+    let crate_dir = crate_dir(checkout)?;
+    // crates/tpt-shell sits two folders below the repository root, which holds templates/.
+    let repo = crate_dir
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| format!("{} is not inside a repository", crate_dir.display()))?;
+    let source = repo.join("templates").join(name);
+    if !source.is_dir() {
+        return Err(format!("no template folder at {}", source.display()));
+    }
+    // Forward slashes need no escaping inside a TOML string.
+    let crates =
+        without_verbatim_prefix(&repo.join("crates").display().to_string()).replace('\\', "/");
+    prepare_dir(dir)?;
+    copy_template(&source, dir, &crates)?;
+    println!("created {} from the {name} template", dir.display());
+    Ok(())
+}
+
+/// Copies a template folder. Cargo.toml paths into the checkout's crates folder are rewritten,
+/// and the copy becomes its own workspace.
+fn copy_template(from: &Path, to: &Path, crates: &str) -> Result<(), String> {
+    let entries = fs::read_dir(from).map_err(|e| format!("cannot read {}: {e}", from.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("cannot read {}: {e}", from.display()))?;
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        if source.is_dir() {
+            fs::create_dir_all(&target)
+                .map_err(|e| format!("cannot create {}: {e}", target.display()))?;
+            copy_template(&source, &target, crates)?;
+        } else if entry.file_name() == "Cargo.toml" {
+            let text = fs::read_to_string(&source)
+                .map_err(|e| format!("cannot read {}: {e}", source.display()))?
+                .replace("\"../../crates/", &format!("\"{crates}/"));
+            let text = if text.contains("[workspace]") {
+                text
+            } else {
+                format!("{text}\n[workspace]\n")
+            };
+            write(&target, &text)?;
+        } else {
+            fs::copy(&source, &target)
+                .map_err(|e| format!("cannot copy {}: {e}", source.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// The `crates/tpt-shell` folder: the one given, or the one this CLI was built from. Refused
+/// unless it has a Cargo.toml. Returned canonical.
+fn crate_dir(checkout: Option<&Path>) -> Result<PathBuf, String> {
+    let checkout = match checkout {
+        Some(path) => path.to_path_buf(),
+        None => Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("tpt-shell"),
+    };
+    if !checkout.join("Cargo.toml").is_file() {
+        return Err(format!(
+            "no tpt-shell crate at {} (pass --tpt-shell <path to crates/tpt-shell>)",
+            checkout.display()
+        ));
+    }
+    fs::canonicalize(&checkout).map_err(|e| format!("cannot resolve {}: {e}", checkout.display()))
+}
+
+/// Builds and runs the project in `dir` with `cargo run`.
+fn run_project(dir: &Path) -> Result<ExitCode, String> {
+    if !dir.join("Cargo.toml").is_file() {
+        return Err(format!(
+            "{} has no Cargo.toml; run `tpt-shell run` in the app's Rust project",
+            dir.display()
+        ));
+    }
+    let status = std::process::Command::new("cargo")
+        .arg("run")
+        .current_dir(dir)
+        .status()
+        .map_err(|e| format!("cannot run cargo: {e}"))?;
+    Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+}
+
+/// A crate name that `cargo new` would accept: lowercase ASCII, starting with a letter.
+fn valid_crate_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some('a'..='z'))
+        && chars.all(|c| matches!(c, 'a'..='z' | '0'..='9' | '-' | '_'))
+}
+
 /// Creates `dir` if needed. Refuses a directory that already has files in it.
 fn prepare_dir(dir: &Path) -> Result<(), String> {
     if dir.exists() {
@@ -1057,6 +1221,90 @@ mod template_tests {
             "a second run must not overwrite"
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod rust_template_tests {
+    use super::*;
+
+    #[test]
+    fn rust_template_writes_a_project_that_depends_on_the_checkout() {
+        let root = std::env::temp_dir().join(format!("tpt-cli-rust-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join("my-app");
+        new_rust(&dir, None).unwrap();
+        let cargo = fs::read_to_string(dir.join("Cargo.toml")).unwrap();
+        assert!(cargo.contains("name = \"my-app\""), "{cargo}");
+        assert!(cargo.contains("tpt-shell = { path = \""), "{cargo}");
+        assert!(cargo.contains("[workspace]"), "{cargo}");
+        assert!(
+            !cargo.contains("{{"),
+            "every placeholder is filled: {cargo}"
+        );
+        let main = fs::read_to_string(dir.join("src").join("main.rs")).unwrap();
+        assert!(main.contains(".loader(loader_path())"), "{main}");
+        assert!(main.contains(".name(\"my-app\")"), "{main}");
+        assert!(dir.join("index.html").is_file());
+        assert!(tpt_shell_manifest::parse(
+            &fs::read_to_string(dir.join("tpt-shell.toml")).unwrap()
+        )
+        .is_ok());
+        assert!(
+            new_rust(&dir, None).is_err(),
+            "a second run must not overwrite"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rust_template_refuses_a_bad_name_and_a_missing_checkout() {
+        let root = std::env::temp_dir().join(format!("tpt-cli-rust-bad-{}", std::process::id()));
+        assert!(new_rust(&root.join("My App"), None).is_err());
+        assert!(new_rust(&root.join("9lives"), None).is_err());
+        assert!(
+            !root.join("My App").exists(),
+            "nothing is written for a bad name"
+        );
+        let missing = Path::new(r"C:\no\such\tpt-shell");
+        assert!(new_rust(&root.join("ok-name"), Some(missing)).is_err());
+        assert!(!root.join("ok-name").exists());
+    }
+
+    #[test]
+    fn a_template_copy_points_at_the_checkout_and_is_its_own_workspace() {
+        let root = std::env::temp_dir().join(format!("tpt-cli-template-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join("pos-copy");
+        new_from_template("pos", &dir, None).unwrap();
+        let cargo = fs::read_to_string(dir.join("Cargo.toml")).unwrap();
+        assert!(!cargo.contains("../../crates"), "{cargo}");
+        assert!(cargo.contains("[workspace]"), "{cargo}");
+        assert!(dir.join("src").join("main.rs").is_file());
+        assert!(dir.join("web").join("index.html").is_file());
+        assert!(
+            new_from_template("pos", &dir, None).is_err(),
+            "a second run must not overwrite"
+        );
+        assert!(new_from_template("nope", &root.join("x"), None).is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn run_refuses_a_folder_without_a_project() {
+        let root = std::env::temp_dir().join(format!("tpt-cli-run-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        assert!(run_project(&root).is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn crate_names_follow_cargo_rules() {
+        assert!(valid_crate_name("my-app_2"));
+        assert!(!valid_crate_name(""));
+        assert!(!valid_crate_name("My-app"));
+        assert!(!valid_crate_name("2app"));
+        assert!(!valid_crate_name("my app"));
     }
 }
 

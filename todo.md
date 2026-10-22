@@ -657,10 +657,10 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [x] Docs that promise more than exists: `quickstart.md` "Not yet", `cookbook.md` replays, `security.md` Secret Service / fuzz targets / compliance outputs
 
 ### Onboarding
-- [ ] `tpt-shell new` writes a runnable project (`Cargo.toml`, `src/main.rs`, manifest, assets) so `cargo run` opens a window
-- [ ] `tpt-shell new --template <name>` for the Rust templates (`pos`, `kiosk`, `audit-app`, `agent-demo`, `appfront-dom`), not only `vanilla` and `typescript`
+- [x] `tpt-shell new` writes a runnable project (`Cargo.toml`, `src/main.rs`, manifest, assets) so `cargo run` opens a window (`new rust`: builds here, and a run stops with a clear message until `WebView2Loader.dll` is beside the program; a window has not been seen open)
+- [x] `tpt-shell new --template <name>` for the Rust templates (`pos`, `kiosk`, `audit-app`, `agent-demo`, `appfront-dom`), not only `vanilla` and `typescript` (`pos` built here; the others copy the same way but are not built)
 - [ ] `tpt-shell init` adds tpt-shell to an existing crate
-- [ ] `tpt-shell run`: build and launch in one command
+- [x] `tpt-shell run`: build and launch in one command
 - [ ] WebView2Loader.dll: locate or embed it so `App::loader(path)` is optional and the quickstart has no manual download step
 - [ ] `tpt-shell dev`: reload the page in the window on change (today it only reports changes)
 - [ ] `tpt-shell dev`: a mock `window.tpt` so a page works in a plain browser tab

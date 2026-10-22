@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright (c) 2026 TPT Solutions
+
+//! The app's entry point. It opens one window that shows `index.html`.
+//!
+//! The window needs `WebView2Loader.dll`. Put the x64 copy from the WebView2 SDK package
+//! (`build/native/x64/`) next to the program, or pass its path as the first argument.
+
+use std::path::PathBuf;
+
+use tpt_shell::{App, Window};
+
+const PAGE: &str = include_str!("../index.html");
+
+fn main() -> tpt_shell::Result<()> {
+    App::new()
+        .name("{{name}}")
+        .loader(loader_path())
+        .asset("index.html", "text/html", PAGE)
+        .window(Window::new("main").title("{{name}}"))
+        .run()
+}
+
+/// The first argument, or `WebView2Loader.dll` beside the program.
+fn loader_path() -> PathBuf {
+    if let Some(path) = std::env::args_os().nth(1) {
+        return PathBuf::from(path);
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("WebView2Loader.dll")))
+        .unwrap_or_else(|| PathBuf::from("WebView2Loader.dll"))
+}
