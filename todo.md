@@ -69,7 +69,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 
 ### CI skeleton (ยง15)
 - [x] GitHub Actions matrix: windows-latest, macos-latest, ubuntu-latest (workflow written)
-- [ ] Verify the workflow runs green on GitHub (not yet run)
+- [x] Verify the workflow runs green on GitHub (run 11, commit 3eef0cc, 2026-10-22: every blocking job passes on Windows, macOS and Linux, including test, conformance and msrv. The non-blocking `linux-adapters` job fails on all four legs; see M5)
 - [ ] Add aarch64 runners where available
 - [x] Jobs: fmt, clippy, tests, cargo-deny (and SPDX header check)
 - [x] Placeholder jobs: conformance, fuzz smoke, docs build, template build, visual artifact upload, benchmarks
@@ -314,7 +314,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Support tags: macOS 12+ matrix, profile limits on 12โ€“13
 
 ### Parity
-- [ ] Conformance green on macOS CI
+- [x] Conformance green on macOS CI (run 11: the job passes; pending and skipped checks are listed in the compatibility report, so green means no failures, not full coverage)
 - [ ] Unit and leak tests for ObjC wrappers
 - [ ] Sanitiser run on macOS FFI module
 - [ ] macOS notarisation notes in docs
