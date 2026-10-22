@@ -781,6 +781,12 @@ impl WindowBackend for WindowsBackend {
         let hwnd = self.require(id)?;
         // SAFETY: `hwnd` is a live window registered with this backend.
         unsafe { ShowWindow(hwnd, SW_SHOW) };
+        // The webview draws only while its controller is visible.
+        self.with_entry(id, |e| {
+            e.controller
+                .set_visible(true)
+                .map_err(|hr| hr_error("put_IsVisible", hr))
+        })??;
         Ok(())
     }
 
@@ -1396,6 +1402,9 @@ impl WindowsBackend {
         controller
             .set_bounds(bounds)
             .map_err(|hr| hr_error("put_Bounds", hr))?;
+        controller
+            .set_visible(true)
+            .map_err(|hr| hr_error("put_IsVisible", hr))?;
         Ok(Entry {
             controller,
             web,
@@ -1862,8 +1871,11 @@ mod tests {
         use crate::window::runtime_test_loader;
         use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
         use std::sync::Arc;
+        use windows_sys::core::BOOL;
+        use windows_sys::Win32::Foundation::{HWND, LPARAM};
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            IsWindow, IsWindowVisible, PostQuitMessage, GWL_EXSTYLE, WM_CLOSE, WS_EX_TOPMOST,
+            EnumChildWindows, IsWindow, IsWindowVisible, PostQuitMessage, GWL_EXSTYLE, WM_CLOSE,
+            WS_EX_TOPMOST,
         };
 
         fn data_dir(name: &str) -> std::path::PathBuf {
@@ -2064,6 +2076,51 @@ mod tests {
             drop(b);
             let _ = std::fs::remove_dir_all(&dir);
             assert!(got, "title never arrived; last was {title:?}");
+        }
+
+        /// The number of visible child windows of `hwnd`, which is where WebView2 draws the page.
+        fn visible_children(hwnd: HWND) -> (usize, usize) {
+            unsafe extern "system" fn count(child: HWND, lparam: LPARAM) -> BOOL {
+                // SAFETY: `lparam` is the address of [total, visible], which lives until the
+                // enumeration returns.
+                let counts = lparam as *mut [usize; 2];
+                unsafe { (*counts)[0] += 1 };
+                if unsafe { IsWindowVisible(child) } != 0 {
+                    unsafe { (*counts)[1] += 1 };
+                }
+                1
+            }
+            let mut counts = [0usize; 2];
+            // SAFETY: `hwnd` is a live window; the counters outlive the call.
+            unsafe {
+                EnumChildWindows(hwnd, Some(count), &mut counts as *mut [usize; 2] as LPARAM)
+            };
+            (counts[0], counts[1])
+        }
+
+        /// The page is drawn in a child window of the shell's window. If that child is hidden, the
+        /// window stays blank, even though the page loads and runs. The conformance checks read
+        /// titles, so they cannot see this; this test does.
+        #[test]
+        fn the_webview_is_visible_once_its_window_is_shown() {
+            let Some((mut b, dir, _serial)) = start("visible") else {
+                return;
+            };
+            let id = b.create(&spec("main")).expect("create");
+            b.show(id).expect("show");
+            b.load_html(id, "<!doctype html><p>visible</p>")
+                .expect("load_html");
+            // WebView2 applies the visibility while messages are pumped, so wait for it, up to a
+            // limit, rather than check at one moment.
+            let hwnd = id.0 as HWND;
+            pump_until(Duration::from_secs(10), || visible_children(hwnd).1 > 0);
+            let (total, shown) = visible_children(hwnd);
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(
+                shown > 0,
+                "no visible child window ({total} child windows, {shown} visible): the page would be drawn nowhere"
+            );
         }
 
         #[test]

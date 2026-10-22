@@ -152,7 +152,10 @@ struct EnvironmentVtbl {
 #[repr(C)]
 struct ControllerVtbl {
     base: IUnknownVtbl,
-    _before_bounds: [usize; 3],
+    // get_IsVisible is slot 3; put_IsVisible is slot 4.
+    _before_visible: [usize; 1],
+    put_is_visible: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
+    _before_bounds: [usize; 1],
     put_bounds: unsafe extern "system" fn(*mut c_void, RECT) -> HRESULT,
     _before_close: [usize; 17],
     close: unsafe extern "system" fn(*mut c_void) -> HRESULT,
@@ -682,6 +685,19 @@ fn check(hr: HRESULT) -> Result<(), HRESULT> {
 }
 
 impl Controller {
+    /// Shows or hides the webview. A webview whose controller is not visible draws nothing, so
+    /// the window stays blank.
+    pub fn set_visible(&self, visible: bool) -> Result<(), HRESULT> {
+        let vt: &ControllerVtbl = self.0.vtbl();
+        // SAFETY: `self.0` is a live controller. BOOL is an i32 in the vtable.
+        let hr = unsafe { (vt.put_is_visible)(self.0.as_ptr(), i32::from(visible)) };
+        if hr < 0 {
+            Err(hr)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Sets the area the webview fills, in the parent window's client coordinates.
     pub fn set_bounds(&self, bounds: RECT) -> Result<(), HRESULT> {
         let vt: &ControllerVtbl = self.0.vtbl();

@@ -98,10 +98,38 @@ The probe is `cold_start_probe` in `conformance/tests/conformance/windows.rs`, r
 - About a third of the time is the window and controller. The rest is WebView2 loading the document after the handover, which the probe does not split further.
 - **Probe limits.** Animation frames were not used: a window that is not visible does not run them, so the probe could not detect a painted frame. The probe now navigates to the app origin, as the app does, and loads an external script. An earlier version used an inline script, which never ran. That is the app's content security policy at work: it blocks inline scripts on the app origin, as the `csp` check confirms. It was not a defect in navigation. Timings are the same on the navigate path as before: a median of about 3 s to `DOMContentLoaded` in the earlier runs.
 
+## A bug found by looking at the screen: the shell's windows were blank (fixed, 2026-10-23)
+
+Every window the shell showed on Windows drew nothing. The page loaded and ran, but its WebView2 content windows were hidden: `IsWindowVisible` was false for `Chrome_WidgetWin_0`, `Chrome_WidgetWin_1` and the D3D window, even though they had full size. The shell never set the controller visible. WebView2 applies that change while messages are pumped, so the content windows became visible only after the pump ran.
+
+The conformance checks could not see this, because they read page titles. The fix binds `put_IsVisible` (slot 4 of `ICoreWebView2Controller`) and sets it when a controller is created and again when a window is shown. A test, `the_webview_is_visible_once_its_window_is_shown`, waits up to 10 seconds for a visible content window. It fails without the fix and passes with it.
+
+The numbers above for the page channel and the cold-start probe were taken before the fix. The conformance suite was run again afterwards, and the results are below.
+
+| Check after the fix (release, 2026-10-23) | Result |
+|---|---|
+| IPC round trip, 200 pings, p95 | 0.20 ms (budget 5 ms: met) |
+| Blob, 4 MiB stored and read through its URL, median of 8 | 101.2 MB/s (budget 50 MB/s: met in this run) |
+| All other conformance checks | pass, or pending as before |
+
+## First paint on screen (release hello, 2026-10-23, after the fix)
+
+Timed from the screen: the release `hello` example was launched, and a pixel at the centre of its window was polled until it turned dark, which is the page's background. Five launches:
+
+| Run | Window appears | Page painted on screen |
+|---|---|---|
+| 1 | 2,899 ms | 2,999 ms |
+| 2 | 1,917 ms | 1,935 ms |
+| 3 | 1,893 ms | 1,905 ms |
+| 4 | 1,501 ms | 1,524 ms |
+| 5 | 1,228 ms | 1,252 ms |
+
+The page paints about 20 ms after its window appears, so the time is in window and controller set-up. The budget (first paint within 500 ms) is **not met**: the first paint is 1.25 to 3.0 s.
+
 ## Not measured yet
 
-- First paint of the page, as a painted frame. The probe above stops at `DOMContentLoaded`, and a visible-window check is needed to time paint.
 - The spec's reading of the shell memory budget, which needs a decision (see above).
+- Whether the cold-start budget can be met at all: the window waits for the WebView2 controller, and that is most of the time.
 - macOS and Linux builds.
 
 The benchmark run is scripted in `tools/run-benchmarks.sh`. Use it so every result follows the same method.
