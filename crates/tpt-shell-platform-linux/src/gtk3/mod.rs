@@ -148,6 +148,7 @@ impl Gtk3Backend {
     pub fn run(&mut self) {
         // SAFETY: called on the thread that started GTK.
         unsafe { (self.gtk.fns.gtk_main)() };
+        drain_default_context(self.gtk);
     }
 
     /// Connects a signal. `callback` must have the signature GTK documents for the signal, and
@@ -252,10 +253,14 @@ impl Gtk3Backend {
             .filter(|(_, w)| w.destroyed.get())
             .map(|(id, _)| *id)
             .collect();
+        let any = !gone.is_empty();
         for id in gone {
             if let Some(w) = self.windows.remove(&id) {
                 self.retire(w);
             }
+        }
+        if any {
+            drain_default_context(self.gtk);
         }
     }
 
@@ -357,6 +362,31 @@ impl Gtk3Backend {
             ));
         }
         Ok(png)
+    }
+}
+
+/// Runs the default main context until it has been idle for three polls in a row (10 ms apart),
+/// or half a second has passed. Disposing a web view is asynchronous: WebKit finishes closing the
+/// page and ending its web process from the main context. A process that exits before that
+/// happens can hit a WebKit assertion in an `atexit` handler, so every path that destroys a
+/// window drains afterwards.
+pub(crate) fn drain_default_context(gtk: &Gtk3) {
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let mut idle = 0;
+    while Instant::now() < deadline {
+        // SAFETY: GTK is initialised and this runs on its thread.
+        let pending = unsafe { (gtk.fns.gtk_events_pending)() };
+        if pending != 0 {
+            idle = 0;
+            // SAFETY: a non-blocking iteration of the default context.
+            unsafe { (gtk.fns.gtk_main_iteration_do)(0) };
+            continue;
+        }
+        idle += 1;
+        if idle >= 3 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -697,6 +727,8 @@ impl WindowBackend for Gtk3Backend {
         if let Some(w) = self.windows.remove(&id.0) {
             self.retire(w);
         }
+        // The destroy only schedules the web view's disposal; let WebKit finish it.
+        drain_default_context(self.gtk);
         Ok(())
     }
 
@@ -882,6 +914,7 @@ impl Drop for Gtk3Backend {
         for w in std::mem::take(&mut self.retired) {
             Box::leak(w);
         }
+        drain_default_context(self.gtk);
     }
 }
 

@@ -382,19 +382,20 @@ mod tests {
         let Some(_gui) = gui_session(name(adapter)) else {
             return;
         };
+        // A Wayland compositor hands the clipboard only to a focused client, and a headless
+        // compositor has no focus, so the clipboard is not exercised there at all (a read could
+        // wait for a selection that never arrives).
+        let on_x11 = std::env::var_os("DISPLAY").is_some_and(|v| !v.is_empty())
+            && std::env::var_os("WAYLAND_DISPLAY").is_none_or(|v| v.is_empty());
+        if !on_x11 {
+            eprintln!("skipped: the clipboard is only tested on a plain X11 display");
+            return;
+        }
         let mut backend = LinuxBackend::with_adapter(adapter).expect("the adapter starts");
         let text = "tpt-shell clipboard test";
         backend
             .set_clipboard_text(text)
             .expect("the clipboard accepts text");
-        let wayland_only = std::env::var_os("DISPLAY").is_none_or(|v| v.is_empty());
-        if wayland_only {
-            // A Wayland compositor hands the clipboard only to a focused client, and the
-            // headless compositor has no focus. Reading must still not crash.
-            let _ = backend.clipboard_text();
-            eprintln!("clipboard read-back not asserted: Wayland without focus");
-            return;
-        }
         assert_eq!(
             backend.clipboard_text().expect("the clipboard answers"),
             Some(text.to_string())

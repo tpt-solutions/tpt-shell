@@ -128,6 +128,45 @@ pub(crate) fn pump(gtk: &Gtk4, mut done: impl FnMut() -> bool, timeout: Option<D
     }
 }
 
+/// Runs the default main context until it has been idle for three polls in a row (10 ms apart),
+/// or half a second has passed. Disposing a web view is asynchronous: WebKit finishes closing the
+/// page and ending its web process from the main context. A process that exits before that
+/// happens can hit a WebKit assertion in an `atexit` handler, so every path that destroys a
+/// window drains afterwards.
+pub(crate) fn drain_default_context(gtk: &Gtk4) {
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let mut idle = 0;
+    while Instant::now() < deadline {
+        // SAFETY: a non-blocking iteration of the default context on the UI thread.
+        let ran = unsafe { (gtk.fns.g_main_context_iteration)(std::ptr::null_mut(), 0) };
+        if ran != 0 {
+            idle = 0;
+            continue;
+        }
+        idle += 1;
+        if idle >= 3 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Destroys a window and its web view now. The view is detached first, so its last reference
+/// drops here and not when the window is eventually disposed. The adapter holds no other
+/// reference to the view: `gtk_window_set_child` took the only one, the user script was
+/// released after it was added, and the pointer stored on the view is a plain pointer without a
+/// reference.
+///
+/// # Safety
+/// `w.window` is a live window of `w.gtk`.
+unsafe fn destroy_window(w: &WindowState) {
+    // SAFETY: see the contract above.
+    unsafe {
+        (w.gtk.fns.gtk_window_set_child)(w.window, std::ptr::null_mut());
+        (w.gtk.fns.gtk_window_destroy)(w.window);
+    }
+}
+
 /// The state of one asynchronous call whose waiter may give up. The callback holds one `Rc` and
 /// the waiter another, so a callback that fires after the waiter stopped waiting still has live
 /// memory to write to, and frees what it was given instead of leaking it.
@@ -229,6 +268,7 @@ impl Gtk4Backend {
     pub fn run(&mut self) {
         // SAFETY: called on the thread that started GTK; the loop is live.
         unsafe { (self.gtk.fns.g_main_loop_run)(self.main_loop) };
+        drain_default_context(self.gtk);
     }
 
     /// Runs the main loop's pending work until `done` is true or `timeout` passes. Returns
@@ -348,10 +388,14 @@ impl Gtk4Backend {
             .filter(|(_, w)| w.destroyed.get())
             .map(|(id, _)| *id)
             .collect();
+        let any = !gone.is_empty();
         for id in gone {
             if let Some(w) = self.windows.remove(&id) {
                 self.retire(w);
             }
+        }
+        if any {
+            drain_default_context(self.gtk);
         }
     }
 
@@ -849,10 +893,12 @@ impl WindowBackend for Gtk4Backend {
         let w = self.state(id)?;
         // SAFETY: the window is live. Destroying it runs `on_destroy`, which only sets a flag,
         // so the state is still valid when it is removed below.
-        unsafe { (self.gtk.fns.gtk_window_destroy)(w.window) };
+        unsafe { destroy_window(w) };
         if let Some(w) = self.windows.remove(&id.0) {
             self.retire(w);
         }
+        // The destroy only schedules the web view's disposal; let WebKit finish it.
+        drain_default_context(self.gtk);
         Ok(())
     }
 
@@ -1016,7 +1062,7 @@ impl Drop for Gtk4Backend {
         for (_, w) in self.windows.drain() {
             if !w.destroyed.get() {
                 // SAFETY: the window is live until destroyed here; the state is freed after.
-                unsafe { (self.gtk.fns.gtk_window_destroy)(w.window) };
+                unsafe { destroy_window(&w) };
             }
             // The state stays allocated: WebKit may still call a handler with its pointer.
             Box::leak(w);
@@ -1024,6 +1070,7 @@ impl Drop for Gtk4Backend {
         for w in std::mem::take(&mut self.retired) {
             Box::leak(w);
         }
+        drain_default_context(self.gtk);
         // SAFETY: the loop was created by `new` and is released once.
         unsafe { (self.gtk.fns.g_main_loop_unref)(self.main_loop) };
     }

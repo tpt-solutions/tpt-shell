@@ -46,20 +46,44 @@ pub(crate) mod testutil {
     /// its whole run.
     static GUI: Mutex<Option<&'static str>> = Mutex::new(None);
 
+    /// Holds the GUI lock for one test. When the test body is done (and its backend dropped,
+    /// since the guard is declared first), it drains the default main context once more, so
+    /// WebKit finishes disposing before the test returns. The test harness controls the process
+    /// exit, so this is as late as a test can settle.
+    pub(crate) struct GuiSession {
+        _lock: MutexGuard<'static, Option<&'static str>>,
+        toolkit: &'static str,
+    }
+
+    impl Drop for GuiSession {
+        fn drop(&mut self) {
+            if self.toolkit == "gtk3" {
+                if let Ok(gtk) = crate::gtk3::sys::load() {
+                    crate::gtk3::drain_default_context(gtk);
+                }
+            } else if let Ok(gtk) = crate::gtk4::sys::load() {
+                crate::gtk4::drain_default_context(gtk);
+            }
+        }
+    }
+
     /// Takes the GUI lock for `toolkit`. `None` (after a message) when the other toolkit already
     /// started in this process: that test is skipped, and runs in the CI leg for its adapter.
-    pub(crate) fn gui_session(
-        toolkit: &'static str,
-    ) -> Option<MutexGuard<'static, Option<&'static str>>> {
+    pub(crate) fn gui_session(toolkit: &'static str) -> Option<GuiSession> {
         let mut guard = GUI.lock().unwrap_or_else(|e| e.into_inner());
         match *guard {
             Some(started) if started != toolkit => {
-                eprintln!("skipped: {started} already runs in this process, and {toolkit} cannot share it");
+                eprintln!(
+                    "skipped: {started} already runs in this process, and {toolkit} cannot share it"
+                );
                 None
             }
             _ => {
                 *guard = Some(toolkit);
-                Some(guard)
+                Some(GuiSession {
+                    _lock: guard,
+                    toolkit,
+                })
             }
         }
     }

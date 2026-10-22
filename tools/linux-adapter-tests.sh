@@ -39,40 +39,33 @@ echo "test binary: $bin"
 # open (GitHub hides group contents in a pasted log) and raised as an error annotation, and the
 # names of all failures are repeated at the end.
 failed=0
-failed_names=""
 out="$(mktemp)"
 while IFS= read -r name; do
-  "$bin" --exact "$name" --nocapture >"$out" 2>&1
-  rc=$?
-  if [ "$rc" -eq 0 ]; then
-    echo "::group::$name"
-    cat "$out"
-    echo "RESULT: $name ok"
-    echo "::endgroup::"
-    continue
-  fi
-  failed=$((failed + 1))
-  failed_names="$failed_names $name"
-  echo "RESULT: $name FAILED (exit code $rc)"
-  tail -n 80 "$out"
-  # The first GLib, GTK or WebKit complaint, for the annotation and for a quick read.
-  first="$(grep -m1 -E 'ERROR|CRITICAL|WARNING|panicked|assert|Error' "$out" | cut -c1-300)"
-  echo "::error title=$name failed (exit code $rc)::${first:-no message}"
-  if [ "$rc" -ge 128 ]; then
-    echo "killed by signal $((rc - 128)); native backtrace follows"
-    if command -v gdb >/dev/null 2>&1; then
-      G_MESSAGES_DEBUG=all gdb -batch -ex "set pagination off" -ex run -ex "bt full" \
-        -ex "thread apply all bt" --args "$bin" --exact "$name" --nocapture >"$out.gdb" 2>&1
-      tail -n 200 "$out.gdb"
-      # The stack frames of the crashing thread and the GLib messages, as one annotation, so the
-      # cause can be read without opening the log.
-      frames="$(grep -E '^#[0-9]+ ' "$out.gdb" | head -n 25 | cut -c1-200 | sed 's/%/%25/g' | paste -sd '|')"
-      glib="$(grep -E 'GLib|Gtk|Gdk|WebKit|GLib-GIO|\*\*' "$out.gdb" | head -n 6 | cut -c1-200 | sed 's/%/%25/g' | paste -sd '|')"
-      echo "::error title=$name backtrace::frames: ${frames:-none} || messages: ${glib:-none}"
+  echo "::group::$name"
+  "$bin" --exact "$name" --nocapture 2>&1 | tee "$out"
+  rc=${PIPESTATUS[0]}
+  if [ "$rc" -ne 0 ]; then
+    failed=$((failed + 1))
+    if grep -q "test result: ok. 1 passed" "$out"; then
+      # The test body finished and the harness reported success; the process died afterwards,
+      # in an exit-time handler (a WebKit object torn down by atexit). A real failure, but a
+      # different one from a test that aborts in its body.
+      echo "RESULT: $name PASSED, THEN ABORTED AT PROCESS EXIT (exit code $rc)"
     else
-      echo "gdb is not installed"
+      echo "RESULT: $name FAILED (exit code $rc)"
     fi
+    if [ "$rc" -ge 128 ]; then
+      echo "killed by signal $((rc - 128)); native backtrace follows"
+      if command -v gdb >/dev/null 2>&1; then
+        G_MESSAGES_DEBUG=all gdb -batch -ex "set pagination off" -ex run -ex "bt full"           -ex "thread apply all bt" --args "$bin" --exact "$name" --nocapture 2>&1 | tail -n 200
+      else
+        echo "gdb is not installed"
+      fi
+    fi
+  else
+    echo "RESULT: $name ok"
   fi
+  echo "::endgroup::"
 done < <("$bin" --list 2>/dev/null | sed -n 's/: test$//p')
 rm -f "$out" "$out.gdb"
 
