@@ -2,18 +2,21 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # Copyright (c) 2026 TPT Solutions
 #
-# Runs every fuzz target for a fixed number of inputs with a fixed seed (spec §14, "Property and
-# fuzz tests"). The run is deterministic, so a failure on one commit reproduces on the next. It is
-# a smoke test, not a search: the long runs are the M12 fuzzing item and the nightly job.
+# Runs every fuzz target for a fixed time each (spec §14, "Property and fuzz tests"). It is a smoke
+# test, not a search: the long runs are the M12 fuzzing item and the nightly job.
 #
-# The targets live in fuzz/ (cargo-fuzz). Each target is one `fuzz_target!` in fuzz/fuzz_targets.
+# The targets live in fuzz/ and run on stable Rust through the mutation driver in fuzz/src/main.rs.
+# cargo-fuzz is not used: libfuzzer-sys is licensed under a term the licence allow list does not
+# permit (see fuzz/Cargo.toml). The driver is seeded from the clock, so a run is not reproducible.
+# A crash is written to fuzz/crashes/<target>-<run>.bin and the target fails.
+#
 # Until fuzz/ exists the script says so and exits 0; the CI job then shows a clear skip.
 #
-# usage: tools/fuzz-smoke.sh [runs-per-target]   (default 2000)
+# usage: tools/fuzz-smoke.sh [seconds-per-target]   (default 30)
 
 set -euo pipefail
 
-runs="${1:-2000}"
+seconds="${1:-30}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 fuzz_dir="$root/fuzz"
 
@@ -23,24 +26,20 @@ if [ ! -f "$fuzz_dir/Cargo.toml" ]; then
   exit 0
 fi
 
-if ! cargo fuzz --version >/dev/null 2>&1; then
-  echo "cargo-fuzz is not installed; install it with cargo install cargo-fuzz or taiki-e/install-action" >&2
-  exit 1
-fi
-
-cd "$fuzz_dir"
-targets=$(cargo fuzz list)
+# The target names are the TARGETS list in the fuzz library, so the two cannot drift apart.
+targets=$(sed -n 's/^pub const TARGETS.*= \[\(.*\)\];/\1/p' "$fuzz_dir/src/lib.rs" | tr -d '"' | tr ',' '\n' | tr -d ' ')
 if [ -z "$targets" ]; then
   echo "fuzz/ has no targets yet; nothing to run"
   exit 0
 fi
 
+cargo build --quiet --release --manifest-path "$fuzz_dir/Cargo.toml"
+
 status=0
 for target in $targets; do
-  echo "== fuzz smoke: $target ($runs runs, seed 1)"
-  # -seed fixes the input sequence; -runs bounds the run; -max_total_time is a safety net.
-  if ! cargo +nightly fuzz run "$target" -- -runs="$runs" -seed=1 -max_total_time=300; then
-    echo "fuzz target $target failed; its crash input is under fuzz/artifacts/$target" >&2
+  echo "== fuzz smoke: $target ($seconds s)"
+  if ! cargo run --quiet --release --manifest-path "$fuzz_dir/Cargo.toml" -- "$target" "$seconds"; then
+    echo "fuzz target $target failed; its crash input is under fuzz/crashes/" >&2
     status=1
   fi
 done

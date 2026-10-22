@@ -10,7 +10,7 @@ name: ci
 on:
   push:
   pull_request:
-  # Nightly: the long fuzz run only. The per-commit fuzz smoke run is deterministic (see below).
+  # Nightly: the long fuzz run only. The per-commit fuzz smoke run is time-bounded (see below).
   schedule:
     - cron: "17 3 * * *"
 
@@ -219,28 +219,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-fuzz
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # Deterministic: a fixed seed and a fixed number of inputs per target, so a failure on one
-      # commit reproduces on the next. Skips with a message until fuzz/ exists.
-      - run: bash tools/fuzz-smoke.sh 2000
+      # Thirty seconds per target (the script default). Skips with a message until fuzz/ exists.
+      - run: bash tools/fuzz-smoke.sh
 
-  # Nightly only: the same targets for much longer. Every target stops after 300 seconds (see
-  # tools/fuzz-smoke.sh). Runs only on the schedule trigger.
+  # Nightly only: the same targets for much longer, an hour each. Runs only on the schedule trigger.
   fuzz-nightly:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-fuzz
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: bash tools/fuzz-smoke.sh 100000000
+      - run: bash tools/fuzz-smoke.sh 3600
 
   docs-build:
     runs-on: ubuntu-latest
