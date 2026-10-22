@@ -35,28 +35,41 @@ if [ -z "$bin" ] || [ ! -x "$bin" ]; then
 fi
 echo "test binary: $bin"
 
+# A passing test's output stays in a collapsed group. A failing test's output is printed in the
+# open (GitHub hides group contents in a pasted log) and raised as an error annotation, and the
+# names of all failures are repeated at the end.
 failed=0
+failed_names=""
+out="$(mktemp)"
 while IFS= read -r name; do
-  echo "::group::$name"
-  "$bin" --exact "$name" --nocapture
+  "$bin" --exact "$name" --nocapture >"$out" 2>&1
   rc=$?
-  if [ "$rc" -ne 0 ]; then
-    failed=$((failed + 1))
-    echo "RESULT: $name FAILED (exit code $rc)"
-    if [ "$rc" -ge 128 ]; then
-      echo "killed by signal $((rc - 128)); native backtrace follows"
-      if command -v gdb >/dev/null 2>&1; then
-        G_MESSAGES_DEBUG=all gdb -batch -ex "set pagination off" -ex run -ex "bt full" \
-          -ex "thread apply all bt" --args "$bin" --exact "$name" --nocapture 2>&1 | tail -n 200
-      else
-        echo "gdb is not installed"
-      fi
-    fi
-  else
+  if [ "$rc" -eq 0 ]; then
+    echo "::group::$name"
+    cat "$out"
     echo "RESULT: $name ok"
+    echo "::endgroup::"
+    continue
   fi
-  echo "::endgroup::"
+  failed=$((failed + 1))
+  failed_names="$failed_names $name"
+  echo "RESULT: $name FAILED (exit code $rc)"
+  tail -n 80 "$out"
+  # The first GLib, GTK or WebKit complaint, for the annotation and for a quick read.
+  first="$(grep -m1 -E 'ERROR|CRITICAL|WARNING|panicked|assert|Error' "$out" | cut -c1-300)"
+  echo "::error title=$name failed (exit code $rc)::${first:-no message}"
+  if [ "$rc" -ge 128 ]; then
+    echo "killed by signal $((rc - 128)); native backtrace follows"
+    if command -v gdb >/dev/null 2>&1; then
+      G_MESSAGES_DEBUG=all gdb -batch -ex "set pagination off" -ex run -ex "bt full" \
+        -ex "thread apply all bt" --args "$bin" --exact "$name" --nocapture 2>&1 | tail -n 200
+    else
+      echo "gdb is not installed"
+    fi
+  fi
 done < <("$bin" --list 2>/dev/null | sed -n 's/: test$//p')
+rm -f "$out"
 
 echo "tests that failed: $failed"
+[ -z "$failed_names" ] || echo "failed:$failed_names"
 [ "$failed" -eq 0 ]
