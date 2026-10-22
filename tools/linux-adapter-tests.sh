@@ -62,13 +62,19 @@ while IFS= read -r name; do
     echo "killed by signal $((rc - 128)); native backtrace follows"
     if command -v gdb >/dev/null 2>&1; then
       G_MESSAGES_DEBUG=all gdb -batch -ex "set pagination off" -ex run -ex "bt full" \
-        -ex "thread apply all bt" --args "$bin" --exact "$name" --nocapture 2>&1 | tail -n 200
+        -ex "thread apply all bt" --args "$bin" --exact "$name" --nocapture >"$out.gdb" 2>&1
+      tail -n 200 "$out.gdb"
+      # The stack frames of the crashing thread and the GLib messages, as one annotation, so the
+      # cause can be read without opening the log.
+      frames="$(grep -E '^#[0-9]+ ' "$out.gdb" | head -n 25 | cut -c1-200 | sed 's/%/%25/g' | paste -sd '|')"
+      glib="$(grep -E 'GLib|Gtk|Gdk|WebKit|GLib-GIO|\*\*' "$out.gdb" | head -n 6 | cut -c1-200 | sed 's/%/%25/g' | paste -sd '|')"
+      echo "::error title=$name backtrace::frames: ${frames:-none} || messages: ${glib:-none}"
     else
       echo "gdb is not installed"
     fi
   fi
 done < <("$bin" --list 2>/dev/null | sed -n 's/: test$//p')
-rm -f "$out"
+rm -f "$out" "$out.gdb"
 
 echo "tests that failed: $failed"
 [ -z "$failed_names" ] || echo "failed:$failed_names"
