@@ -692,12 +692,12 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [ ] External or internal security review
 - [ ] Control-channel review (R7)
 - [ ] Soundness review of all unsafe code (R1, R3)
-- [ ] Sanitiser and Miri runs where possible
+- [ ] Sanitiser and Miri runs where possible. Miri does not apply: the workspace has no `unsafe` outside the platform and FFI crates (devices, kiosk, the three platform crates), and Miri cannot run foreign calls. The ipc crate has none. Sanitisers are not run yet.
 
 ### Performance (§13)
 - [x] Hello-world binary ≤ 4 MB stripped on Windows (`examples/hello`: 706,048 bytes release on 2026-10-22; see BENCHMARKS.md)
 - [ ] Cold start to first paint ≤ 500 ms; shell overhead ≤ 50 ms
-- [ ] IPC round trip small payload p95 ≤ 5 ms
+- [ ] IPC round trip small payload p95 ≤ 5 ms (router share measured: 1.5 µs p95, in-process, see BENCHMARKS.md. The page channel is not measured; the Windows conformance suite does that and needs `WebView2Loader.dll`)
 - [ ] Blob channel ≥ 50 MB/s sustained
 - [ ] Idle shell memory overhead ≤ 25 MB
 - [ ] Supervisor ≤ 5 MB idle (see the M6 item: private memory 3.2 MB, working set 7.0 MB)

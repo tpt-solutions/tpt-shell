@@ -23,6 +23,16 @@ Method:
   separately.
 - Measured on 2026-10-22. Rebuild and re-measure after a dependency change.
 
+## Router cost per IPC call (in process, not the round trip)
+
+| Measure | Result | Budget |
+|---|---|---|
+| Router only (parse, dispatch, encode), 20,000 calls: p50 / p95 / p99 | 1.4 / 1.5 / 2.3 µs | the whole round trip, p95 ≤ 5 ms |
+
+This is the router's share of an IPC call, and nothing else. It does not include the page channel (WebView2 `postMessage` in both directions), which is most of the round trip. The IPC budget stays unmet until the channel is measured: the Windows conformance suite does that, and it needs `WebView2Loader.dll`.
+
+Method: `cargo test -p tpt-shell-ipc --release --test router_latency -- --ignored --nocapture`. A no-op echo command, default limits, one request per call. The test is in `crates/tpt-shell-ipc/tests/router_latency.rs`.
+
 ## Supervisor idle memory (Windows)
 
 | Measure | Result | Budget |
@@ -36,7 +46,7 @@ Method: start `tpt-shell-supervisor -- supervisor-child beat` (release builds), 
 
 - Cold start to first paint (spec §13 budget 500 ms). Partial numbers are in `todo.md`
   under M1 (controller creation 0.8–2.0 s, total 2.1–2.3 s, so the budget is not met).
-- IPC round trip (budget p95 ≤ 5 ms).
+- IPC round trip through the page channel (budget p95 ≤ 5 ms). Only the router's share is measured, above.
 - Blob channel throughput (budget ≥ 50 MB/s).
 - Idle shell memory (budget ≤ 25 MB) and supervisor idle memory (budget ≤ 5 MB).
 - macOS and Linux builds.
