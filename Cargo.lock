@@ -350,7 +350,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags",
+ "block2",
  "dispatch2",
+ "libc",
  "objc2",
 ]
 
@@ -460,6 +462,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "709fe137109bd1e8b5a99390f77a7d8b2961dafc1a1c5db8f2e60329ad6d895a"
 dependencies = [
  "bitflags",
+ "block2",
+ "libc",
  "objc2",
  "objc2-core-foundation",
 ]
@@ -829,6 +833,7 @@ dependencies = [
  "tpt-shell-ipc",
  "tpt-shell-kiosk",
  "tpt-shell-manifest",
+ "tpt-shell-platform-linux",
  "tpt-shell-platform-windows",
  "tpt-shell-replay",
  "tpt-shell-supervisor",
@@ -852,6 +857,9 @@ version = "0.0.0"
 [[package]]
 name = "tpt-shell-devices"
 version = "0.0.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "tpt-shell-devtools"
@@ -923,7 +931,9 @@ dependencies = [
  "block2",
  "objc2",
  "objc2-app-kit",
+ "objc2-core-foundation",
  "objc2-foundation",
+ "objc2-security",
  "objc2-web-kit",
  "tpt-shell-core",
 ]
