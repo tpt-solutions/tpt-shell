@@ -357,20 +357,22 @@ fn large_blobs_fetch(loader: &Path, dir: &Path) -> Result<(Outcome, String), Str
         .map_err(err)?;
     let title = wait_title(&b, id, WAIT, |t| t.starts_with("fetch:"));
     let expected_prefix = format!("fetch:{BLOB_BYTES}:z:{BLOB_COUNT}:");
-    let Some(median_ms) = title
+    // The page reports the median of each whole read, then the median of its response alone.
+    let times: Option<(f64, f64)> = title
         .strip_prefix(&expected_prefix)
-        .and_then(|ms| ms.parse::<f64>().ok())
-    else {
+        .and_then(|rest| rest.split_once(':'))
+        .and_then(|(total, headers)| Some((total.parse().ok()?, headers.parse().ok()?)));
+    let Some((total_ms, headers_ms)) = times else {
         return Ok((
             Outcome::Fail(format!(
-                "title was {title:?}, expected {expected_prefix:?} and a time"
+                "title was {title:?}, expected {expected_prefix:?} followed by two times"
             )),
             String::new(),
         ));
     };
-    let mb_per_s = (BLOB_BYTES as f64 / 1_000_000.0) / (median_ms / 1000.0);
+    let mb_per_s = (BLOB_BYTES as f64 / 1_000_000.0) / (total_ms / 1000.0);
     let detail = format!(
-        "fetched through the app's blob URL: {BLOB_COUNT} reads of {} MiB, median {mb_per_s:.1} MB/s",
+        "fetched through the app's blob URL: {BLOB_COUNT} reads of {} MiB, median {mb_per_s:.1} MB/s; median response {headers_ms:.1} ms of {total_ms:.1} ms, so the body took the rest",
         BLOB_BYTES / (1024 * 1024)
     );
     Ok((Outcome::Pass, detail))

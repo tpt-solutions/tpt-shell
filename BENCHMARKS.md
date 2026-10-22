@@ -40,15 +40,15 @@ Measured 2026-10-23 with the Windows conformance suite, on Windows 11 with the E
 | Measure | Result | Budget |
 |---|---|---|
 | IPC round trip, page to host and back, 200 round trips: p95 gap between pings, 3 runs | 0.12, 0.34, 0.44, 0.70, 0.81 ms (5 runs) | p95 ≤ 5 ms: **met** |
-| Blob, 4 MiB host to page as a message, 8 transfers in a row, median per run (2 runs) | 46.2, 38.9 MB/s | ≥ 50 MB/s, sustained: **not met** |
-| Blob, 4 MiB read by the page through the app's blob URL, 8 reads in a row, median (2 runs) | 36.3, 37.3 MB/s | ≥ 50 MB/s, sustained: **not met** |
+| Blob, 4 MiB host to page as a message, 8 transfers in a row, median per run (5 runs, the first two before the copy and split changes) | 38.9, 46.2, 47.9, 52.5, 44.1 MB/s | ≥ 50 MB/s, sustained: **around the budget, not reliably met** |
+| Blob, 4 MiB read by the page through the app's blob URL, 8 reads in a row, median per run (7 runs, the first two before the response split) | 36.3, 37.3, 38.3, 49.9, 54.5, 62.2, 65.9 MB/s | ≥ 50 MB/s, sustained: **around the budget, not reliably met** |
 
 What the numbers mean:
 
 - **An earlier IPC figure of 16.7 ms was the harness, not the channel.** The conformance pump waited with `Sleep(1)`, and on Windows that can take a full timer tick, about 16 ms. The ping timestamp is taken when the message is dispatched, so it inherited that wait. The pump now waits on the message queue, with a 1 ms timeout. The application's own loop (`GetMessageW`) never had this problem.
 - **The blob figure now times only the transfer.** The earlier figure of 1.4 MB/s counted page start-up, about 2 to 4 s. The whole check, start-up included, still takes 2 to 4 s.
-- **The blob budget is a sustained rate, and the sustained measure is now the median of eight transfers in a row.** Single transfers looked faster (39 to 86 MB/s over four runs), but one transfer is one sample, so it is not what the budget asks about. The median of eight is what the budget asks about, and it is below 50 MB/s in both runs, for both paths.
-- **The fetch path includes the asset closure's copy of the 4 MiB body, and that copy is not the cause.** Copying 4 MiB takes about 1.5 ms (PowerShell `Clone()`, 8 runs after warm-up), against transfers of about 100 ms. The rest of the gap is in WebView2's request handling and the page's own handling of the bytes, which are not separated yet.
+- **The blob budget is a sustained rate, and the sustained measure is now the median of eight transfers in a row.** Single transfers looked faster (39 to 86 MB/s over four runs), but one transfer is one sample, so it is not what the budget asks about. The median of eight is what the budget asks about. Across runs it sits around 50 MB/s, above it in some runs and below in others, so the budget is not reliably met. The runs were on a desktop in use, which adds variation the measurement cannot separate out.
+- **The fetch path includes the asset closure's copy of the 4 MiB body, and that copy is not the cause.** Copying 4 MiB takes about 1.5 ms (PowerShell `Clone()`, 8 runs after warm-up), against transfers of about 100 ms. The page now times each read in two parts. The response (headers) takes most of each read, about 52 to 78 ms, and the body takes the rest, about 9 to 31 ms. So the time is spent before WebView2 hands the response to the page, not in reading the bytes. That is in the host's request handling or in WebView2's transfer of the response. It is not separated further yet.
 - **Not measured yet:** the facade's `put_blob` store and the 64 MiB limit, and the blob channel on macOS and Linux.
 
 The conformance suite checks correctness, so every check above passes, including the two budget checks. The budgets are judged from the numbers here, and both blob budget numbers are not met.
