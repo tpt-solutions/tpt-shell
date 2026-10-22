@@ -588,3 +588,70 @@ fn a_page_prints_through_a_granted_device_and_the_use_is_audited() {
         vec![EventKind::Open, EventKind::Write, EventKind::Close]
     );
 }
+
+#[test]
+fn the_ui_handle_queues_work_for_known_windows_and_refuses_others() {
+    let Some((loader, _serial)) = runtime_test_loader() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("tpt-app-ui-{}", std::process::id()));
+    let running = App::new()
+        .name("ui-test")
+        .loader(loader)
+        .data_dir(&dir)
+        .asset("index.html", "text/html", INDEX)
+        .window(Window::new("main"))
+        .build()
+        .expect("the app should start");
+    let ui = running.ui_handle();
+    assert!(ui.show("missing").is_err(), "an unknown window is refused");
+    ui.show("main").expect("a known window is queued");
+    ui.emit("main", "ping", serde_json::json!({ "n": 1 }))
+        .expect("an event is queued");
+    // The handle is Send, so another thread can queue work too.
+    let from_thread = ui.clone();
+    std::thread::spawn(move || {
+        from_thread
+            .emit("main", "ping", serde_json::json!({}))
+            .expect("queued from another thread")
+    })
+    .join()
+    .expect("thread");
+    // The queued work never runs here: the loop is not pumped, and dropping the app frees it.
+    drop(running);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_kiosk_app_builds_with_its_page_failure_and_idle_hooks() {
+    let Some((loader, _serial)) = runtime_test_loader() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("tpt-app-kiosk-run-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+    // Browser mode: a kiosk config without the single-app lock-down, so no fullscreen window and
+    // no key hook. The idle reset and the page-failure hook are still installed.
+    let secret = [7u8; 32];
+    let public = tpt_shell_kiosk::config::public_key_hex(&secret);
+    let body = br#"{"mode":"browser","home":"index.html","idle_seconds":1}"#;
+    let config = dir.join("kiosk.json");
+    let sig = dir.join("kiosk.json.sig");
+    std::fs::write(&config, body).expect("write config");
+    std::fs::write(&sig, tpt_shell_kiosk::config::sign(body, &secret)).expect("write sig");
+    let running = App::new()
+        .name("kiosk-run-test")
+        .loader(loader)
+        .data_dir(dir.join("data"))
+        .asset("index.html", "text/html", INDEX)
+        .window(Window::new("main"))
+        .kiosk_config(&config, &sig, &public)
+        .expect("the signed config is read")
+        .build()
+        .expect("the kiosk app should start");
+    assert!(running.window("main").is_some());
+    // The developer overlay is a separate window, never one of the app's windows.
+    assert!(running.window("tpt-devtools").is_none());
+    drop(running);
+    let _ = std::fs::remove_dir_all(&dir);
+}

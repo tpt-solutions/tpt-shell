@@ -14,12 +14,18 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+#[cfg(all(windows, feature = "admin-endpoint"))]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(all(windows, feature = "admin-endpoint"))]
+use std::sync::Arc;
 use std::time::Duration;
 #[cfg(windows)]
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
 use crate::blob;
+#[cfg(windows)]
+use crate::{devtools, session, ui};
 use tpt_shell_audit::Policy;
 #[cfg(windows)]
 use tpt_shell_audit::{AuditLog, Entry, Outcome};
@@ -32,10 +38,14 @@ use tpt_shell_core::geometry::LogicalSize;
 use tpt_shell_core::Error;
 use tpt_shell_core::Result;
 #[cfg(windows)]
+use tpt_shell_devtools::IpcEntry;
+#[cfg(windows)]
 use tpt_shell_ipc::Caller;
 use tpt_shell_ipc::{Router, Target, Value};
 #[cfg(windows)]
 use tpt_shell_kiosk::idle::IdleTimer;
+#[cfg(windows)]
+use tpt_shell_kiosk::recovery::CrashRecovery;
 #[cfg(windows)]
 use tpt_shell_platform_windows::webview2::default_user_data_dir;
 
@@ -139,6 +149,20 @@ pub struct App {
     /// The URL scheme to register for this app, if any.
     #[cfg_attr(not(windows), allow(dead_code))]
     deep_link: Option<String>,
+    /// The command contract that `write_contract` and `--tpt-write-contract` write out.
+    contract: Option<tpt_shell_ipc::contract::Contract>,
+    /// The `[agent]` config and the profile name the app selected (feature `agent`).
+    #[cfg(feature = "agent")]
+    agent_config: Option<(tpt_shell_agent::profile::AgentConfig, String)>,
+    /// The tools the app offers an agent (feature `agent`).
+    #[cfg(feature = "agent")]
+    agent_tools: Vec<tpt_shell_agent::AgentTool>,
+    /// The health endpoint's address and the longest heartbeat age it accepts (feature `health-endpoint`).
+    #[cfg(feature = "health-endpoint")]
+    health: Option<(std::net::SocketAddr, Duration)>,
+    /// The admin endpoint's address and token (feature `admin-endpoint`).
+    #[cfg(feature = "admin-endpoint")]
+    admin: Option<(std::net::SocketAddr, String)>,
 }
 
 /// What a kiosk config sets: the page the app returns to, and how long it may sit idle first.
@@ -249,6 +273,28 @@ fn profile_data_dir(
             Ok((dir, None))
         }
     }
+}
+
+/// The path after `--tpt-write-contract` on the command line, if the flag is there.
+fn contract_flag() -> Result<Option<PathBuf>> {
+    let mut args = std::env::args_os().skip(1);
+    while let Some(arg) = args.next() {
+        if arg.to_str() == Some("--tpt-write-contract") {
+            return args
+                .next()
+                .map(|path| Some(PathBuf::from(path)))
+                .ok_or_else(|| Error::Backend("--tpt-write-contract needs a file path".into()));
+        }
+    }
+    Ok(None)
+}
+
+/// Reads and validates the manifest at `manifest`.
+#[cfg(feature = "agent")]
+fn read_manifest(manifest: &Path) -> Result<tpt_shell_manifest::Manifest> {
+    let text = std::fs::read_to_string(manifest)
+        .map_err(|e| Error::Backend(format!("cannot read {}: {e}", manifest.display())))?;
+    tpt_shell_manifest::parse(&text).map_err(|e| Error::Backend(e.to_string()))
 }
 
 /// Reads a kiosk config's settings. `home` must be a plain path under the app origin.
@@ -508,9 +554,94 @@ impl App {
         self
     }
 
-    /// Starts the app and runs it until its last window closes or the app quits.
+    /// Sets the command contract, the JSON description of the app's commands that the CLI reads.
+    /// Build it with `commands![...]` from the `#[command]` functions (see [`CommandContract`]).
+    pub fn contract(mut self, contract: tpt_shell_ipc::contract::Contract) -> Self {
+        self.contract = Some(contract);
+        self
+    }
+
+    /// Writes the contract as JSON to `path`. Fails when the app has no contract (see
+    /// [`App::contract`]). [`App::run`] calls this for `--tpt-write-contract <path>` and returns
+    /// before any window opens.
+    pub fn write_contract(&self, path: &Path) -> Result<()> {
+        let Some(contract) = &self.contract else {
+            return Err(Error::Backend(
+                "the app has no command contract: call App::contract first".into(),
+            ));
+        };
+        std::fs::write(path, contract.to_json_string())
+            .map_err(|e| Error::Backend(format!("cannot write {}: {e}", path.display())))
+    }
+
+    /// Reads the `[agent]` section of the manifest at `manifest` and selects `profile` from it
+    /// (feature `agent`). The agent runs only when the section enables it and the profile exists;
+    /// otherwise the app starts without one. The agent needs an audit log (see [`App::audit`]).
+    #[cfg(feature = "agent")]
+    pub fn agent(mut self, manifest: &Path, profile: &str) -> Result<Self> {
+        let parsed = read_manifest(manifest)?;
+        let section = parsed
+            .stubs
+            .iter()
+            .find(|(name, _)| name.as_str() == "agent")
+            .map(|(_, table)| table);
+        let config = tpt_shell_agent::profile::parse_agent_section(section)
+            .map_err(|e| Error::Backend(e.to_string()))?;
+        if !config.profiles.contains_key(profile) {
+            return Err(Error::Backend(format!(
+                "the manifest has no agent profile named {profile:?}"
+            )));
+        }
+        self.agent_config = Some((config, profile.to_string()));
+        Ok(self)
+    }
+
+    /// Adds a command an agent may call (feature `agent`). `args` is its argument schema. The
+    /// handler runs on the UI thread with the arguments the agent sent; its `Err` text is what the
+    /// agent sees. Only the tools the selected profile allows are offered.
+    #[cfg(feature = "agent")]
+    pub fn agent_tool(
+        mut self,
+        command: &str,
+        description: &str,
+        args: tpt_shell_ipc::schema::Schema,
+        handler: impl FnMut(&Value) -> std::result::Result<Value, String> + 'static,
+    ) -> Self {
+        self.agent_tools.push(tpt_shell_agent::AgentTool {
+            command: command.to_string(),
+            description: description.to_string(),
+            args,
+            handler: Box::new(handler),
+        });
+        self
+    }
+
+    /// Serves the health check on `addr`, which must be loopback (feature `health-endpoint`). It
+    /// reads the heartbeat file named by `TPT_HEARTBEAT_FILE` and reports unhealthy once the beat
+    /// is older than `max_age`.
+    #[cfg(feature = "health-endpoint")]
+    pub fn health_endpoint(mut self, addr: std::net::SocketAddr, max_age: Duration) -> Self {
+        self.health = Some((addr, max_age));
+        self
+    }
+
+    /// Serves the admin endpoint on `addr`, which must be loopback (feature `admin-endpoint`).
+    /// Requests must carry `token`, at least 24 characters. The endpoint reports the app's window
+    /// names, and a reset sends every window back to the home page.
+    #[cfg(feature = "admin-endpoint")]
+    pub fn admin_endpoint(mut self, addr: std::net::SocketAddr, token: &str) -> Self {
+        self.admin = Some((addr, token.to_string()));
+        self
+    }
+
+    /// Starts the app and runs it until its last window closes or the app quits. With
+    /// `--tpt-write-contract <path>` it writes the contract instead, and returns `Ok` before any
+    /// window opens, so the process exits with 0.
     #[cfg_attr(not(windows), allow(unused_mut))]
     pub fn run(mut self) -> Result<()> {
+        if let Some(path) = contract_flag()? {
+            return self.write_contract(&path);
+        }
         #[cfg(windows)]
         {
             let guard = match self.claim_instance()? {
@@ -566,23 +697,51 @@ impl App {
     /// Creates the windows, keeping `instance` alive for as long as the app runs.
     #[cfg(windows)]
     fn build_with(
-        self,
+        mut self,
         instance: Option<tpt_shell_platform_windows::single_instance::InstanceGuard>,
     ) -> Result<Running> {
         use std::cell::RefCell;
         use std::rc::Rc;
         use tpt_shell_capabilities::Engine;
-        use tpt_shell_core::backend::{WebviewBackend, WindowBackend};
+        use tpt_shell_core::backend::{EventLoopBackend, WebviewBackend, WindowBackend};
         use tpt_shell_ipc::{Caller, Limits};
+        use tpt_shell_kiosk::policy::Mode;
         use tpt_shell_platform_windows::backend::WindowsBackend;
         use tpt_shell_platform_windows::consent::NativeConsent;
         use tpt_shell_platform_windows::webview2::APP_ORIGIN;
 
-        let loader = self.loader.ok_or_else(|| {
+        let loader = self.loader.take().ok_or_else(|| {
             Error::Backend("App needs a WebView2 loader path (App::loader)".into())
         })?;
         let (data_dir, ephemeral) =
             resolve_data_dir(self.data_dir.as_ref(), self.profile.as_ref(), &self.name)?;
+
+        // A single-app kiosk is one full-screen window that navigates only inside its allow-list.
+        let single_app = self
+            .kiosk
+            .as_ref()
+            .filter(|k| k.policy.mode == Mode::SingleApp)
+            .map(|k| k.policy.clone());
+        if let Some(policy) = &single_app {
+            if policy.windows.single_window && self.windows.len() > 1 {
+                return Err(Error::Backend(format!(
+                    "a single-app kiosk opens one window, but this app declares {}",
+                    self.windows.len()
+                )));
+            }
+        }
+        let fullscreen = single_app.as_ref().is_some_and(|p| p.windows.fullscreen);
+        // Entries with a scheme are extra origins; path entries are already under the app origin.
+        let kiosk_allow: Vec<String> = single_app
+            .as_ref()
+            .map(|p| {
+                p.allow
+                    .iter()
+                    .filter(|entry| entry.contains("://"))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
 
         if let Some(scheme) = &self.deep_link {
             let exe = std::env::current_exe()
@@ -607,6 +766,15 @@ impl App {
             None => None,
         };
 
+        // The developer overlay's state (debug builds only). It reads the grants and the contract,
+        // so it is made before the grants are moved into the engine.
+        let devtools_shell = tpt_shell_devtools::enabled().then(|| {
+            Rc::new(devtools::Shell::new(
+                self.audit.as_ref().map(|(path, _)| path.clone()),
+                &self.grants,
+                self.contract.as_ref(),
+            ))
+        });
         let mut engine = Engine::with_consent_store(consent_store(&data_dir));
         for grant in self.grants {
             engine.add_grant(grant).map_err(|e| Error::Backend(e.0))?;
@@ -631,8 +799,59 @@ impl App {
             None => None,
         };
 
-        let assets = Rc::new(self.assets);
+        // The licence page is built in unless the app serves its own file at that path.
+        let mut app_assets = std::mem::take(&mut self.assets);
+        app_assets
+            .entry(crate::licenses::LICENSES_PATH.to_string())
+            .or_insert_with(crate::licenses::asset);
+        let assets = Rc::new(app_assets);
         let mut backend = WindowsBackend::new(&loader, &data_dir)?;
+
+        // The agent, when its manifest profile enables it. It writes to the same audit log.
+        #[cfg(feature = "agent")]
+        let agent_tick = match self.agent_config.take() {
+            Some((config, profile)) => {
+                let setup = crate::agent::AgentSetup {
+                    config,
+                    profile,
+                    tools: std::mem::take(&mut self.agent_tools),
+                };
+                crate::agent::session(setup, audit.clone())
+                    .map_err(Error::Backend)?
+                    .map(crate::agent::stdio_tick)
+            }
+            None => None,
+        };
+        #[cfg(feature = "health-endpoint")]
+        let health_server = match self.health.take() {
+            Some((addr, max_age)) => Some(crate::endpoints::health(addr, max_age)?),
+            None => None,
+        };
+        #[cfg(feature = "admin-endpoint")]
+        let reset_home = Arc::new(AtomicBool::new(false));
+        #[cfg(feature = "admin-endpoint")]
+        let admin_server = match self.admin.take() {
+            Some((addr, token)) => {
+                let names: Vec<String> = self.windows.iter().map(|w| w.name.clone()).collect();
+                let status = Arc::new(move || serde_json::json!({ "windows": names }).to_string());
+                let flag = reset_home.clone();
+                let reset = Arc::new(move || flag.store(true, Ordering::SeqCst));
+                Some(crate::endpoints::admin(addr, &token, status, reset)?)
+            }
+            None => None,
+        };
+        // Virtual devices from TPT_VIRTUAL_DEVICES (see `tpt_shell_devices::virtual_devices`).
+        let devices = match std::env::var("TPT_VIRTUAL_DEVICES") {
+            Ok(spec) if !spec.trim().is_empty() => {
+                let transports = tpt_shell_devices::virtual_devices::from_spec(&spec)
+                    .map_err(|e| Error::Backend(format!("TPT_VIRTUAL_DEVICES: {e}")))?;
+                Some(tpt_shell_devices::hub::DeviceHub::new(
+                    transports,
+                    |_: &tpt_shell_devices::hub::Event| {},
+                ))
+            }
+            _ => None,
+        };
         let kiosk = self.kiosk;
         // Single-app kiosks block the chords Alt+Tab, Win, Alt+F4 and Ctrl+Esc (best effort).
         let keys = match &kiosk {
@@ -658,15 +877,31 @@ impl App {
             .as_deref()
             .map(load_window_state)
             .unwrap_or_default();
+        // The developer overlay's window, when the build has one (debug builds). Created hidden.
+        let overlay = match &devtools_shell {
+            Some(shell) => devtools::create(&mut backend, shell)?.map(|id| (id, shell.clone())),
+            None => None,
+        };
+        // The windows by id, with the URL the shell last loaded in each. The hooks use them.
+        let panes = Rc::new(session::Panes::default());
+        // The kiosk's home page as a full URL. Crash recovery goes there when it gives up.
+        let kiosk_home = kiosk.as_ref().map(|k| format!("{APP_ORIGIN}/{}", k.home));
+        backend.on_window_closed(session::close_hook(panes.clone()))?;
         let mut windows = Vec::new();
         for window in self.windows {
-            let id = backend.create(&window.spec())?;
+            let mut spec = window.spec();
+            spec.allow_navigation = kiosk_allow.clone();
+            let id = backend.create(&spec)?;
+            panes.add(id, &window.name);
             if let Some(placement) = saved.get(&window.name) {
                 if let Err(e) = backend.set_placement(id, *placement) {
                     eprintln!("tpt-shell: cannot restore window {}: {e}", window.name);
                 }
             }
             backend.show(id)?;
+            if fullscreen {
+                backend.set_fullscreen(id, true)?;
+            }
             let caller = Caller {
                 window: window.name.clone(),
                 origin: APP_ORIGIN.into(),
@@ -675,9 +910,39 @@ impl App {
             let engine = engine.clone();
             let audit = audit.clone();
             let idle = idle.clone();
+            // Kiosk windows recover a page whose process failed. The page's messages mark the last
+            // page the shell loaded as good.
+            let crash = kiosk_home.as_ref().map(|home| {
+                Rc::new(RefCell::new(CrashRecovery::new(
+                    home.clone(),
+                    session::CRASH_WINDOW,
+                    session::CRASH_LIMIT,
+                )))
+            });
+            if let (Some(recovery), Some(home)) = (&crash, &kiosk_home) {
+                backend.on_process_failed(
+                    id,
+                    session::recover(panes.clone(), id, recovery.clone(), home.clone()),
+                )?;
+            }
+            let panes_for_page = panes.clone();
+            let overlay_for_page = overlay.clone();
             backend.set_message_handler(
                 id,
                 Box::new(move |text| {
+                    if let Some(recovery) = &crash {
+                        if let Some(url) = panes_for_page.url_of(id) {
+                            recovery.borrow_mut().page_loaded(&url);
+                        }
+                    }
+                    if let Some((overlay_id, shell)) = &overlay_for_page {
+                        if text == devtools::HOTKEY_MESSAGE {
+                            if let Err(e) = devtools::open(*overlay_id, shell) {
+                                eprintln!("tpt-shell: cannot open the developer overlay: {e}");
+                            }
+                            return None;
+                        }
+                    }
                     let mut prompt = NativeConsent::for_window(id);
                     if let Some(idle) = &idle {
                         idle.borrow_mut().touch(Instant::now());
@@ -690,10 +955,23 @@ impl App {
                         text.as_bytes(),
                         &Limits::default(),
                     );
-                    if let Some(log) = &audit {
-                        let entry = audit_entry(&caller, &router, text, &reply, started.elapsed());
+                    // Built only when something keeps it: the audit log or the overlay's log.
+                    let entry = (audit.is_some() || overlay_for_page.is_some())
+                        .then(|| audit_entry(&caller, &router, text, &reply, started.elapsed()));
+                    if let (Some((_, shell)), Some(entry)) = (&overlay_for_page, &entry) {
+                        let outcome = match &entry.outcome {
+                            Outcome::Ok => "ok".to_string(),
+                            Outcome::Err(code) => code.clone(),
+                        };
+                        shell.record(IpcEntry {
+                            command: entry.command.clone(),
+                            latency_us: entry.duration_us,
+                            outcome,
+                        });
+                    }
+                    if let (Some(log), Some(entry)) = (&audit, &entry) {
                         // The command has already run, so a failed write cannot undo it.
-                        if let Err(e) = log.borrow_mut().append(&entry) {
+                        if let Err(e) = log.borrow_mut().append(entry) {
                             eprintln!("tpt-shell: audit write failed: {e}");
                         }
                     }
@@ -708,7 +986,10 @@ impl App {
                     None => assets.get(path).cloned(),
                 }),
             )?;
-            backend.navigate(id, &format!("{APP_ORIGIN}/{}", window.page))?;
+            if overlay.is_some() {
+                devtools::add_hotkey(&mut backend, id)?;
+            }
+            session::go(&panes, id, &format!("{APP_ORIGIN}/{}", window.page))?;
             windows.push((window.name, id));
         }
         let window_ids: Vec<_> = windows.iter().map(|(_, id)| *id).collect();
@@ -717,15 +998,11 @@ impl App {
             let limit = settings.idle.unwrap_or_default();
             let period = (limit / 4).clamp(Duration::from_millis(50), Duration::from_secs(1));
             let home = format!("{APP_ORIGIN}/{}", settings.home);
+            let panes = panes.clone();
             backend.every(period, move || {
                 if idle.borrow().is_due(Instant::now()) {
-                    for id in &window_ids {
-                        let navigated =
-                            tpt_shell_platform_windows::backend::navigate_window(*id, &home);
-                        if let Err(e) = navigated {
-                            eprintln!("tpt-shell: cannot return to the home page: {e}");
-                        }
-                    }
+                    // The reset clears the session (cookies, storage, cache), then goes home.
+                    session::clear_and_go_home(panes.clone(), window_ids.clone(), home.clone());
                     idle.borrow_mut().touch(Instant::now());
                 }
             })?;
@@ -739,19 +1016,52 @@ impl App {
                 }
             })?;
         }
+        #[cfg(feature = "agent")]
+        if let Some(tick) = agent_tick {
+            backend.every(crate::agent::TICK, tick)?;
+        }
+        // An admin reset sends every window back to the home page, kiosk or not.
+        #[cfg(feature = "admin-endpoint")]
+        {
+            let home = format!(
+                "{APP_ORIGIN}/{}",
+                kiosk
+                    .as_ref()
+                    .map(|k| k.home.as_str())
+                    .unwrap_or("index.html")
+            );
+            let ids: Vec<_> = windows.iter().map(|(_, id)| *id).collect();
+            let panes = panes.clone();
+            backend.every(Duration::from_millis(250), move || {
+                if reset_home.swap(false, Ordering::SeqCst) {
+                    for id in &ids {
+                        if let Err(e) = session::go(&panes, *id, &home) {
+                            eprintln!("tpt-shell: cannot reset to the home page: {e}");
+                        }
+                    }
+                }
+            })?;
+        }
         let snapshot_state = match snapshot {
             Some(plan) => Some(start_snapshots(&mut backend, plan)?),
             None => None,
         };
+        let ui = ui::UiHandle::new(backend.proxy(), windows.clone());
         Ok(Running {
             backend,
             windows,
+            ui,
             _instance: instance,
             tray,
             state_file,
             snapshot_state,
             _ephemeral: ephemeral,
             _keys: keys,
+            devices,
+            #[cfg(feature = "health-endpoint")]
+            _health: health_server,
+            #[cfg(feature = "admin-endpoint")]
+            _admin: admin_server,
         })
     }
 }
@@ -826,6 +1136,16 @@ pub struct Running {
     _keys: Option<tpt_shell_kiosk::hook_windows::KeyboardHook>,
     /// The state file and the capture, for the save at the end of the event loop.
     snapshot_state: Option<(PathBuf, SnapshotCapture)>,
+    /// The virtual devices from `TPT_VIRTUAL_DEVICES`, if any.
+    devices: Option<tpt_shell_devices::hub::DeviceHub>,
+    /// The UI-thread handle other threads use (see `Running::ui_handle`).
+    ui: ui::UiHandle,
+    /// The health endpoint, which stops when the app does.
+    #[cfg(feature = "health-endpoint")]
+    _health: Option<tpt_shell_kiosk::http::Server>,
+    /// The admin endpoint, which stops when the app does.
+    #[cfg(feature = "admin-endpoint")]
+    _admin: Option<tpt_shell_kiosk::http::Server>,
 }
 
 /// The capture function, shared by the periodic save and the save at exit.
@@ -881,9 +1201,29 @@ impl Running {
         }
     }
 
+    /// The virtual devices from `TPT_VIRTUAL_DEVICES`, if the variable was set. The hub is not yet
+    /// reachable from app commands; it is available to code that holds the `Running`.
+    pub fn devices(&mut self) -> Option<&mut tpt_shell_devices::hub::DeviceHub> {
+        self.devices.as_mut()
+    }
+
+    /// A handle that other threads use to ask the UI thread to show a window, run a script in a
+    /// window or send a window an event. Clone it and move it to any thread. Each call returns at
+    /// once; the work runs on the UI thread.
+    ///
+    /// Support: Full on Windows.
+    pub fn ui_handle(&self) -> ui::UiHandle {
+        self.ui.clone()
+    }
+
     /// Runs the event loop until the app quits.
     pub fn run(mut self) -> Result<()> {
         let result = self.backend.run_until_quit();
+        // The windows are gone, so their blobs go with them. A window that closed while the app ran
+        // had its blobs removed then, by the close hook (see `session::close_hook`).
+        for (name, _) in &self.windows {
+            blob::remove_window_blobs(name);
+        }
         if let Some((path, capture)) = &self.snapshot_state {
             let value = (capture.borrow_mut())();
             if let Err(e) = tpt_shell_kiosk::state::save(path, &value) {
@@ -1128,6 +1468,23 @@ mod tests {
         assert_eq!(spec.title, "Demo");
         assert_eq!((spec.size.width, spec.size.height), (1100.0, 700.0));
         assert!(spec.allow_navigation.is_empty());
+    }
+
+    #[test]
+    fn the_contract_is_written_only_when_the_app_has_one() {
+        let dir = std::env::temp_dir().join(format!("tpt-app-contract-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("contract.json");
+        assert!(App::new().write_contract(&path).is_err());
+        assert!(!path.exists());
+        App::new()
+            .contract(tpt_shell_ipc::contract::Contract::new())
+            .write_contract(&path)
+            .expect("write");
+        let text = std::fs::read_to_string(&path).expect("read");
+        assert!(text.contains("contract_version"), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
