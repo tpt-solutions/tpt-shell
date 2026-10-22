@@ -40,15 +40,18 @@ Measured 2026-10-23 with the Windows conformance suite, on Windows 11 with the E
 | Measure | Result | Budget |
 |---|---|---|
 | IPC round trip, page to host and back, 200 round trips: p95 gap between pings, 3 runs | 0.12, 0.34, 0.44, 0.70, 0.81 ms (5 runs) | p95 ≤ 5 ms: **met** |
-| Blob, 4 MiB host to page, timed from the request to the page's report, 4 runs | 38.7, 50.4, 52.6, 86.4 MB/s (median about 51) | ≥ 50 MB/s, sustained: **borderline, not shown** |
+| Blob, 4 MiB host to page as a message, 8 transfers in a row, median per run (2 runs) | 46.2, 38.9 MB/s | ≥ 50 MB/s, sustained: **not met** |
+| Blob, 4 MiB read by the page through the app's blob URL, 8 reads in a row, median (2 runs) | 36.3, 37.3 MB/s | ≥ 50 MB/s, sustained: **not met** |
 
 What the numbers mean:
 
 - **An earlier IPC figure of 16.7 ms was the harness, not the channel.** The conformance pump waited with `Sleep(1)`, and on Windows that can take a full timer tick, about 16 ms. The ping timestamp is taken when the message is dispatched, so it inherited that wait. The pump now waits on the message queue, with a 1 ms timeout. The application's own loop (`GetMessageW`) never had this problem.
 - **The blob figure now times only the transfer.** The earlier figure of 1.4 MB/s counted page start-up, about 2 to 4 s. The whole check, start-up included, still takes 2 to 4 s.
-- **The blob budget is a sustained rate, and this is one 4 MiB message per run.** Four runs spread from 39 to 86 MB/s, so one run can clear 50 MB/s and another not. Sustained throughput over repeated transfers, and the blob channel the facade serves over `app://`, are not measured yet.
+- **The blob budget is a sustained rate, and the sustained measure is now the median of eight transfers in a row.** Single transfers looked faster (39 to 86 MB/s over four runs), but one transfer is one sample, so it is not what the budget asks about. The median of eight is what the budget asks about, and it is below 50 MB/s in both runs, for both paths.
+- **The fetch path is measured through WebView2's own request handling.** The asset closure copies the 4 MiB body on every request, so that copy is inside the measured time. How much of the gap it accounts for is not measured.
+- **Not measured yet:** the facade's `put_blob` store and the 64 MiB limit, and the blob channel on macOS and Linux.
 
-The conformance suite checks correctness, so every check above passes, including the two budget checks. The budgets are judged from the numbers here.
+The conformance suite checks correctness, so every check above passes, including the two budget checks. The budgets are judged from the numbers here, and both blob budget numbers are not met.
 
 Method: `TPT_WEBVIEW2_LOADER=<path to WebView2Loader.dll> cargo test --release --manifest-path conformance/Cargo.toml -- --nocapture`. The results go to `conformance/out/windows.json` (git-ignored).
 

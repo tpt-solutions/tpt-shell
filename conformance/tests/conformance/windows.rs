@@ -27,6 +27,9 @@ const SKIP_REASON: &str = "needs TPT_WEBVIEW2_LOADER and an interactive desktop 
 const ROUNDS: usize = 200;
 /// Size of the large-blob check's payload.
 const BLOB_BYTES: usize = 4 * 1024 * 1024;
+/// Transfers in the blob check, one after another in one page. Their rates give the sustained
+/// figure.
+const BLOB_COUNT: usize = 8;
 const WAIT: Duration = Duration::from_secs(60);
 
 /// Files the app origin serves for one check: (path, content type, body).
@@ -245,22 +248,45 @@ fn ipc_round_trip(loader: &Path, dir: &Path) -> Result<(Outcome, String), String
     Ok((Outcome::Pass, detail))
 }
 
+/// The blob URL the fetch part reads, on the app origin.
+const BLOB_PATH: &str = "__tpt/blob/big";
+const FETCH_JS: &str = include_str!("../../pages/fetch.js");
+const FETCH_PAGES: Pages = &[
+    ("index.html", "text/html", START),
+    ("page.js", "text/javascript", FETCH_JS),
+];
+
+/// The blob check. Two parts, both must pass: the blob sent as a message, and the same size of
+/// blob read through the app's blob URL, as a page does with a blob it was handed.
 fn large_blobs(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
+    let (message_outcome, message_detail) = large_blobs_message(loader, dir)?;
+    let (fetch_outcome, fetch_detail) = large_blobs_fetch(loader, dir)?;
+    let outcome = if matches!(message_outcome, Outcome::Pass) {
+        fetch_outcome
+    } else {
+        message_outcome
+    };
+    Ok((outcome, format!("{message_detail}; {fetch_detail}")))
+}
+
+/// The blob sent as a message, eight times in a row.
+fn large_blobs_message(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
     let mut b = backend(loader, dir)?;
     let blob = format!("{}z", "a".repeat(BLOB_BYTES - 1));
-    // When the page asked for the blob. The transfer is timed from here, so page start-up
-    // (controller creation and navigation) is not counted.
-    let asked: Rc<RefCell<Option<Instant>>> = Rc::new(RefCell::new(None));
-    let asked_at = asked.clone();
+    // When the page asked for each blob. Each transfer is timed from one request to the next, so
+    // page start-up (controller creation and navigation) is not counted. The last one ends when
+    // the page reports.
+    let asks: Rc<RefCell<Vec<Instant>>> = Rc::new(RefCell::new(Vec::new()));
+    let asks_seen = asks.clone();
     let handler: MessageHandler = Box::new(move |message: &str| {
         (message == "blob").then(|| {
-            *asked_at.borrow_mut() = Some(Instant::now());
+            asks_seen.borrow_mut().push(Instant::now());
             blob.clone()
         })
     });
     let started = Instant::now();
     let id = open_app(&mut b, BLOB_PAGES, Some(handler))?;
-    let expected = format!("blob:{BLOB_BYTES}:z");
+    let expected = format!("blob:{BLOB_BYTES}:z:{BLOB_COUNT}");
     let title = wait_title(&b, id, WAIT, |t| t.starts_with("blob:"));
     let done = Instant::now();
     let total = done.duration_since(started).as_secs_f64();
@@ -270,19 +296,82 @@ fn large_blobs(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
             String::new(),
         ));
     }
-    let Some(asked_at) = *asked.borrow() else {
+    let asks = asks.borrow();
+    if asks.len() != BLOB_COUNT {
         return Ok((
-            Outcome::Fail("the page never asked for the blob".into()),
+            Outcome::Fail(format!(
+                "the page asked {} times, expected {BLOB_COUNT}",
+                asks.len()
+            )),
+            String::new(),
+        ));
+    }
+    let mut ends: Vec<Instant> = asks.iter().skip(1).copied().collect();
+    ends.push(done);
+    let mut rates: Vec<f64> = asks
+        .iter()
+        .zip(&ends)
+        .map(|(from, to)| {
+            (BLOB_BYTES as f64 / 1_000_000.0) / to.duration_since(*from).as_secs_f64()
+        })
+        .collect();
+    rates.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = rates[rates.len() / 2];
+    let slowest = rates[0];
+    let detail = format!(
+        "{BLOB_COUNT} transfers of {} MiB, median {median:.1} MB/s, slowest {slowest:.1} MB/s (budget 50 MB/s sustained, spec 13); the whole check, page start-up included, took {:.0} ms",
+        BLOB_BYTES / (1024 * 1024),
+        total * 1000.0
+    );
+    Ok((Outcome::Pass, detail))
+}
+
+/// The same size of blob, read eight times in a row through the app's blob URL.
+fn large_blobs_fetch(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
+    let mut b = backend(loader, dir)?;
+    let mut bytes = vec![b'a'; BLOB_BYTES];
+    bytes[BLOB_BYTES - 1] = b'z';
+    let blob = Rc::new(bytes);
+    let id = window(&mut b, FETCH_PAGES, None)?;
+    let served = blob.clone();
+    b.set_asset_source(
+        id,
+        Box::new(move |path| {
+            if path == BLOB_PATH {
+                return Some(Asset {
+                    content_type: "application/octet-stream".into(),
+                    body: served.as_ref().clone(),
+                });
+            }
+            FETCH_PAGES
+                .iter()
+                .find(|(name, _, _)| *name == path)
+                .map(|(_, content_type, body)| Asset {
+                    content_type: (*content_type).into(),
+                    body: body.as_bytes().to_vec(),
+                })
+        }),
+    )
+    .map_err(err)?;
+    b.navigate(id, &format!("{APP_ORIGIN}/index.html"))
+        .map_err(err)?;
+    let title = wait_title(&b, id, WAIT, |t| t.starts_with("fetch:"));
+    let expected_prefix = format!("fetch:{BLOB_BYTES}:z:{BLOB_COUNT}:");
+    let Some(median_ms) = title
+        .strip_prefix(&expected_prefix)
+        .and_then(|ms| ms.parse::<f64>().ok())
+    else {
+        return Ok((
+            Outcome::Fail(format!(
+                "title was {title:?}, expected {expected_prefix:?} and a time"
+            )),
             String::new(),
         ));
     };
-    let transfer = done.duration_since(asked_at).as_secs_f64();
-    let mb_per_s = (BLOB_BYTES as f64 / 1_000_000.0) / transfer;
+    let mb_per_s = (BLOB_BYTES as f64 / 1_000_000.0) / (median_ms / 1000.0);
     let detail = format!(
-        "{} MiB host to page in {:.0} ms, {mb_per_s:.1} MB/s (budget 50 MB/s, spec 13); the whole check, page start-up included, took {:.0} ms",
-        BLOB_BYTES / (1024 * 1024),
-        transfer * 1000.0,
-        total * 1000.0
+        "fetched through the app's blob URL: {BLOB_COUNT} reads of {} MiB, median {mb_per_s:.1} MB/s",
+        BLOB_BYTES / (1024 * 1024)
     );
     Ok((Outcome::Pass, detail))
 }
