@@ -56,10 +56,16 @@ tpt-shell dev my-app
 ```
 
 Open <http://127.0.0.1:8080/> in a browser. Edit a file in `my-app` and the terminal reports the
-change within about half a second. Use `--port <port>` if 8080 is taken.
+change within about half a second, and the browser tab reloads. Use `--port <port>` if 8080 is
+taken.
 
-A plain browser tab has no `window.tpt`, the page runtime that only a shell window provides, so
-commands will not run there. The preview shows the layout and nothing more.
+A plain browser tab has no real `window.tpt`, the page runtime that only a shell window provides.
+`dev` adds a mock in its place, so the page loads and its commands run. A command has no answer
+until the page sets one, for example `window.tpt.mock.respond('greet', args => ...)`. A command
+with no answer rejects with `MOCK_NO_RESPONDER`. The mock does nothing inside a shell window.
+
+The shell window itself does not reload on change. It loads the app's own files, not the dev
+server.
 
 ## Not yet
 

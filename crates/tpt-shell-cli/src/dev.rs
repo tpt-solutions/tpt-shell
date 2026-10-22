@@ -33,6 +33,10 @@ const VERSION_PATH: &str = "/__tpt/version";
 const SCRIPT_PATH: &str = "/__tpt/reload.js";
 /// The last recorded session.
 const SESSION_PATH: &str = "/__tpt/session";
+/// The mock `window.tpt` that every served HTML page gets. It does nothing inside a shell window.
+const MOCK_PATH: &str = "/__tpt/mock.js";
+/// The mock runtime (js/runtime/tpt-shell-mock.js), served at `MOCK_PATH`.
+const MOCK_SCRIPT: &str = include_str!("../../../js/runtime/tpt-shell-mock.js");
 
 /// Counts the change batches seen by the watcher. Pages compare it with the value they loaded
 /// with, so a change reloads them without restarting the process.
@@ -106,15 +110,22 @@ const RELOAD_SCRIPT: &str = r#"(function () {
 })();
 "#;
 
-/// Inserts the reload script into an HTML page, before `</body>` when there is one.
+/// Inserts the dev scripts into an HTML page. The mock goes before `</head>`, so it is defined
+/// before the page's body scripts run. The reload script goes before `</body>`.
 ///
 /// Support: Full.
 pub fn inject_reload_script(html: &str) -> String {
-    let tag = format!("<script src=\"{SCRIPT_PATH}\"></script>");
+    let mock = format!("<script src=\"{MOCK_PATH}\"></script>");
+    let reload = format!("<script src=\"{SCRIPT_PATH}\"></script>");
     let lower = html.to_ascii_lowercase();
+    let with_mock = match lower.find("</head>") {
+        Some(at) => format!("{}{mock}{}", &html[..at], &html[at..]),
+        None => format!("{mock}{html}"),
+    };
+    let lower = with_mock.to_ascii_lowercase();
     match lower.rfind("</body>") {
-        Some(at) => format!("{}{tag}{}", &html[..at], &html[at..]),
-        None => format!("{html}{tag}"),
+        Some(at) => format!("{}{reload}{}", &with_mock[..at], &with_mock[at..]),
+        None => format!("{with_mock}{reload}"),
     }
 }
 
@@ -261,6 +272,10 @@ fn handle(root: &Path, reloads: &Reloads, mut stream: TcpStream) -> std::io::Res
         SCRIPT_PATH => {
             let kind = "text/javascript; charset=utf-8";
             return respond(&mut stream, 200, kind, RELOAD_SCRIPT.as_bytes(), head_only);
+        }
+        MOCK_PATH => {
+            let kind = "text/javascript; charset=utf-8";
+            return respond(&mut stream, 200, kind, MOCK_SCRIPT.as_bytes(), head_only);
         }
         SESSION_PATH => {
             return match last_session(root) {
@@ -438,6 +453,21 @@ mod tests {
         assert!(get(addr, "/__tpt/version").ends_with("\r\n\r\n1"));
         assert!(get(addr, SCRIPT_PATH).contains("location.reload"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_mock_is_defined_before_the_body_and_only_outside_a_shell() {
+        let page = inject_reload_script("<html><head><title>t</title></head><body><p>x</p></body>");
+        assert!(page.find(MOCK_PATH) < page.find("</head>"), "{page}");
+        assert!(page.find(MOCK_PATH) < page.find("<p>"), "{page}");
+        assert!(page.find(SCRIPT_PATH) > page.find("<p>"), "{page}");
+        let bare = inject_reload_script("<p>no head or body</p>");
+        assert!(
+            bare.contains(MOCK_PATH) && bare.contains(SCRIPT_PATH),
+            "{bare}"
+        );
+        assert!(MOCK_SCRIPT.contains("window.chrome && window.chrome.webview"));
+        assert!(MOCK_SCRIPT.contains("MOCK_NO_RESPONDER"));
     }
 
     #[test]
