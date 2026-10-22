@@ -12,8 +12,11 @@
 //! records from the end of the file, or a rewritten file. Signed checkpoints and external
 //! anchors (M9) close that gap.
 
+/// Support: Full.
 pub mod anchor;
+/// Support: Full.
 pub mod keys;
+/// Support: Full.
 pub mod segments;
 
 use std::fs::{File, OpenOptions};
@@ -32,12 +35,18 @@ use tpt_shell_manifest::AuditSettings;
 pub use segments::{verify_rotated, RotatingLog};
 
 /// `prev` of the first record.
+///
+/// Support: Full.
 pub const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 /// Value written in place of a redacted parameter.
+///
+/// Support: Full.
 pub const REDACTED: &str = "[redacted]";
 
 /// Result of one command, as recorded.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
     Ok,
@@ -46,6 +55,8 @@ pub enum Outcome {
 }
 
 /// One audited action, before it is written.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub wall_unix_ms: u64,
@@ -60,6 +71,8 @@ pub struct Entry {
 }
 
 /// What the writer keeps from the parameters. The hash always covers the full parameters.
+///
+/// Support: Full.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Policy {
     /// Keep a copy of the parameters, with `redact_keys` replaced. Off means only the hash.
@@ -79,6 +92,7 @@ impl From<&AuditSettings> for Policy {
     }
 }
 
+/// Support: Full.
 #[derive(Debug)]
 pub enum AuditError {
     Io(String),
@@ -115,6 +129,8 @@ impl From<io::Error> for AuditError {
 }
 
 /// Command name of checkpoint records. Their params hold `upto`, `hash` and `signature`.
+///
+/// Support: Full.
 pub const CHECKPOINT_COMMAND: &str = "tpt.checkpoint";
 
 /// Signs checkpoints. The key signs the hash of the record a checkpoint names. The key comes
@@ -124,6 +140,8 @@ pub const CHECKPOINT_COMMAND: &str = "tpt.checkpoint";
 /// last count-based interval, or when `every_secs` seconds have passed since the last
 /// checkpoint. The time check runs only when an entry is written, so a quiet log gets its
 /// next checkpoint with the next entry. Zero turns an interval off.
+///
+/// Support: Full.
 #[derive(Clone)]
 pub struct Signing {
     pub key: Arc<dyn CheckpointSigner>,
@@ -159,6 +177,8 @@ impl Resume {
 }
 
 /// Writer for one audit file. Opening an existing file verifies it first.
+///
+/// Support: Full.
 pub struct AuditLog {
     path: PathBuf,
     file: File,
@@ -178,12 +198,16 @@ pub struct AuditLog {
 
 impl AuditLog {
     /// Opens (or creates) the file at `path`. An existing file must verify, or open fails.
+    ///
+    /// Support: Full.
     pub fn open(path: impl AsRef<Path>, policy: Policy) -> Result<Self, AuditError> {
         Self::open_inner(path.as_ref(), policy, None)
     }
 
     /// Like [`AuditLog::open`], but writes a signed checkpoint every `signing.every` records.
     /// An existing file is verified with the key's public half, signatures included.
+    ///
+    /// Support: Full.
     pub fn open_signed(
         path: impl AsRef<Path>,
         policy: Policy,
@@ -247,11 +271,15 @@ impl AuditLog {
 
     /// Sends each checkpoint hash to `anchor` as well as to the file. Anchors cover checkpoints,
     /// so a log without signing has nothing to send.
+    ///
+    /// Support: Full.
     pub fn set_anchor(&mut self, anchor: Box<dyn Anchor>) {
         self.anchor = Some(anchor);
     }
 
     /// Bytes in the file so far.
+    ///
+    /// Support: Full.
     pub fn bytes(&self) -> u64 {
         self.bytes
     }
@@ -271,6 +299,8 @@ impl AuditLog {
 
     /// Appends one record and returns its sequence number. The line is flushed to disk
     /// before this returns.
+    ///
+    /// Support: Full.
     pub fn append(&mut self, entry: &Entry) -> Result<u64, AuditError> {
         let seq = self.next_seq;
         let record = build_record(seq, &self.prev, entry, &self.policy);
@@ -331,20 +361,27 @@ impl AuditLog {
     }
 
     /// Number of records written so far, including those found when the file was opened.
+    ///
+    /// Support: Full.
     pub fn len(&self) -> u64 {
         self.next_seq
     }
 
+    /// Support: Partial. No test calls AuditLog::is_empty; it only returns whether the current file
+    /// has no records.
     pub fn is_empty(&self) -> bool {
         self.next_seq == 0
     }
 
+    /// Support: Full.
     pub fn path(&self) -> &Path {
         &self.path
     }
 }
 
 /// What a successful verification found.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Summary {
     pub records: u64,
@@ -355,12 +392,16 @@ pub struct Summary {
 
 /// Recomputes the whole chain in `path`. Checkpoints must name the record they claim to, but
 /// their signatures are not checked, because no key is given. Use [`verify_file_with_key`].
+///
+/// Support: Full.
 pub fn verify_file(path: impl AsRef<Path>) -> Result<Summary, AuditError> {
     verify_inner(path.as_ref(), None)
 }
 
 /// Recomputes the chain and checks every checkpoint signature against `key`. A checkpoint
 /// without a valid signature is reported at its own sequence number.
+///
+/// Support: Full.
 pub fn verify_file_with_key(
     path: impl AsRef<Path>,
     key: &VerifyingKey,
@@ -370,6 +411,9 @@ pub fn verify_file_with_key(
 
 /// Verifies a file and checks its anchors. Each anchor must name a record of the chain with the
 /// same hash, so a truncated or replaced log fails even when its own chain is consistent.
+///
+/// Support: Partial. The anchor check it runs is tested in tpt-shell-audit (check_anchors), but
+/// this file-level wrapper has no test of its own.
 pub fn verify_file_anchored(
     path: impl AsRef<Path>,
     key: Option<&VerifyingKey>,
@@ -509,18 +553,24 @@ fn check_checkpoint(
 }
 
 /// Reads a verifying key from its 64 hex digits, as written by a key file.
+///
+/// Support: Full.
 pub fn verifying_key_from_hex(text: &str) -> Option<VerifyingKey> {
     let bytes: [u8; 32] = hex_decode(text.trim())?.try_into().ok()?;
     VerifyingKey::from_bytes(&bytes).ok()
 }
 
 /// Column names of [`export_csv`], in order.
+///
+/// Support: Full.
 pub const CSV_HEADER: &str =
     "seq,wall_unix_ms,mono_ns,actor,command,capability,outcome,error_code,duration_us,params_sha256";
 
 /// Verifies `path`, then renders one CSV row per record under [`CSV_HEADER`]. Parameters are
 /// left out: the CSV is for review, and the file itself (JSON Lines) is the full record. A file
 /// that does not verify exports nothing.
+///
+/// Support: Full.
 pub fn export_csv(path: impl AsRef<Path>) -> Result<String, AuditError> {
     let path = path.as_ref();
     verify_file(path)?;
@@ -561,6 +611,8 @@ fn csv_cell(value: Option<&Value>) -> String {
 }
 
 /// The bytes a checkpoint signature covers. The prefix keeps it apart from other signatures.
+///
+/// Support: Full.
 pub fn checkpoint_message(upto: u64, hash: &str) -> Vec<u8> {
     format!("tpt-shell-audit-checkpoint\n{upto}\n{hash}").into_bytes()
 }
@@ -634,6 +686,8 @@ fn redact(value: &Value, keys: &[String]) -> Value {
 
 /// Canonical JSON: object keys sorted by their UTF-8 bytes, no whitespace, otherwise the
 /// standard serializer's output. Two equal values always produce the same bytes.
+///
+/// Support: Full.
 pub fn canonical(value: &Value) -> String {
     let mut out = String::new();
     write_canonical(value, &mut out);
@@ -671,6 +725,8 @@ fn write_canonical(value: &Value, out: &mut String) {
 }
 
 /// SHA-256 as lowercase hex.
+///
+/// Support: Full.
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|b| format!("{b:02x}")).collect()

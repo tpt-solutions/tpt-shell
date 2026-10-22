@@ -13,6 +13,9 @@ use serde_json::Value;
 
 /// Checks `instance` against `schema`. Returns one line per problem, with the JSON path of
 /// the value. An empty list means the instance passes the keywords this checker knows.
+///
+/// Support: Partial. It does not follow $ref, oneOf or anyOf, so a subschema behind one of those is
+/// not checked here; the full validation is the ajv run in tools/validate-sbom.sh.
 pub fn check(instance: &Value, schema: &Value) -> Vec<String> {
     let mut errors = Vec::new();
     walk(instance, schema, "$", &mut errors);

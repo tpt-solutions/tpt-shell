@@ -15,9 +15,13 @@ use crate::Outcome;
 
 /// Writing an action failed. The session stops, because an action that cannot be recorded
 /// must not run. Fix: check the audit file's volume and permissions.
+///
+/// Support: Full.
 pub const CODE_RECORD: &str = "TS0113";
 
 /// One handled call, as a recorder sees it.
+///
+/// Support: Full.
 pub struct RecordedAction<'a> {
     /// Who acted, such as `agent:assistant`.
     pub actor: &'a str,
@@ -31,17 +35,22 @@ pub struct RecordedAction<'a> {
 }
 
 /// Receives every handled call. An error stops the session.
+///
+/// Support: Full.
 pub trait Recorder {
     fn record(&mut self, action: &RecordedAction) -> Result<(), String>;
 }
 
 /// Writes each action to an audit log.
+///
+/// Support: Full.
 pub struct AuditRecorder {
     log: AuditLog,
     started: Instant,
 }
 
 impl AuditRecorder {
+    /// Support: Full.
     pub fn new(log: AuditLog) -> Self {
         AuditRecorder {
             log,
@@ -50,6 +59,8 @@ impl AuditRecorder {
     }
 
     /// Gives the log back, for example to verify it when the session ends.
+    ///
+    /// Support: Full.
     pub fn into_log(self) -> AuditLog {
         self.log
     }

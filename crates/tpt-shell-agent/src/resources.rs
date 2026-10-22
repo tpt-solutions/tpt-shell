@@ -12,11 +12,17 @@ use std::path::PathBuf;
 use crate::page::{render, Snapshot};
 
 /// URI of the semantic tree of the current page.
+///
+/// Support: Full.
 pub const TREE_URI: &str = "tpt-shell://page/tree";
 /// URI of the last lines of the audit file.
+///
+/// Support: Full.
 pub const AUDIT_TAIL_URI: &str = "tpt-shell://audit/tail";
 
 /// One resource a session offers.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resource {
     pub uri: String,
@@ -25,17 +31,22 @@ pub struct Resource {
 }
 
 /// Something that offers resources. `read` returns the text of one, or why it cannot.
+///
+/// Support: Full.
 pub trait ResourceProvider {
     fn list(&self) -> Vec<Resource>;
     fn read(&mut self, uri: &str) -> Result<String, String>;
 }
 
 /// The semantic tree, rendered as the agent sees it. `take` produces a fresh snapshot.
+///
+/// Support: Full.
 pub struct PageTree {
     take: Box<dyn FnMut() -> Result<Snapshot, String>>,
 }
 
 impl PageTree {
+    /// Support: Full.
     pub fn new(take: Box<dyn FnMut() -> Result<Snapshot, String>>) -> Self {
         PageTree { take }
     }
@@ -61,12 +72,15 @@ impl ResourceProvider for PageTree {
 }
 
 /// The last `lines` lines of an audit file.
+///
+/// Support: Full.
 pub struct AuditTail {
     path: PathBuf,
     lines: usize,
 }
 
 impl AuditTail {
+    /// Support: Full.
     pub fn new(path: impl Into<PathBuf>, lines: usize) -> Self {
         AuditTail {
             path: path.into(),
@@ -98,12 +112,15 @@ impl ResourceProvider for AuditTail {
 
 /// Several providers in one. Their resources are listed in order; a URI goes to the first
 /// provider that offers it.
+///
+/// Support: Full.
 #[derive(Default)]
 pub struct Resources {
     parts: Vec<Box<dyn ResourceProvider>>,
 }
 
 impl Resources {
+    /// Support: Full.
     pub fn new(parts: Vec<Box<dyn ResourceProvider>>) -> Self {
         Resources { parts }
     }

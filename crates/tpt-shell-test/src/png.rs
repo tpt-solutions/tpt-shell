@@ -14,6 +14,8 @@ use crate::inflate::zlib_decompress;
 use crate::visual::Image;
 
 /// The largest image accepted, in pixels (about 160 MB as RGBA).
+///
+/// Support: Full.
 pub const MAX_PIXELS: u64 = 40_000_000;
 
 const SIGNATURE: [u8; 8] = *b"\x89PNG\r\n\x1a\n";
@@ -39,6 +41,8 @@ const CRC_TABLE: [u32; 256] = {
 };
 
 /// CRC-32 as PNG uses it (ISO 3309).
+///
+/// Support: Full.
 pub fn crc32(parts: &[&[u8]]) -> u32 {
     let mut c = 0xFFFF_FFFFu32;
     for part in parts {
@@ -50,6 +54,9 @@ pub fn crc32(parts: &[&[u8]]) -> u32 {
 }
 
 /// Decodes a PNG file into RGBA pixels. Errors name the problem and never panic.
+///
+/// Support: Partial. Adam7 interlaced files are refused, and tRNS colour keys on grey and RGB
+/// images are ignored (only the palette tRNS table is applied).
 pub fn decode(bytes: &[u8]) -> Result<Image, String> {
     if bytes.len() < 8 || bytes[..8] != SIGNATURE {
         return Err("not a PNG file".into());

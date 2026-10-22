@@ -21,14 +21,20 @@ use serde_json::Value;
 use crate::{divergence, Divergence, Event, Mode, Replay};
 
 /// Something that runs the app for a replay.
+///
+/// Support: Full.
 pub trait Target {
-    /// Performs one recorded event and returns the events the target produced. Support: Full.
+    /// Performs one recorded event and returns the events the target produced.
+    ///
+    /// Support: Full.
     fn apply(&mut self, event: &Event) -> Result<Vec<Event>, String>;
 
     /// Whether the target reproduces events of this kind. The player compares only those with
     /// the recording. Inputs and requests are performed by the target, so they are not compared;
     /// responses, window events, protocol loads and clock or rng reads are what the run
-    /// produces, and those must match. Support: Full.
+    /// produces, and those must match.
+    ///
+    /// Support: Full.
     fn reproduces(&self, kind: &str) -> bool {
         matches!(
             kind,
@@ -38,6 +44,8 @@ pub trait Target {
 }
 
 /// The result of a play that completed.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Outcome {
     /// The events the target produced, in order.
@@ -48,6 +56,8 @@ pub struct Outcome {
 }
 
 /// Why a play stopped.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PlayError {
     /// The target failed on a recorded event.
@@ -71,7 +81,9 @@ impl std::fmt::Display for PlayError {
 
 impl std::error::Error for PlayError {}
 
-/// Plays `replay` against `target`. Support: Full.
+/// Plays `replay` against `target`.
+///
+/// Support: Full.
 pub fn play(replay: &Replay, target: &mut dyn Target, mode: Mode) -> Result<Outcome, PlayError> {
     let mut replayed = Vec::new();
     for (index, event) in replay.events.iter().enumerate() {
@@ -107,7 +119,9 @@ pub fn play(replay: &Replay, target: &mut dyn Target, mode: Mode) -> Result<Outc
 
 /// A target that replays the recorded input events by echoing the recorded responses. It is
 /// the reference used to check the player itself: it produces what the recording says it
-/// should, so a play against it must not diverge. Support: Full.
+/// should, so a play against it must not diverge.
+///
+/// Support: Full.
 pub struct Echo;
 
 impl Target for Echo {

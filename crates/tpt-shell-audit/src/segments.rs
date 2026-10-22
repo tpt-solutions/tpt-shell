@@ -19,14 +19,20 @@ use crate::{verify_chain, AuditError, AuditLog, Entry, Policy, Signing, Summary}
 
 /// Segments are missing or out of order, or there are none. Fix: restore the missing file, or
 /// point verification at the directory that holds the whole log.
+///
+/// Support: Full.
 pub const CODE_SEGMENT: &str = "TS0104";
 
 /// The path of segment `n` (1-based) of the log called `stem` in `dir`.
+///
+/// Support: Full.
 pub fn segment_path(dir: &Path, stem: &str, n: u64) -> PathBuf {
     dir.join(format!("{stem}.{n:06}.jsonl"))
 }
 
 /// The segments of the log called `stem` in `dir`, in order. Fails when a number is missing.
+///
+/// Support: Full.
 pub fn segment_paths(dir: &Path, stem: &str) -> Result<Vec<PathBuf>, AuditError> {
     let prefix = format!("{stem}.");
     let mut found: Vec<(u64, PathBuf)> = Vec::new();
@@ -60,6 +66,8 @@ pub fn segment_paths(dir: &Path, stem: &str) -> Result<Vec<PathBuf>, AuditError>
 }
 
 /// Verifies every segment of the log in order, then checks the anchors against them.
+///
+/// Support: Full.
 pub fn verify_rotated(
     dir: &Path,
     stem: &str,
@@ -80,6 +88,8 @@ pub fn verify_rotated(
 
 /// A log that rotates. `max_bytes` is the size at which a segment is closed; zero means no
 /// limit. The signing key and the anchor, if any, carry over to each new segment.
+///
+/// Support: Full.
 pub struct RotatingLog {
     dir: PathBuf,
     stem: String,
@@ -93,6 +103,8 @@ pub struct RotatingLog {
 impl RotatingLog {
     /// Opens the log, or starts it. An existing log is verified in full first, and a broken
     /// segment or a missing one refuses the open.
+    ///
+    /// Support: Full.
     pub fn open(
         dir: impl Into<PathBuf>,
         stem: &str,
@@ -137,6 +149,8 @@ impl RotatingLog {
     }
 
     /// Appends one entry, first closing the segment if it has reached the size limit.
+    ///
+    /// Support: Full.
     pub fn append(&mut self, entry: &Entry) -> Result<u64, AuditError> {
         if self.max_bytes > 0 && self.current.bytes() >= self.max_bytes && !self.current.is_empty()
         {
@@ -146,20 +160,27 @@ impl RotatingLog {
     }
 
     /// Sets the external anchor. It moves with the log to each new segment.
+    ///
+    /// Support: Full.
     pub fn set_anchor(&mut self, anchor: Box<dyn Anchor>) {
         self.current.set_anchor(anchor);
     }
 
     /// The number of the segment being written (1-based).
+    ///
+    /// Support: Full.
     pub fn segment(&self) -> u64 {
         self.segment
     }
 
     /// Records written so far, across all segments.
+    ///
+    /// Support: Full.
     pub fn len(&self) -> u64 {
         self.current.len()
     }
 
+    /// Support: Full.
     pub fn is_empty(&self) -> bool {
         self.current.is_empty()
     }

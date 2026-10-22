@@ -34,18 +34,29 @@ use std::fmt;
 
 use serde_json::{json, Map, Value};
 
+/// Support: Full.
 pub mod codec;
+/// Support: Full.
 pub mod player;
+/// Support: Full.
 pub mod report;
+/// Support: Full.
 pub mod timeline;
+/// Support: Full.
 pub mod virtual_time;
 
 /// The version this crate writes.
+///
+/// Support: Full.
 pub const VERSION: u64 = 2;
 /// The versions this crate reads. Version 1 had no assets and no clock or rng events.
+///
+/// Support: Full.
 pub const READABLE_VERSIONS: [u64; 2] = [1, 2];
 
 /// Event kinds this version defines.
+///
+/// Support: Full.
 pub const KINDS: [&str; 8] = [
     "ipc_request",
     "ipc_response",
@@ -58,9 +69,13 @@ pub const KINDS: [&str; 8] = [
 ];
 
 /// The largest asset the reader accepts, in bytes.
+///
+/// Support: Full.
 pub const MAX_ASSET_BYTES: usize = 16 * 1024 * 1024;
 
 /// The first line of a recording.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Header {
     pub app: String,
@@ -68,6 +83,8 @@ pub struct Header {
 }
 
 /// One recorded event.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Event {
     pub seq: u64,
@@ -77,6 +94,8 @@ pub struct Event {
 }
 
 /// A file the run used, such as an image the page loaded. Stored inline as base64.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Asset {
     pub name: String,
@@ -84,6 +103,8 @@ pub struct Asset {
 }
 
 /// A whole recording.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Replay {
     pub version: u64,
@@ -95,6 +116,8 @@ pub struct Replay {
 }
 
 /// How strictly to read.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Strict,
@@ -102,6 +125,8 @@ pub enum Mode {
 }
 
 /// Why a recording could not be read.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReadError {
     /// 1-based line number.
@@ -120,6 +145,8 @@ impl std::error::Error for ReadError {}
 /// Whether a name is safe as an asset name: 1 to 100 ASCII letters, digits, `-`, `_` or `.`,
 /// and not `.` or `..`. Names never carry a path, so an asset cannot be written outside its
 /// directory when a recording is unpacked.
+///
+/// Support: Full.
 pub fn is_asset_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 100
@@ -131,6 +158,8 @@ pub fn is_asset_name(name: &str) -> bool {
 }
 
 /// Builds a recording. Events must be added in order, with time never going backwards.
+///
+/// Support: Full.
 pub struct Recorder {
     header: Header,
     out: String,
@@ -139,7 +168,9 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    /// Starts a recording. Support: Full.
+    /// Starts a recording.
+    ///
+    /// Support: Full.
     pub fn new(header: Header) -> Self {
         let line = json!({
             "format": "tptreplay",
@@ -157,13 +188,17 @@ impl Recorder {
         }
     }
 
-    /// The header this recording was started with. Support: Full.
+    /// The header this recording was started with.
+    ///
+    /// Support: Full.
     pub fn header(&self) -> &Header {
         &self.header
     }
 
     /// Records one event. `kind` must be one of [`KINDS`]; anything else is refused, so a
-    /// recording never contains a kind the strict reader would reject. Support: Full.
+    /// recording never contains a kind the strict reader would reject.
+    ///
+    /// Support: Full.
     pub fn record(&mut self, t_ns: u64, kind: &str, data: Value) -> Result<(), String> {
         if !KINDS.contains(&kind) {
             return Err(format!("`{kind}` is not a known event kind"));
@@ -180,7 +215,9 @@ impl Recorder {
     }
 
     /// Stores a file the run used. The name must pass [`is_asset_name`] and the bytes must be
-    /// at most [`MAX_ASSET_BYTES`]. Support: Full.
+    /// at most [`MAX_ASSET_BYTES`].
+    ///
+    /// Support: Full.
     pub fn add_asset(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
         if !is_asset_name(name) {
             return Err(format!("`{name}` is not a valid asset name"));
@@ -198,13 +235,17 @@ impl Recorder {
         Ok(())
     }
 
-    /// The finished recording text. Support: Full.
+    /// The finished recording text.
+    ///
+    /// Support: Full.
     pub fn finish(self) -> String {
         self.out
     }
 }
 
-/// Reads a recording. Support: Full.
+/// Reads a recording.
+///
+/// Support: Full.
 pub fn read(text: &str, mode: Mode) -> Result<Replay, ReadError> {
     let mut lines = text.lines().enumerate();
     let (_, first) = lines.next().ok_or(ReadError {
@@ -392,6 +433,8 @@ fn parse_asset(value: &Value) -> Result<Asset, String> {
 }
 
 /// Where a new run first stopped matching the recording.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Divergence {
     pub index: usize,

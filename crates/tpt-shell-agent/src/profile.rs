@@ -30,9 +30,13 @@ use tpt_shell_ipc::rate_limit::RateLimit;
 use crate::Policy;
 
 /// A profile is invalid. Fix: correct the key, name, action or pattern the message names.
+///
+/// Support: Full.
 pub const CODE_PROFILE: &str = "TS0110";
 
 /// Every verb of the action API. `invoke` runs typed commands; the rest drive the page.
+///
+/// Support: Full.
 pub const ACTIONS: [&str; 9] = [
     "click", "focus", "type", "select", "key", "scroll", "wait_for", "read", "invoke",
 ];
@@ -48,6 +52,8 @@ const PROFILE_KEYS: [&str; 7] = [
 ];
 
 /// A manifest profile problem, with its code.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProfileError {
     pub message: String,
@@ -71,6 +77,8 @@ impl std::error::Error for ProfileError {}
 
 /// The URLs an agent may navigate to. Patterns are exact, or a prefix ending in `*`. An empty
 /// list allows nothing.
+///
+/// Support: Full.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RouteRules {
     patterns: Vec<String>,
@@ -78,6 +86,8 @@ pub struct RouteRules {
 
 impl RouteRules {
     /// Builds the rules. A bare `*` is refused, because it would allow every URL.
+    ///
+    /// Support: Full.
     pub fn new(patterns: Vec<String>) -> Result<Self, ProfileError> {
         for p in &patterns {
             let prefix = p.strip_suffix('*').unwrap_or(p);
@@ -91,6 +101,8 @@ impl RouteRules {
     }
 
     /// Whether `url` is on the allow-list. A URL with whitespace or control characters never is.
+    ///
+    /// Support: Full.
     pub fn allows(&self, url: &str) -> bool {
         if url.is_empty() || url.chars().any(|c| c.is_control() || c.is_whitespace()) {
             return false;
@@ -103,6 +115,8 @@ impl RouteRules {
 }
 
 /// One agent profile.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AgentProfile {
     pub name: String,
@@ -119,16 +133,22 @@ pub struct AgentProfile {
 
 impl AgentProfile {
     /// Whether the page action `verb` is allowed.
+    ///
+    /// Support: Full.
     pub fn allows_action(&self, verb: &str) -> bool {
         self.actions.contains(verb)
     }
 
     /// Whether typed command `name` may be invoked by this profile.
+    ///
+    /// Support: Full.
     pub fn allows_command(&self, name: &str) -> bool {
         self.actions.contains("invoke") && self.commands.as_ref().is_none_or(|c| c.contains(name))
     }
 
     /// The session policy this profile implies.
+    ///
+    /// Support: Full.
     pub fn policy(&self) -> Policy {
         Policy {
             confirm: self.confirm.clone(),
@@ -141,6 +161,8 @@ impl AgentProfile {
 }
 
 /// The parsed `[agent]` section.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AgentConfig {
     pub enabled: bool,
@@ -149,6 +171,8 @@ pub struct AgentConfig {
 
 impl AgentConfig {
     /// The profile called `name`, when the agent is enabled and the profile exists.
+    ///
+    /// Support: Full.
     pub fn profile(&self, name: &str) -> Option<&AgentProfile> {
         if self.enabled {
             self.profiles.get(name)
@@ -160,6 +184,8 @@ impl AgentConfig {
 
 /// Reads the `[agent]` section, given as the manifest keeps it (a TOML table). An absent
 /// section gives a disabled config.
+///
+/// Support: Full.
 pub fn parse_agent_section(table: Option<&Table>) -> Result<AgentConfig, ProfileError> {
     let Some(table) = table else {
         return Ok(AgentConfig {

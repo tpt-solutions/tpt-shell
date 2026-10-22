@@ -23,11 +23,17 @@ use sha2::{Digest, Sha256};
 use crate::{hex_decode, hex_encode, AuditError};
 
 /// No key could be found or loaded. Fix: enrol a key, or point the source at a valid one.
+///
+/// Support: Full.
 pub const CODE_KEY_UNAVAILABLE: &str = "TS0100";
 /// A detached signature does not verify against the given key.
+///
+/// Support: Full.
 pub const CODE_SIGNATURE_INVALID: &str = "TS0101";
 
 /// Holds the checkpoint signing key. The log never sees more than a signature.
+///
+/// Support: Full.
 pub trait CheckpointSigner: Send + Sync {
     fn verifying_key(&self) -> VerifyingKey;
     /// Signs `message` with Ed25519 and returns the 64-byte signature.
@@ -45,12 +51,16 @@ impl CheckpointSigner for SigningKey {
 }
 
 /// Where the checkpoint key comes from when a log is opened.
+///
+/// Support: Full.
 pub trait KeySupplier {
     fn signer(&self) -> Result<Arc<dyn CheckpointSigner>, AuditError>;
 }
 
 /// A small secret store, such as the Windows keystore. Errors are plain text, which is what
 /// the platform stores return.
+///
+/// Support: Full.
 pub trait KeyStore {
     fn get(&self, name: &str) -> Result<Option<Vec<u8>>, String>;
     fn set(&self, name: &str, secret: &[u8]) -> Result<(), String>;
@@ -69,11 +79,14 @@ fn seed_from_hex(text: &str) -> Option<SigningKey> {
 }
 
 /// Reads the signing seed from a file of 64 hex digits.
+///
+/// Support: Full.
 pub struct FileKeySupplier {
     path: PathBuf,
 }
 
 impl FileKeySupplier {
+    /// Support: Full.
     pub fn new(path: impl Into<PathBuf>) -> Self {
         FileKeySupplier { path: path.into() }
     }
@@ -98,12 +111,15 @@ impl KeySupplier for FileKeySupplier {
 }
 
 /// Reads the signing seed from a keystore entry.
+///
+/// Support: Full.
 pub struct StoreKeySupplier<S: KeyStore> {
     store: S,
     name: String,
 }
 
 impl<S: KeyStore> StoreKeySupplier<S> {
+    /// Support: Full.
     pub fn new(store: S, name: impl Into<String>) -> Self {
         StoreKeySupplier {
             store,
@@ -137,6 +153,8 @@ impl<S: KeyStore + Send + Sync> KeySupplier for StoreKeySupplier<S> {
 /// Stores a new audit seed in the keystore and returns its public key. Refuses to replace an
 /// existing key, because replacing it would break the checkpoints already written. The caller
 /// supplies the seed, from the operating system's random source.
+///
+/// Support: Full.
 pub fn enroll_key<S: KeyStore>(
     store: &S,
     name: &str,
@@ -165,11 +183,15 @@ fn detached_message(bytes: &[u8]) -> Vec<u8> {
 }
 
 /// Signs the bytes of a file. Returns the signature as 128 hex digits.
+///
+/// Support: Full.
 pub fn sign_detached(signer: &dyn CheckpointSigner, bytes: &[u8]) -> Result<String, AuditError> {
     Ok(hex_encode(&signer.sign(&detached_message(bytes))?))
 }
 
 /// Checks a detached signature made by [`sign_detached`].
+///
+/// Support: Full.
 pub fn verify_detached(
     key: &VerifyingKey,
     bytes: &[u8],

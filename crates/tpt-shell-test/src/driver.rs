@@ -34,19 +34,30 @@ use tpt_shell_replay::virtual_time::Session;
 use crate::channel::{is_artifact_stem, ChannelError, Command, FileChannel};
 
 /// How long a retried expectation waits between attempts.
+///
+/// Support: Full.
 pub const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// How long a single command waits for the app to answer.
+///
+/// Support: Full.
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The error code for an element that is not on the page yet. Only this code is retried.
+///
+/// Support: Full.
 pub const NOT_FOUND: &str = "TS0303";
 
 /// Carries commands to the app and returns its answers. The file channel implements it.
+///
+/// Support: Full.
 pub trait Transport {
-    /// Sends a command and returns the app's data. Support: Full for the file channel.
+    /// Sends a command and returns the app's data.
+    ///
+    /// Support: Full for the file channel.
     fn call(&mut self, command: &Command) -> Result<Value, ChannelError>;
-    /// Reads an artifact the app wrote, such as a screenshot. Support: Full for the file
-    /// channel.
+    /// Reads an artifact the app wrote, such as a screenshot.
+    ///
+    /// Support: Full for the file channel.
     fn artifact(&self, name: &str) -> Result<Vec<u8>, ChannelError>;
 }
 
@@ -62,6 +73,8 @@ impl Transport for FileChannel {
 
 /// A way to find an element: its role, and optionally its accessible name. Build one with
 /// [`role`].
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Locator {
     role: String,
@@ -69,13 +82,17 @@ pub struct Locator {
 }
 
 impl Locator {
-    /// Narrows the locator to elements with this accessible name. Support: Full.
+    /// Narrows the locator to elements with this accessible name.
+    ///
+    /// Support: Full.
     pub fn name(mut self, name: &str) -> Self {
         self.name = Some(name.to_string());
         self
     }
 
     /// The role this locator looks for.
+    ///
+    /// Support: Full.
     pub fn role_name(&self) -> &str {
         &self.role
     }
@@ -91,36 +108,48 @@ pub fn role(role: &str) -> Locator {
 }
 
 /// An element the driver has found. It is valid for the page it was found on.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Element {
     handle: u64,
 }
 
 impl Element {
-    /// The app's handle for the element. Support: Full.
+    /// The app's handle for the element.
+    ///
+    /// Support: Full.
     pub fn handle(&self) -> u64 {
         self.handle
     }
 }
 
 /// The test driver. It is generic over the transport so tests can script the app.
+///
+/// Support: Full.
 pub struct Driver<T: Transport> {
     transport: T,
 }
 
 impl<T: Transport> Driver<T> {
-    /// Wraps a transport. Support: Full.
+    /// Wraps a transport.
+    ///
+    /// Support: Full.
     pub fn new(transport: T) -> Self {
         Driver { transport }
     }
 
-    /// The transport, for reading its state in a test. Support: Full.
+    /// The transport, for reading its state in a test.
+    ///
+    /// Support: Full.
     pub fn transport(&self) -> &T {
         &self.transport
     }
 
     /// Finds the first element that matches, once. Returns a not-found error when none
-    /// matches. Support: Full.
+    /// matches.
+    ///
+    /// Support: Full.
     pub fn find(&mut self, locator: &Locator) -> Result<Element, ChannelError> {
         let name = locator.name.clone();
         let data = self.transport.call(&Command::Find {
@@ -134,7 +163,9 @@ impl<T: Transport> Driver<T> {
         Ok(Element { handle })
     }
 
-    /// Finds an element, retrying while it is missing, until `timeout`. Support: Full.
+    /// Finds an element, retrying while it is missing, until `timeout`.
+    ///
+    /// Support: Full.
     pub fn wait_for(
         &mut self,
         locator: &Locator,
@@ -144,7 +175,9 @@ impl<T: Transport> Driver<T> {
     }
 
     /// Runs `attempt` until it succeeds, or fails with something other than a missing
-    /// element, or the timeout passes. Each retry waits [`POLL_INTERVAL`]. Support: Full.
+    /// element, or the timeout passes. Each retry waits [`POLL_INTERVAL`].
+    ///
+    /// Support: Full.
     pub fn eventually<R>(
         &mut self,
         timeout: Duration,
@@ -162,7 +195,9 @@ impl<T: Transport> Driver<T> {
         }
     }
 
-    /// Clicks an element. Support: Full.
+    /// Clicks an element.
+    ///
+    /// Support: Full.
     pub fn click(&mut self, element: &Element) -> Result<(), ChannelError> {
         self.transport.call(&Command::Click {
             handle: element.handle,
@@ -170,7 +205,9 @@ impl<T: Transport> Driver<T> {
         Ok(())
     }
 
-    /// Types text into an element. The text is limited to 1024 characters. Support: Full.
+    /// Types text into an element. The text is limited to 1024 characters.
+    ///
+    /// Support: Full.
     pub fn type_text(&mut self, element: &Element, text: &str) -> Result<(), ChannelError> {
         self.transport.call(&Command::TypeText {
             handle: element.handle,
@@ -179,7 +216,9 @@ impl<T: Transport> Driver<T> {
         Ok(())
     }
 
-    /// Presses a key by name, such as `Enter` or `Tab`. Support: Full.
+    /// Presses a key by name, such as `Enter` or `Tab`.
+    ///
+    /// Support: Full.
     pub fn press(&mut self, key: &str) -> Result<(), ChannelError> {
         self.transport.call(&Command::Press {
             key: key.to_string(),
@@ -187,10 +226,11 @@ impl<T: Transport> Driver<T> {
         Ok(())
     }
 
-    /// Captures the window as PNG bytes. The name is the artifact's file stem. Support: Full
-    /// on the file channel; the capture is made by the app (CapturePreview on WebView2,
-    /// takeSnapshot on WKWebView, and get_snapshot on WebKitGTK are routed to the platform
-    /// agents).
+    /// Captures the window as PNG bytes. The name is the artifact's file stem.
+    ///
+    /// Support: Full on the file channel; the capture is made by the app (CapturePreview on
+    /// WebView2, takeSnapshot on WKWebView, and get_snapshot on WebKitGTK are routed to the
+    /// platform agents).
     pub fn screenshot(&mut self, name: &str) -> Result<Vec<u8>, ChannelError> {
         if !is_artifact_stem(name) {
             return Err(ChannelError {
@@ -208,14 +248,17 @@ impl<T: Transport> Driver<T> {
         self.transport.artifact(file)
     }
 
-    /// The DOM as the app reports it, as JSON. Support: Full on the file channel.
+    /// The DOM as the app reports it, as JSON.
+    ///
+    /// Support: Full on the file channel.
     pub fn dom_snapshot(&mut self) -> Result<Value, ChannelError> {
         self.transport.call(&Command::DomSnapshot)
     }
 
-    /// The native accessibility tree of the window, as role and name pairs. Support: Full on
-    /// the file channel. The native dump is made by the platform (UIA, NSAccessibility,
-    /// AT-SPI), which is routed to the platform agents.
+    /// The native accessibility tree of the window, as role and name pairs.
+    ///
+    /// Support: Full on the file channel. The native dump is made by the platform (UIA,
+    /// NSAccessibility, AT-SPI), which is routed to the platform agents.
     pub fn a11y_tree(&mut self) -> Result<Vec<TreeNode>, ChannelError> {
         let data = self.transport.call(&Command::A11yTree)?;
         let nodes = data
@@ -237,8 +280,9 @@ impl<T: Transport> Driver<T> {
             .collect()
     }
 
-    /// Runs a script in the page and returns its JSON result. Support: Full on the file
-    /// channel. The app refuses it unless the build enables test mode.
+    /// Runs a script in the page and returns its JSON result.
+    ///
+    /// Support: Full on the file channel. The app refuses it unless the build enables test mode.
     pub fn eval(&mut self, script: &str) -> Result<Value, ChannelError> {
         self.transport.call(&Command::Eval {
             script: script.to_string(),
@@ -263,7 +307,9 @@ pub struct Recording<T: Transport> {
 }
 
 impl<T: Transport> Recording<T> {
-    /// Wraps a transport so its traffic goes into . Support: Full.
+    /// Wraps a transport so its traffic goes into .
+    ///
+    /// Support: Full.
     pub fn new(inner: T, session: Session) -> Self {
         Recording {
             inner,

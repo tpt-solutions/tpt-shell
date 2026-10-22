@@ -17,6 +17,8 @@
 //! [`crate::png`], and [`crate::screens`] merges the files from several CI jobs.
 
 /// An RGBA image: 8 bits per channel, rows from the top, no padding.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Image {
     width: u32,
@@ -26,6 +28,8 @@ pub struct Image {
 
 impl Image {
     /// Wraps pixels that are `width * height * 4` bytes long.
+    ///
+    /// Support: Full.
     pub fn new(width: u32, height: u32, rgba: Vec<u8>) -> Result<Self, String> {
         let expected = u64::from(width) * u64::from(height) * 4;
         if rgba.len() as u64 != expected {
@@ -41,15 +45,19 @@ impl Image {
         })
     }
 
+    /// Support: Full.
     pub fn width(&self) -> u32 {
         self.width
     }
 
+    /// Support: Full.
     pub fn height(&self) -> u32 {
         self.height
     }
 
     /// The pixels, 8 bits per channel, rows from the top.
+    ///
+    /// Support: Full.
     pub fn rgba(&self) -> &[u8] {
         &self.rgba
     }
@@ -66,6 +74,8 @@ impl Image {
 }
 
 /// What to do with the pixels of a region.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
     /// Leave the pixels out of the comparison, such as a clock or an animated ad.
@@ -75,6 +85,8 @@ pub enum Action {
 }
 
 /// A rectangle of pixels with its own action. Where regions overlap, the last one listed wins.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Region {
     pub x: u32,
@@ -91,6 +103,8 @@ impl Region {
 }
 
 /// How two screenshots are compared.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comparison {
     /// Largest distance a pixel may have and still count as unchanged, from 0 to 1.
@@ -111,6 +125,8 @@ impl Default for Comparison {
 }
 
 /// The result of one comparison.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Report {
     /// Pixels that took part, which excludes ignored regions.
@@ -125,6 +141,8 @@ pub struct Report {
 
 impl Report {
     /// The changed share of the compared pixels. Zero when nothing was compared.
+    ///
+    /// Support: Full.
     pub fn changed_fraction(&self) -> f64 {
         if self.compared == 0 {
             0.0
@@ -135,6 +153,8 @@ impl Report {
 }
 
 /// Compares `actual` with `baseline`. The two must have the same size.
+///
+/// Support: Full.
 pub fn compare(baseline: &Image, actual: &Image, cfg: &Comparison) -> Result<Report, String> {
     if baseline.width != actual.width || baseline.height != actual.height {
         return Err(format!(

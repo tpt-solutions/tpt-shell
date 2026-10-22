@@ -30,12 +30,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// Support: Full.
 pub mod catalog;
+/// Support: Full.
 pub mod page;
+/// Support: Full.
 pub mod profile;
+/// Support: Full.
 pub mod record;
+/// Support: Full.
 pub mod resources;
 
+/// Support: Full.
 #[cfg(feature = "mcp-http")]
 pub mod http;
 
@@ -52,14 +58,22 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// A URL argument is outside the profile's route allow-list. Fix: add the route to the profile,
 /// or call the tool with a route it allows.
+///
+/// Support: Full.
 pub const CODE_ROUTE: &str = "TS0112";
 /// Typed commands are not allowed for this profile. Fix: add `invoke` to its `actions`.
+///
+/// Support: Full.
 pub const CODE_INVOKE: &str = "TS0114";
 
 /// Runs one tool call. `Err` carries the message the agent sees.
+///
+/// Support: Full.
 pub type ToolHandler = Box<dyn FnMut(&Value) -> Result<Value, String>>;
 
 /// One command an agent may call.
+///
+/// Support: Full.
 pub struct AgentTool {
     pub command: String,
     pub description: String,
@@ -69,11 +83,15 @@ pub struct AgentTool {
 
 /// Asks the user before a sensitive action. The platform crates implement this with a native
 /// dialog. [`DenyAll`] is the default when no dialog exists: it refuses everything.
+///
+/// Support: Full.
 pub trait Confirm {
     fn confirm(&mut self, command: &str, args: &Value) -> bool;
 }
 
 /// Refuses every confirmation. Used when no dialog is available.
+///
+/// Support: Full.
 pub struct DenyAll;
 
 impl Confirm for DenyAll {
@@ -83,11 +101,15 @@ impl Confirm for DenyAll {
 }
 
 /// Adapts a [`Confirm`] to the callback that [`Session::handle_line`] takes.
+///
+/// Support: Full.
 pub fn confirm_with(c: &mut dyn Confirm) -> impl FnMut(&str, &Value) -> bool + '_ {
     move |command, args| c.confirm(command, args)
 }
 
 /// Limits and confirmation rules for one session.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Policy {
     /// Tools in this set need the user's confirmation before each call.
@@ -114,6 +136,8 @@ impl Default for Policy {
 }
 
 /// What happened to one call, for the action log.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
     Ran,
@@ -122,6 +146,8 @@ pub enum Outcome {
 }
 
 /// One logged call.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionRecord {
     pub command: String,
@@ -129,6 +155,8 @@ pub struct ActionRecord {
 }
 
 /// A session. Feed it one message at a time with [`Session::handle_line`].
+///
+/// Support: Full.
 pub struct Session {
     tools: Vec<AgentTool>,
     policy: Policy,
@@ -141,6 +169,7 @@ pub struct Session {
 }
 
 impl Session {
+    /// Support: Full.
     pub fn new(tools: Vec<AgentTool>, policy: Policy) -> Self {
         let limiter = RateLimiter::new(policy.rate);
         Session {
@@ -156,18 +185,24 @@ impl Session {
     }
 
     /// Offers resources (the page tree, the audit tail) over `resources/list` and `resources/read`.
+    ///
+    /// Support: Full.
     pub fn with_resources(mut self, provider: Box<dyn ResourceProvider>) -> Self {
         self.resources = Some(provider);
         self
     }
 
     /// Records every handled call, for example to the audit file.
+    ///
+    /// Support: Full.
     pub fn with_recorder(mut self, recorder: Box<dyn Recorder>) -> Self {
         self.recorder = Some(recorder);
         self
     }
 
     /// Names the agent in the records, such as `agent:assistant`.
+    ///
+    /// Support: Full.
     pub fn with_actor(mut self, actor: impl Into<String>) -> Self {
         self.actor = actor.into();
         self
@@ -175,6 +210,8 @@ impl Session {
 
     /// A handle that stops every later tool call and resource read when set. Safe to share with
     /// a hotkey thread.
+    ///
+    /// Support: Full.
     pub fn kill_switch(&self) -> Arc<AtomicBool> {
         self.kill.clone()
     }
@@ -183,6 +220,8 @@ impl Session {
     ///
     /// `now` is the session's own clock, measured from when the session started. `confirm`
     /// is asked for tools that the policy marks, and returns the user's answer.
+    ///
+    /// Support: Full.
     pub fn handle_line(
         &mut self,
         line: &str,
@@ -443,6 +482,8 @@ fn error_response(id: Value, code: i64, message: &str) -> String {
 
 /// Runs a session over line-based input and output until the input ends. Each input line is
 /// one message; each response is written as one line. `confirm` answers confirmation prompts.
+///
+/// Support: Full.
 pub fn serve(
     session: &mut Session,
     input: impl std::io::BufRead,

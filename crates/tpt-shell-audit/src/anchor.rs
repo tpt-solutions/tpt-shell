@@ -19,12 +19,19 @@ use std::path::{Path, PathBuf};
 use crate::AuditError;
 
 /// No anchor could be written. Fix: check the anchor sink, such as its volume and permissions.
+///
+/// Support: Partial. No test forces a failed write, so the code returned on a write error is not
+/// checked.
 pub const CODE_ANCHOR_WRITE: &str = "TS0102";
 /// An anchor is missing from the log, or the log does not hold the anchored record. The log
 /// was truncated or replaced.
+///
+/// Support: Full.
 pub const CODE_ANCHOR_MISMATCH: &str = "TS0103";
 
 /// One anchored checkpoint: the sequence number and hash of the checkpoint record.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AnchorPoint {
     pub seq: u64,
@@ -33,6 +40,8 @@ pub struct AnchorPoint {
 }
 
 /// A second sink for checkpoint hashes. Called once per checkpoint, after it is on disk.
+///
+/// Support: Full.
 pub trait Anchor: Send {
     fn publish(&mut self, point: &AnchorPoint) -> Result<(), AuditError>;
 }
@@ -45,11 +54,14 @@ fn write_error(reason: impl Into<String>) -> AuditError {
 }
 
 /// Appends `seq wall_unix_ms hash` lines to a file that should live on another volume.
+///
+/// Support: Full.
 pub struct FileAnchor {
     path: PathBuf,
 }
 
 impl FileAnchor {
+    /// Support: Full.
     pub fn new(path: impl Into<PathBuf>) -> Self {
         FileAnchor { path: path.into() }
     }
@@ -75,6 +87,8 @@ impl Anchor for FileAnchor {
 }
 
 /// Reads the anchors a [`FileAnchor`] wrote.
+///
+/// Support: Full.
 pub fn read_file_anchors(path: impl AsRef<Path>) -> Result<Vec<AnchorPoint>, AuditError> {
     let reader = BufReader::new(std::fs::File::open(path.as_ref())?);
     let mut points = Vec::new();
@@ -108,6 +122,8 @@ pub fn read_file_anchors(path: impl AsRef<Path>) -> Result<Vec<AnchorPoint>, Aud
 
 /// Formats one anchor as an RFC 5424 message. The timestamp field is the NILVALUE `-`, and the
 /// wall time is carried in the message text. `host` has spaces replaced, so it stays one field.
+///
+/// Support: Full.
 pub fn syslog_line(point: &AnchorPoint, host: &str) -> String {
     let host: String = host
         .chars()
@@ -125,12 +141,15 @@ pub fn syslog_line(point: &AnchorPoint, host: &str) -> String {
 }
 
 /// Writes one RFC 5424 line per checkpoint to any writer the caller opened.
+///
+/// Support: Full.
 pub struct SyslogAnchor<W: Write + Send> {
     out: W,
     host: String,
 }
 
 impl<W: Write + Send> SyslogAnchor<W> {
+    /// Support: Full.
     pub fn new(out: W, host: impl Into<String>) -> Self {
         SyslogAnchor {
             out,

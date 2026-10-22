@@ -19,6 +19,8 @@ use crate::profile::AgentProfile;
 use crate::AgentTool;
 
 /// What the contract says about one command.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommandDescriptor {
     pub name: String,
@@ -32,17 +34,25 @@ pub struct CommandDescriptor {
 
 /// Lists the commands of a contract. Implemented from the generated contract, so this crate
 /// does not depend on the macro crate.
+///
+/// Support: Full.
 pub trait CommandCatalog {
     fn commands(&self) -> Vec<CommandDescriptor>;
 }
 
 /// Runs a command by name: the command's name and its arguments, and the result or the error.
+///
+/// Support: Full.
 pub type Runner = Box<dyn FnMut(&str, &Value) -> Result<Value, String>>;
 
 /// Runs a command by name. Shared by every generated tool.
+///
+/// Support: Full.
 pub type Dispatch = Rc<RefCell<Runner>>;
 
 /// The tools for one session, and the commands that need confirmation.
+///
+/// Support: Full.
 pub struct Generated {
     pub tools: Vec<AgentTool>,
     /// Commands the contract marks for confirmation. Merge into the session policy.
@@ -51,6 +61,8 @@ pub struct Generated {
 
 /// Builds one tool for each agent-flagged command the profile allows. With no profile, every
 /// flagged command is offered.
+///
+/// Support: Full.
 pub fn tools_from_catalog(
     catalog: &dyn CommandCatalog,
     profile: Option<&AgentProfile>,

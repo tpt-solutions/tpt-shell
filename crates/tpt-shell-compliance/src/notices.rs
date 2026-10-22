@@ -13,12 +13,17 @@ use serde_json::Value;
 use crate::{components_from_metadata, App, Component};
 
 /// The app path under which `licenses.html` is served. The facade and platform crates embed it.
+///
+/// Support: Partial. The constant names the path where the notices are served. The app layer that
+/// serves them is not in this crate, and no test here reads the path.
 pub const LICENSES_PATH: &str = "__tpt/licenses";
 
 /// Licence files larger than this are skipped, so one file cannot bloat the notices.
 const MAX_FILE_BYTES: u64 = 256 * 1024;
 
 /// One licence file shipped with a crate.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LicenseFile {
     pub name: String,
@@ -26,6 +31,8 @@ pub struct LicenseFile {
 }
 
 /// A third-party crate and its licence files.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
     pub component: Component,
@@ -34,6 +41,8 @@ pub struct Notice {
 
 /// Builds one notice per third-party crate in `cargo metadata` output, reading each crate's
 /// licence files from its source directory. A crate whose directory is missing gets no files.
+///
+/// Support: Full.
 pub fn notices_from_metadata(json_text: &str) -> Result<Vec<Notice>, String> {
     let components = components_from_metadata(json_text)?;
     let doc: Value =
@@ -74,6 +83,8 @@ pub fn notices_from_metadata(json_text: &str) -> Result<Vec<Notice>, String> {
 
 /// The licence files in a crate directory: names starting with LICENSE, LICENCE, COPYING,
 /// NOTICE or UNLICENSE (any case), in name order. Non-UTF-8 bytes are replaced.
+///
+/// Support: Full.
 pub fn read_license_files(dir: &Path) -> Vec<LicenseFile> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -108,6 +119,8 @@ pub fn read_license_files(dir: &Path) -> Vec<LicenseFile> {
 }
 
 /// Escapes text for HTML element content and quoted attributes.
+///
+/// Support: Full.
 pub fn escape_html(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -140,6 +153,8 @@ fn anchor_id(c: &Component) -> String {
 
 /// The page served at `app://__tpt/licenses`: a table of crates and licences, then each
 /// crate's licence files.
+///
+/// Support: Full.
 pub fn licenses_html(app: &App, notices: &[Notice]) -> String {
     let mut out = String::new();
     out.push_str("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n");
@@ -205,6 +220,8 @@ pub fn licenses_html(app: &App, notices: &[Notice]) -> String {
 
 /// The plain-text `THIRD_PARTY_NOTICES` file: a header, then each crate with its licence and
 /// licence files, separated by rules.
+///
+/// Support: Full.
 pub fn third_party_notices(app: &App, notices: &[Notice]) -> String {
     let rule = "-".repeat(72);
     let mut out = format!(

@@ -22,6 +22,8 @@ use serde_json::{json, Value};
 use crate::png::crc32;
 
 /// What an artifact is, which decides how the report shows it.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Screenshot,
@@ -42,6 +44,8 @@ impl Kind {
 }
 
 /// One file in the index.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub test: String,
@@ -53,13 +57,17 @@ pub struct Entry {
 }
 
 /// Writes artifacts for a run and the index that lists them.
+///
+/// Support: Full.
 pub struct Collector {
     root: PathBuf,
     entries: Vec<Entry>,
 }
 
 impl Collector {
-    /// Starts a collection in `root`, creating it if needed. Support: Full.
+    /// Starts a collection in `root`, creating it if needed.
+    ///
+    /// Support: Full.
     pub fn new(root: &Path) -> Result<Self, String> {
         fs::create_dir_all(root).map_err(|e| format!("cannot create {}: {e}", root.display()))?;
         Ok(Collector {
@@ -68,7 +76,9 @@ impl Collector {
         })
     }
 
-    /// Writes one artifact under `<root>/<test>/<file>`. Support: Full.
+    /// Writes one artifact under `<root>/<test>/<file>`.
+    ///
+    /// Support: Full.
     pub fn add(&mut self, test: &str, kind: Kind, file: &str, bytes: &[u8]) -> Result<(), String> {
         if !is_plain(test) || !is_plain(file) {
             return Err(format!("`{test}/{file}` is not a plain name"));
@@ -87,12 +97,16 @@ impl Collector {
         Ok(())
     }
 
-    /// The artifacts added so far. Support: Full.
+    /// The artifacts added so far.
+    ///
+    /// Support: Full.
     pub fn entries(&self) -> &[Entry] {
         &self.entries
     }
 
-    /// Writes `index.json` and returns its path. Support: Full.
+    /// Writes `index.json` and returns its path.
+    ///
+    /// Support: Full.
     pub fn finish(self) -> Result<PathBuf, String> {
         let items: Vec<Value> = self
             .entries
@@ -119,6 +133,8 @@ impl Collector {
 }
 
 /// A name of 1 to 100 ASCII letters, digits, `-`, `_` or `.`, that is not `.` or `..`.
+///
+/// Support: Full.
 pub fn is_plain(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 100

@@ -13,23 +13,35 @@
 //! on it. The allow list is read from `deny.toml` at run time ([`allow_list_from_deny_toml`]).
 //! The gate is this crate's own parser, not cargo-deny itself; CI still runs cargo-deny.
 
+/// Support: Full.
 pub mod lock;
+/// Support: Full.
 pub mod notices;
+/// Support: Partial. It does not follow $ref, oneOf or anyOf, so a subschema behind one of those is
+/// not checked here; the full validation is the ajv run in tools/validate-sbom.sh.
 pub mod schema;
 
 use serde_json::{json, Value};
 
 /// `deny.toml` could not be read, or has no licence allow list. Fix: check the file has a
 /// `[licenses] allow = [...]` array.
+///
+/// Support: Full.
 pub const CODE_POLICY: &str = "TS0120";
 /// A generated SBOM does not match its published schema. Fix: the message names the path.
+///
+/// Support: Partial. The code is defined here, but no function in this crate returns it yet.
 pub const CODE_SCHEMA: &str = "TS0121";
 
 /// Licences the gate accepts when no `deny.toml` is given. Keep in step with `deny.toml`; the
 /// test `allow_list_matches_deny_toml` checks this.
+///
+/// Support: Full.
 pub const ALLOWED_LICENSES: [&str; 4] = ["MIT", "Unicode-3.0", "BSD-3-Clause", "ISC"];
 
 /// A third-party crate from the lock file.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Component {
     pub name: String,
@@ -40,6 +52,8 @@ pub struct Component {
 }
 
 /// The application being described.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct App {
     pub name: String,
@@ -47,6 +61,8 @@ pub struct App {
 }
 
 /// Finds the application named `name` in `cargo metadata` output and returns its name and version.
+///
+/// Support: Full.
 pub fn app_from_metadata(json_text: &str, name: &str) -> Result<App, String> {
     let doc: Value =
         serde_json::from_str(json_text).map_err(|e| format!("metadata is not JSON: {e}"))?;
@@ -71,6 +87,8 @@ pub fn app_from_metadata(json_text: &str, name: &str) -> Result<App, String> {
 
 /// Reads the third-party packages from `cargo metadata` output. Workspace members (packages
 /// without a `source`) are left out; the application itself is described by [`App`].
+///
+/// Support: Full.
 pub fn components_from_metadata(json_text: &str) -> Result<Vec<Component>, String> {
     let doc: Value =
         serde_json::from_str(json_text).map_err(|e| format!("metadata is not JSON: {e}"))?;
@@ -110,6 +128,8 @@ pub fn components_from_metadata(json_text: &str) -> Result<Vec<Component>, Strin
 }
 
 /// CycloneDX 1.5 JSON.
+///
+/// Support: Full.
 pub fn cyclonedx(components: &[Component], app: &App, timestamp: Option<&str>) -> Value {
     let mut metadata = json!({
         "component": { "type": "application", "name": app.name, "version": app.version },
@@ -147,6 +167,8 @@ pub fn cyclonedx(components: &[Component], app: &App, timestamp: Option<&str>) -
 }
 
 /// SPDX 2.3 JSON. `namespace` must be a unique URI for this document.
+///
+/// Support: Full.
 pub fn spdx(components: &[Component], app: &App, namespace: &str, created: Option<&str>) -> Value {
     let mut packages = vec![json!({
         "SPDXID": "SPDXRef-Application",
@@ -202,12 +224,16 @@ fn purl(c: &Component) -> String {
 }
 
 /// The allow list of the built-in policy, as owned strings.
+///
+/// Support: Full.
 pub fn default_allow() -> Vec<String> {
     ALLOWED_LICENSES.iter().map(|s| s.to_string()).collect()
 }
 
 /// Reads the licence allow list from the text of a `deny.toml`. Fails when the file is not
 /// TOML or has no `[licenses] allow` array of strings.
+///
+/// Support: Full.
 pub fn allow_list_from_deny_toml(deny_toml: &str) -> Result<Vec<String>, String> {
     let table: toml::Table = deny_toml
         .parse()
@@ -232,11 +258,15 @@ pub fn allow_list_from_deny_toml(deny_toml: &str) -> Result<Vec<String>, String>
 /// The grammar is SPDX-like: identifiers, `AND` (binds tighter), `OR`, parentheses, and
 /// `WITH` (an exception, which does not change the licence it is attached to). The older
 /// `/` form is read as `OR`. An expression with anything else in it is refused.
+///
+/// Support: Full.
 pub fn license_allowed(expression: &str) -> bool {
     license_allowed_with(expression, &default_allow())
 }
 
 /// Like [`license_allowed`], against the given allow list (for example from `deny.toml`).
+///
+/// Support: Full.
 pub fn license_allowed_with(expression: &str, allow: &[String]) -> bool {
     match tokenize(expression) {
         Some(tokens) if !tokens.is_empty() => {
@@ -372,11 +402,15 @@ impl Parser<'_> {
 
 /// Components whose licence the gate refuses, as `name version: reason`. An empty result
 /// means the gate passes.
+///
+/// Support: Full.
 pub fn license_violations(components: &[Component]) -> Vec<String> {
     license_violations_with(components, &default_allow())
 }
 
 /// Like [`license_violations`], against the given allow list.
+///
+/// Support: Full.
 pub fn license_violations_with(components: &[Component], allow: &[String]) -> Vec<String> {
     components
         .iter()
@@ -392,6 +426,8 @@ pub fn license_violations_with(components: &[Component], allow: &[String]) -> Ve
 }
 
 /// How the build was made reproducible. Recorded in the attestation.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reproducibility {
     /// The `SOURCE_DATE_EPOCH` used for timestamps, if one was set.
@@ -404,6 +440,8 @@ pub struct Reproducibility {
 
 /// The attestation: what was built, from which lock file, and what the gate found. The policy
 /// section lists the built-in allow list. Use [`attestation_with_allow`] for `deny.toml`'s list.
+///
+/// Support: Full.
 pub fn attestation(
     app: &App,
     rustc: &str,
@@ -426,6 +464,8 @@ pub fn attestation(
 }
 
 /// [`attestation`], recording the allow list that the gate actually used.
+///
+/// Support: Full.
 #[allow(clippy::too_many_arguments)]
 pub fn attestation_with_allow(
     app: &App,
@@ -462,12 +502,16 @@ pub fn attestation_with_allow(
 }
 
 /// SHA-256 of `bytes`, as used for the attestation's digests.
+///
+/// Support: Full.
 pub fn digest(bytes: &[u8]) -> String {
     tpt_shell_audit::sha256_hex(bytes)
 }
 
 /// The licence gate for a build: every component must pass the allow list, and every crate the
 /// lock file pins must be described by the metadata. Returns the violations; empty means pass.
+///
+/// Support: Full.
 pub fn gate(
     components: &[Component],
     locked: &[lock::LockedPackage],
@@ -479,6 +523,8 @@ pub fn gate(
 }
 
 /// The message for a failed gate, with its code. `violations` must not be empty.
+///
+/// Support: Full.
 pub fn gate_failure(violations: &[String]) -> String {
     format!(
         "{CODE_GATE}: the licence gate refused {} item(s): {}",
@@ -489,10 +535,14 @@ pub fn gate_failure(violations: &[String]) -> String {
 
 /// `TS0122`: the licence gate refused a component. Fix: replace the crate, or add its licence to
 /// `deny.toml` with a justification line.
+///
+/// Support: Full.
 pub const CODE_GATE: &str = "TS0122";
 
 /// Signs an artifact with the audit key (Ed25519 over the file's SHA-256). Returns the signature
 /// as 128 hex digits, to be written next to the artifact, for example `sbom.cdx.json.sig`.
+///
+/// Support: Full.
 pub fn sign_artifact(
     signer: &dyn tpt_shell_audit::keys::CheckpointSigner,
     bytes: &[u8],
@@ -502,6 +552,8 @@ pub fn sign_artifact(
 
 /// Checks a signature made by [`sign_artifact`]. `public_key_hex` is the public key as 64 hex
 /// digits, as the audit tools write it.
+///
+/// Support: Full.
 pub fn verify_artifact(
     public_key_hex: &str,
     bytes: &[u8],
@@ -513,6 +565,8 @@ pub fn verify_artifact(
 }
 
 /// Formats Unix seconds as an ISO 8601 UTC timestamp, for example `2023-11-14T22:13:20Z`.
+///
+/// Support: Full.
 pub fn iso8601_utc(epoch_seconds: u64) -> String {
     let days = (epoch_seconds / 86_400) as i64;
     let secs = epoch_seconds % 86_400;

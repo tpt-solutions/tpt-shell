@@ -15,9 +15,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 /// The in-page helper: `window.__tptAgent.snapshot()` and `window.__tptAgent.act(...)`.
+///
+/// Support: Full.
 pub const AGENT_JS: &str = include_str!("../../../js/agent/agent.js");
 
 /// A snapshot of a page.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Snapshot {
     pub title: String,
@@ -27,6 +31,8 @@ pub struct Snapshot {
 }
 
 /// One element that has a role. `ref_id` is valid until the next snapshot of the same page.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Node {
     #[serde(rename = "ref")]
@@ -42,6 +48,7 @@ pub struct Node {
     pub children: Vec<Node>,
 }
 
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 pub struct Bounds {
     pub x: i32,
@@ -51,6 +58,8 @@ pub struct Bounds {
 }
 
 /// One action on an element of the latest snapshot.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     Click { ref_id: u32 },
@@ -86,21 +95,29 @@ impl Action {
 
 /// The script that takes a snapshot. Its value is the snapshot, which the platform returns as
 /// JSON. The script returns the object itself: a string would be encoded twice.
+///
+/// Support: Full.
 pub fn snapshot_script() -> String {
     format!("{AGENT_JS}\n;window.__tptAgent.snapshot()")
 }
 
 /// The script that performs `action`. Its value is `{ok, data}` or `{ok: false, error}`.
+///
+/// Support: Full.
 pub fn action_script(action: &Action) -> String {
     format!("{AGENT_JS}\n;window.__tptAgent.act({})", action.to_json())
 }
 
 /// Reads the JSON a snapshot script returned.
+///
+/// Support: Full.
 pub fn parse_snapshot(json: &str) -> Result<Snapshot, String> {
     serde_json::from_str(json).map_err(|e| format!("the snapshot is not valid: {e}"))
 }
 
 /// The outcome of an action: its data, or the error the page reported.
+///
+/// Support: Full.
 pub fn parse_action_result(json: &str) -> Result<Value, String> {
     let value: Value =
         serde_json::from_str(json).map_err(|e| format!("the action result is not valid: {e}"))?;
@@ -115,6 +132,8 @@ pub fn parse_action_result(json: &str) -> Result<Value, String> {
 }
 
 /// Renders a snapshot as text, one node per line with its reference, indented by depth.
+///
+/// Support: Full.
 pub fn render(snapshot: &Snapshot) -> String {
     let mut out = format!(
         "page: {} {}\n",
@@ -164,11 +183,15 @@ fn untrusted(text: &str) -> String {
 
 /// Marks text as untrusted content for the model. The session uses it on every tool result and
 /// resource read, because either can carry text from the page.
+///
+/// Support: Full.
 pub fn mark_untrusted(text: &str) -> String {
     untrusted(text)
 }
 
 /// What `wait_for` waits for: a node with this role, and this name when one is given.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Want {
     pub role: String,
@@ -184,6 +207,8 @@ impl Want {
 /// Takes snapshots until a node matches `want`, and returns it. The first snapshot is taken at
 /// once. Gives up when `timeout` has passed by `now`. `pause` sleeps for one `poll` interval.
 /// A zero `poll` is refused, so the loop always waits.
+///
+/// Support: Full.
 pub fn wait_for(
     want: &Want,
     timeout: Duration,

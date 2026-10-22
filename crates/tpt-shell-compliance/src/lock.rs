@@ -10,10 +10,14 @@ use std::collections::BTreeSet;
 use crate::Component;
 
 /// One package pinned by the lock file: name and version.
+///
+/// Support: Full.
 pub type LockedPackage = (String, String);
 
 /// The packages in a `Cargo.lock` that come from a source (a registry or git). Workspace
 /// members have no `source` and are left out.
+///
+/// Support: Full.
 pub fn sourced_packages(lock_text: &str) -> Result<Vec<LockedPackage>, String> {
     let table: toml::Table = lock_text
         .parse()
@@ -44,6 +48,8 @@ pub fn sourced_packages(lock_text: &str) -> Result<Vec<LockedPackage>, String> {
 
 /// Locked packages that have no entry in the metadata components. Each is reported as
 /// `name version: ...`, so the gate cannot pass a crate it has never seen.
+///
+/// Support: Full.
 pub fn unknown_to_metadata(locked: &[LockedPackage], components: &[Component]) -> Vec<String> {
     locked
         .iter()

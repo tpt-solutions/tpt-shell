@@ -34,17 +34,29 @@ use serde_json::{json, Map, Value};
 use tpt_shell_core::{Rng, SystemRng};
 
 /// The only protocol version this build speaks.
+///
+/// Support: Full.
 pub const PROTOCOL: u64 = 1;
 /// The largest request or response file accepted, in bytes.
+///
+/// Support: Full.
 pub const MAX_MESSAGE_BYTES: u64 = 64 * 1024;
 /// The largest screenshot file the driver reads back, in bytes.
+///
+/// Support: Full.
 pub const MAX_ARTIFACT_BYTES: u64 = 32 * 1024 * 1024;
 /// The longest accessible name or text argument, in characters.
+///
+/// Support: Full.
 pub const MAX_TEXT_CHARS: usize = 1024;
 /// The longest script `eval` accepts, in bytes.
+///
+/// Support: Full.
 pub const MAX_SCRIPT_BYTES: usize = 16 * 1024;
 
 /// A refused message or a failed channel operation. `code` is a stable `TS####` code.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChannelError {
     pub code: &'static str,
@@ -69,17 +81,23 @@ impl std::fmt::Display for ChannelError {
 impl std::error::Error for ChannelError {}
 
 /// A per-run token: 128 random bits as 32 lowercase hex characters.
+///
+/// Support: Full.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Token(String);
 
 impl Token {
-    /// A fresh token from the process's random source. Support: Full.
+    /// A fresh token from the process's random source.
+    ///
+    /// Support: Full.
     pub fn generate() -> Self {
         let mut rng = SystemRng::new();
         Token(format!("{:016x}{:016x}", rng.next_u64(), rng.next_u64()))
     }
 
-    /// Reads a token from text. It must be exactly 32 lowercase hex characters. Support: Full.
+    /// Reads a token from text. It must be exactly 32 lowercase hex characters.
+    ///
+    /// Support: Full.
     pub fn parse(text: &str) -> Result<Self, ChannelError> {
         let ok = text.len() == 32
             && text
@@ -95,12 +113,16 @@ impl Token {
     }
 
     /// The token text. It is secret for the run, so do not print it in logs.
+    ///
+    /// Support: Full.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
     /// Compares with a token from a message, in time that does not depend on where they
-    /// differ. Support: Full.
+    /// differ.
+    ///
+    /// Support: Full.
     pub fn matches(&self, other: &str) -> bool {
         let (a, b) = (self.0.as_bytes(), other.as_bytes());
         if a.len() != b.len() {
@@ -117,6 +139,8 @@ impl std::fmt::Debug for Token {
 }
 
 /// A command the driver can send. Each one is checked by [`Command::from_json`].
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     /// Finds the first element with this role, and with this name when one is given.
@@ -149,6 +173,8 @@ pub enum Command {
 
 impl Command {
     /// The command as a JSON object, with its `cmd` field.
+    ///
+    /// Support: Full.
     pub fn to_json(&self) -> Value {
         match self {
             Command::Find { role, name } => json!({ "cmd": "find", "role": role, "name": name }),
@@ -165,6 +191,8 @@ impl Command {
     }
 
     /// Reads and checks a command. Unknown fields and out-of-range values are refused.
+    ///
+    /// Support: Full.
     pub fn from_json(value: &Value) -> Result<Self, ChannelError> {
         let obj = value
             .as_object()
@@ -280,6 +308,8 @@ fn handle_field(obj: &Map<String, Value>) -> Result<u64, ChannelError> {
 }
 
 /// A name that is safe as a file stem: 1-100 ASCII letters, digits, `-` or `_`.
+///
+/// Support: Full.
 pub fn is_artifact_stem(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 100
@@ -289,13 +319,17 @@ pub fn is_artifact_stem(name: &str) -> bool {
 }
 
 /// A request as the app receives it.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Request {
     pub seq: u64,
     pub command: Command,
 }
 
-/// Encodes a request. Support: Full.
+/// Encodes a request.
+///
+/// Support: Full.
 pub fn encode_request(token: &Token, seq: u64, command: &Command) -> Vec<u8> {
     let mut obj = Map::new();
     obj.insert("v".into(), json!(PROTOCOL));
@@ -306,7 +340,9 @@ pub fn encode_request(token: &Token, seq: u64, command: &Command) -> Vec<u8> {
 }
 
 /// Checks and decodes a request on the app side. `expected_seq` is the next sequence number
-/// the app will accept, so a replayed or skipped message is refused. Support: Full.
+/// the app will accept, so a replayed or skipped message is refused.
+///
+/// Support: Full.
 pub fn parse_request(
     token: &Token,
     expected_seq: u64,
@@ -334,13 +370,17 @@ pub fn parse_request(
 }
 
 /// A response as the driver receives it.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Response {
     Ok(Value),
     Err { code: String, message: String },
 }
 
-/// Encodes a response on the app side. Support: Full.
+/// Encodes a response on the app side.
+///
+/// Support: Full.
 pub fn encode_response(token: &Token, seq: u64, result: &Result<Value, ChannelError>) -> Vec<u8> {
     let body = match result {
         Ok(data) => json!({ "ok": true, "data": data }),
@@ -351,7 +391,9 @@ pub fn encode_response(token: &Token, seq: u64, result: &Result<Value, ChannelEr
         .into_bytes()
 }
 
-/// Checks and decodes a response on the driver side. Support: Full.
+/// Checks and decodes a response on the driver side.
+///
+/// Support: Full.
 pub fn parse_response(token: &Token, seq: u64, bytes: &[u8]) -> Result<Response, ChannelError> {
     let value = parse_envelope(bytes)?;
     let obj = value
@@ -414,16 +456,22 @@ fn check_common(obj: &Map<String, Value>, token: &Token) -> Result<(), ChannelEr
 
 /// The file names a run uses. Only integers appear in them, so no path can be built from
 /// message content.
+///
+/// Support: Full.
 pub fn request_file(seq: u64) -> String {
     format!("req-{seq:08}.json")
 }
 
 /// The response file name for a sequence number.
+///
+/// Support: Full.
 pub fn response_file(seq: u64) -> String {
     format!("res-{seq:08}.json")
 }
 
 /// The driver's end of a run directory. It writes requests and reads responses.
+///
+/// Support: Full.
 pub struct FileChannel {
     dir: PathBuf,
     token: Token,
@@ -432,7 +480,9 @@ pub struct FileChannel {
 
 impl FileChannel {
     /// Creates a new run directory named by a fresh token under `base`. It fails if the
-    /// directory already exists, so a run never reuses another run's files. Support: Full.
+    /// directory already exists, so a run never reuses another run's files.
+    ///
+    /// Support: Full.
     pub fn create(base: &Path) -> Result<Self, ChannelError> {
         let token = Token::generate();
         let dir = base.join(format!("run-{}", token.as_str()));
@@ -448,16 +498,22 @@ impl FileChannel {
 
     /// The run's token. The launcher passes it to the app, for example in an environment
     /// variable, and never writes it to a log.
+    ///
+    /// Support: Full.
     pub fn token(&self) -> &Token {
         &self.token
     }
 
     /// The run directory.
+    ///
+    /// Support: Full.
     pub fn dir(&self) -> &Path {
         &self.dir
     }
 
-    /// Sends a command and waits for its response, up to `timeout`. Support: Full.
+    /// Sends a command and waits for its response, up to `timeout`.
+    ///
+    /// Support: Full.
     pub fn call(&mut self, command: &Command, timeout: Duration) -> Result<Value, ChannelError> {
         let seq = self.next_seq;
         self.next_seq += 1;
@@ -496,7 +552,9 @@ impl FileChannel {
     }
 
     /// Reads a file from `artifacts/`. The name must be a single file name ending in `.png`
-    /// and the file must be at most [`MAX_ARTIFACT_BYTES`]. Support: Full.
+    /// and the file must be at most [`MAX_ARTIFACT_BYTES`].
+    ///
+    /// Support: Full.
     pub fn read_artifact(&self, name: &str) -> Result<Vec<u8>, ChannelError> {
         let stem = name.strip_suffix(".png").unwrap_or("");
         if !is_artifact_stem(stem) {
@@ -518,6 +576,8 @@ impl FileChannel {
 }
 
 /// The app's end of a run directory: it reads requests and writes responses.
+///
+/// Support: Full.
 pub struct AppChannel {
     dir: PathBuf,
     token: Token,
@@ -525,7 +585,9 @@ pub struct AppChannel {
 }
 
 impl AppChannel {
-    /// Opens the run directory the driver created, with the token it was given. Support: Full.
+    /// Opens the run directory the driver created, with the token it was given.
+    ///
+    /// Support: Full.
     pub fn open(dir: &Path, token: &str) -> Result<Self, ChannelError> {
         let token = Token::parse(token)?;
         let expected = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -542,7 +604,9 @@ impl AppChannel {
     }
 
     /// The next request, if the driver has written one. A request that fails the checks is
-    /// answered with an error and skipped, so the app never runs it. Support: Full.
+    /// answered with an error and skipped, so the app never runs it.
+    ///
+    /// Support: Full.
     pub fn poll(&mut self) -> Option<Result<Request, ChannelError>> {
         let path = self.dir.join(request_file(self.next_seq));
         let meta = fs::metadata(&path).ok()?;
@@ -558,7 +622,9 @@ impl AppChannel {
         Some(parse_request(&self.token, seq, &bytes))
     }
 
-    /// Writes the answer to request `seq`. Support: Full.
+    /// Writes the answer to request `seq`.
+    ///
+    /// Support: Full.
     pub fn respond(
         &self,
         seq: u64,
@@ -571,7 +637,9 @@ impl AppChannel {
     }
 
     /// Writes a screenshot or other artifact under `artifacts/`. The name is checked as
-    /// [`FileChannel::read_artifact`] checks it. Support: Full.
+    /// [`FileChannel::read_artifact`] checks it.
+    ///
+    /// Support: Full.
     pub fn write_artifact(&self, name: &str, bytes: &[u8]) -> Result<(), ChannelError> {
         if !is_artifact_stem(name) {
             return Err(ChannelError {

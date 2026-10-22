@@ -48,14 +48,18 @@ struct Inner {
     last_t: u64,
 }
 
-/// A recording or replay in progress. Clones share the same state. Support: Full.
+/// A recording or replay in progress. Clones share the same state.
+///
+/// Support: Full.
 #[derive(Clone)]
 pub struct Session {
     inner: Arc<Mutex<Inner>>,
 }
 
 impl Session {
-    /// Starts recording. Support: Full.
+    /// Starts recording.
+    ///
+    /// Support: Full.
     pub fn record(header: Header) -> Self {
         Session {
             inner: Arc::new(Mutex::new(Inner {
@@ -90,13 +94,17 @@ impl Session {
         }
     }
 
-    /// Whether this session replays rather than records. Support: Full.
+    /// Whether this session replays rather than records.
+    ///
+    /// Support: Partial. No test calls it.
     pub fn is_replaying(&self) -> bool {
         matches!(self.lock().mode, Mode::Replay(_))
     }
 
     /// A clock for the app to use. In recording mode it reads `real`; in replay mode `real` is
-    /// not read. Support: Full.
+    /// not read.
+    ///
+    /// Support: Full.
     pub fn clock(&self, real: Box<dyn Clock>) -> VirtualClock {
         VirtualClock {
             session: self.clone(),
@@ -104,7 +112,9 @@ impl Session {
         }
     }
 
-    /// A generator for the app to use. Support: Full.
+    /// A generator for the app to use.
+    ///
+    /// Support: Full.
     pub fn rng<R: Rng>(&self, real: R) -> VirtualRng<R> {
         VirtualRng {
             session: self.clone(),
@@ -113,7 +123,9 @@ impl Session {
     }
 
     /// Records an app event such as an IPC call, at `t_ns` since the session started. Refused
-    /// while replaying. Support: Full.
+    /// while replaying.
+    ///
+    /// Support: Full.
     pub fn record_event(&self, kind: &str, data: Value) -> Result<(), String> {
         let mut guard = self.lock();
         let inner = &mut *guard;
@@ -130,8 +142,9 @@ impl Session {
         }
     }
 
-    /// The first point where a replayed read did not match the recording, if any. Support:
-    /// Full.
+    /// The first point where a replayed read did not match the recording, if any.
+    ///
+    /// Support: Full.
     pub fn divergence(&self) -> Option<String> {
         match &self.lock().mode {
             Mode::Replay(p) => p.divergence.clone(),
@@ -139,7 +152,9 @@ impl Session {
         }
     }
 
-    /// Finishes a recording and returns its text. Support: Full.
+    /// Finishes a recording and returns its text.
+    ///
+    /// Support: Full.
     pub fn finish(&self) -> Result<String, String> {
         let mut guard = self.lock();
         match &mut guard.mode {
@@ -259,7 +274,9 @@ fn note(p: &mut Playback, message: String) {
     }
 }
 
-/// The virtualised clock. Support: Full.
+/// The virtualised clock.
+///
+/// Support: Full.
 pub struct VirtualClock {
     session: Session,
     real: Option<Box<dyn Clock>>,
@@ -281,7 +298,9 @@ impl Clock for VirtualClock {
     }
 }
 
-/// The virtualised generator. Support: Full.
+/// The virtualised generator.
+///
+/// Support: Full.
 pub struct VirtualRng<R: Rng> {
     session: Session,
     real: Option<R>,

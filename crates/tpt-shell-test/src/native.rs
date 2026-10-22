@@ -22,9 +22,13 @@ use tpt_shell_core::Error;
 use crate::a11y::TreeNode;
 
 /// Dumps the native accessibility tree of a window.
+///
+/// Support: Partial. The default dump returns Unsupported. The Windows, macOS and Linux overrides
+/// are routed to the platform agents.
 pub trait NativeTree {
-    /// The nodes of the window's native tree, in document order. Support: Unsupported by
-    /// default; a platform backend overrides this.
+    /// The nodes of the window's native tree, in document order.
+    ///
+    /// Support: Unsupported by default; a platform backend overrides this.
     fn dump(&self, window: &str) -> Result<Vec<TreeNode>, Error> {
         let _ = window;
         Err(Error::Unsupported {
@@ -34,6 +38,9 @@ pub trait NativeTree {
 }
 
 /// A backend that has no native dump. It is what a platform without an override gets.
+///
+/// Support: Unsupported. The backend that every platform without an override gets. Its dump returns
+/// Error::Unsupported.
 pub struct NoNativeTree;
 
 impl NativeTree for NoNativeTree {}
@@ -44,6 +51,8 @@ fn normal_name(name: &str) -> String {
 }
 
 /// A node that exists on one side only, or with a different role on the other side.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Mismatch {
     pub name: String,
@@ -52,6 +61,8 @@ pub struct Mismatch {
 }
 
 /// The result of comparing the DOM with the native tree.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct DomNativeReport {
     /// Named nodes that match on role and name.
@@ -66,11 +77,15 @@ pub struct DomNativeReport {
 
 impl DomNativeReport {
     /// True when every named DOM node is exposed natively with the same role.
+    ///
+    /// Support: Full.
     pub fn passed(&self) -> bool {
         self.only_dom.is_empty() && self.only_native.is_empty() && self.role_differs.is_empty()
     }
 
     /// A plain-text report, one line per difference.
+    ///
+    /// Support: Full.
     pub fn render_text(&self) -> String {
         let mut out = format!("matched: {}\n", self.matched);
         for m in &self.only_dom {
@@ -107,6 +122,8 @@ impl DomNativeReport {
 ///
 /// Matching is by role and name first. What is left is paired by name alone, so a role
 /// difference is reported as one row, not as two missing nodes.
+///
+/// Support: Full.
 pub fn compare_dom_native(dom: &[TreeNode], native: &[TreeNode]) -> DomNativeReport {
     let named = |nodes: &[TreeNode]| -> Vec<(String, String)> {
         nodes

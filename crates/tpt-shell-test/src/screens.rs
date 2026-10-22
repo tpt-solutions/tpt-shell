@@ -22,6 +22,8 @@ use crate::png;
 use crate::visual::{self, Comparison, Report};
 
 /// One CI job and the directory holding its screenshots.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Job {
     pub name: String,
@@ -29,6 +31,8 @@ pub struct Job {
 }
 
 /// What happened to one screenshot name in one job.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
     /// The job's screenshot was compared with the baseline's.
@@ -40,6 +44,8 @@ pub enum Outcome {
 }
 
 /// One row of the summary: a screenshot name, a job, and the result against the baseline.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub name: String,
@@ -49,6 +55,8 @@ pub struct Entry {
 
 impl Entry {
     /// Whether this row counts as a failure.
+    ///
+    /// Support: Full.
     pub fn failed(&self) -> bool {
         match &self.outcome {
             Outcome::Compared(report) => !report.passed,
@@ -58,6 +66,8 @@ impl Entry {
 }
 
 /// The result of comparing several jobs.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Summary {
     pub baseline: String,
@@ -66,12 +76,16 @@ pub struct Summary {
 
 impl Summary {
     /// The number of rows that failed. A CI job exits non-zero when this is above zero.
+    ///
+    /// Support: Full.
     pub fn failed(&self) -> usize {
         self.entries.iter().filter(|e| e.failed()).count()
     }
 }
 
 /// Compares every screenshot in every job with the baseline job, which is `jobs[baseline]`.
+///
+/// Support: Full.
 pub fn compare_jobs(jobs: &[Job], baseline: usize, cfg: &Comparison) -> Result<Summary, String> {
     let base = jobs
         .get(baseline)
@@ -158,6 +172,8 @@ fn is_plain_name(name: &str) -> bool {
 }
 
 /// Renders the summary as one HTML page. All text is escaped, and the page loads nothing.
+///
+/// Support: Partial. The page lists results only; it has no side-by-side or diff images yet.
 pub fn render_html(summary: &Summary) -> String {
     let mut rows = String::new();
     for e in &summary.entries {

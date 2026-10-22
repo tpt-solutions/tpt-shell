@@ -19,14 +19,20 @@ use crate::{Confirm, Session};
 
 /// The token is too short, or the port cannot be bound on loopback. Fix: give a token of at
 /// least 32 characters, and a free port.
+///
+/// Support: Full.
 pub const CODE_HTTP: &str = "TS0111";
 /// Minimum token length, in characters.
+///
+/// Support: Full.
 pub const TOKEN_MIN_LEN: usize = 32;
 
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_BODY_BYTES: usize = 64 * 1024;
 
 /// Binds `127.0.0.1:port`. Port 0 picks a free port; read it back with `local_addr`.
+///
+/// Support: Full.
 pub fn bind_loopback(port: u16, token: &str) -> Result<TcpListener, String> {
     check_token(token)?;
     TcpListener::bind((Ipv4Addr::LOCALHOST, port))
@@ -57,6 +63,8 @@ fn same_secret(a: &str, b: &str) -> bool {
 
 /// Serves requests until `max_requests` have been answered (`None` means forever). Each
 /// connection carries one request and is closed after its response.
+///
+/// Support: Full.
 pub fn serve_http(
     session: &mut Session,
     listener: &TcpListener,
@@ -204,6 +212,8 @@ fn respond(
 }
 
 /// Confirms through a [`Confirm`] dialog. A convenience for callers that hold one.
+///
+/// Support: Full.
 pub fn with_dialog(dialog: &mut dyn Confirm) -> impl FnMut(&str, &Value) -> bool + '_ {
     move |command, args| dialog.confirm(command, args)
 }

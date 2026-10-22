@@ -25,17 +25,27 @@ use serde_json::{json, Value};
 use crate::{read, Mode, Recorder};
 
 /// The most text kept from one log, in bytes. A longer log keeps its last part.
+///
+/// Support: Full.
 pub const MAX_LOG_BYTES: usize = 1024 * 1024;
 
-/// Replaces secrets. Support: Full.
+/// Replaces secrets.
+///
+/// Support: Full.
 pub trait Redactor {
-    /// Whether the value under this JSON object key must be removed. Support: Full.
+    /// Whether the value under this JSON object key must be removed.
+    ///
+    /// Support: Full.
     fn secret_key(&self, key: &str) -> bool;
-    /// Returns the text with secrets removed. Support: Full.
+    /// Returns the text with secrets removed.
+    ///
+    /// Support: Full.
     fn redact_text(&self, text: &str) -> String;
 }
 
-/// Key-based redaction plus a list of literal strings to hide. Support: Full.
+/// Key-based redaction plus a list of literal strings to hide.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DefaultRedactor {
     /// Substrings of key names, lowercase. A key that contains one of these is a secret.
@@ -85,7 +95,9 @@ impl Redactor for DefaultRedactor {
 }
 
 /// Redacts a JSON value in place: secret keys lose their value, and strings are passed
-/// through the text redactor. Returns how many values were changed. Support: Full.
+/// through the text redactor. Returns how many values were changed.
+///
+/// Support: Full.
 pub fn redact_value(value: &mut Value, redactor: &dyn Redactor) -> usize {
     match value {
         Value::Object(map) => {
@@ -117,7 +129,9 @@ pub fn redact_value(value: &mut Value, redactor: &dyn Redactor) -> usize {
 }
 
 /// Redacts a recording: its events are rewritten with redacted data, and its assets are
-/// dropped. Support: Full.
+/// dropped.
+///
+/// Support: Full.
 pub fn redact_replay(text: &str, redactor: &dyn Redactor) -> Result<String, String> {
     let replay = read(text, Mode::Lenient).map_err(|e| e.to_string())?;
     let mut recorder = Recorder::new(crate::Header {
@@ -133,6 +147,8 @@ pub fn redact_replay(text: &str, redactor: &dyn Redactor) -> Result<String, Stri
 }
 
 /// What goes into a bundle.
+///
+/// Support: Full.
 #[derive(Clone, Debug, Default)]
 pub struct Inputs<'a> {
     /// The recording, if one was made. It is read leniently, so a newer or damaged file still
@@ -146,7 +162,9 @@ pub struct Inputs<'a> {
     pub audit_tail: Vec<String>,
 }
 
-/// Builds the bundle as JSON text. Support: Full.
+/// Builds the bundle as JSON text.
+///
+/// Support: Full.
 pub fn build(inputs: &Inputs, redactor: &dyn Redactor) -> Result<String, String> {
     let mut redactions = 0usize;
     let replay_text = match inputs.replay {

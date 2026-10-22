@@ -15,14 +15,25 @@
 //! Support tags are given on each public item. The platform parts (the native tree dumps and
 //! the screenshot capture) are routed to the platform crates.
 
+/// Support: Partial. The browser side that collects focus stops, Tab traces and animations is
+/// routed to the platform agents. The rules are heuristics where marked.
 pub mod a11y;
+/// Support: Full.
 pub mod artifacts;
+/// Support: Full. Built only with the test-driver feature, which is off in normal builds.
 #[cfg(feature = "test-driver")]
 pub mod channel;
+/// Support: Full. Built only with the test-driver feature, which is off in normal builds.
 #[cfg(feature = "test-driver")]
 pub mod driver;
 mod inflate;
+/// Support: Partial. The default native tree dump returns Unsupported. The Windows, macOS and Linux
+/// overrides are routed to the platform agents.
 pub mod native;
+/// Support: Partial. Adam7 interlaced files are refused, and tRNS colour keys on grey and RGB
+/// images are ignored.
 pub mod png;
+/// Support: Partial. The HTML report lists results and has no side-by-side or diff images yet.
 pub mod screens;
+/// Support: Full.
 pub mod visual;

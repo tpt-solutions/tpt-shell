@@ -24,6 +24,8 @@ use serde_json::Value;
 use crate::{Divergence, Event};
 
 /// The state of the run at the cursor.
+///
+/// Support: Full.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {
     /// IPC request ids that were sent and have no response yet, in order.
@@ -40,7 +42,9 @@ pub struct State {
     pub rng_draws: usize,
 }
 
-/// A recording's events with a cursor. Support: Full.
+/// A recording's events with a cursor.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Timeline {
     events: Vec<Event>,
@@ -49,7 +53,9 @@ pub struct Timeline {
 }
 
 impl Timeline {
-    /// A timeline at the start of the events. Support: Full.
+    /// A timeline at the start of the events.
+    ///
+    /// Support: Full.
     pub fn new(events: Vec<Event>) -> Self {
         Timeline {
             events,
@@ -58,27 +64,37 @@ impl Timeline {
         }
     }
 
-    /// The number of events. Support: Full.
+    /// The number of events.
+    ///
+    /// Support: Partial. No test calls it.
     pub fn len(&self) -> usize {
         self.events.len()
     }
 
-    /// Whether there are no events. Support: Full.
+    /// Whether there are no events.
+    ///
+    /// Support: Partial. No test calls it.
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()
     }
 
-    /// The cursor: how many events are applied. Support: Full.
+    /// The cursor: how many events are applied.
+    ///
+    /// Support: Full.
     pub fn position(&self) -> usize {
         self.cursor
     }
 
-    /// The event the cursor is on, the one that would be applied next. Support: Full.
+    /// The event the cursor is on, the one that would be applied next.
+    ///
+    /// Support: Full.
     pub fn next_event(&self) -> Option<&Event> {
         self.events.get(self.cursor)
     }
 
-    /// Applies one more event. Returns false at the end. Support: Full.
+    /// Applies one more event. Returns false at the end.
+    ///
+    /// Support: Full.
     pub fn step_forward(&mut self) -> bool {
         if self.cursor < self.events.len() {
             self.cursor += 1;
@@ -88,7 +104,9 @@ impl Timeline {
         }
     }
 
-    /// Undoes one event. Returns false at the start. Support: Full.
+    /// Undoes one event. Returns false at the start.
+    ///
+    /// Support: Full.
     pub fn step_back(&mut self) -> bool {
         if self.cursor > 0 {
             self.cursor -= 1;
@@ -98,7 +116,9 @@ impl Timeline {
         }
     }
 
-    /// Moves the cursor to `position`, which may be at most `len()`. Support: Full.
+    /// Moves the cursor to `position`, which may be at most `len()`.
+    ///
+    /// Support: Full.
     pub fn seek(&mut self, position: usize) -> Result<(), String> {
         if position > self.events.len() {
             return Err(format!(
@@ -111,20 +131,26 @@ impl Timeline {
     }
 
     /// Moves the cursor to the event where a replay first diverged, so the state there can be
-    /// inspected. Returns the position. Support: Full.
+    /// inspected. Returns the position.
+    ///
+    /// Support: Full.
     pub fn jump_to_divergence(&mut self, divergence: &Divergence) -> usize {
         self.cursor = divergence.index.min(self.events.len());
         self.cursor
     }
 
-    /// Attaches a DOM snapshot taken just before the event at `index`. Support: Full.
+    /// Attaches a DOM snapshot taken just before the event at `index`.
+    ///
+    /// Support: Full.
     pub fn attach_dom(&mut self, index: usize, snapshot: Value) {
         self.dom.retain(|(i, _)| *i != index);
         self.dom.push((index, snapshot));
         self.dom.sort_by_key(|(i, _)| *i);
     }
 
-    /// The latest DOM snapshot taken at or before the cursor, if any. Support: Full.
+    /// The latest DOM snapshot taken at or before the cursor, if any.
+    ///
+    /// Support: Full.
     pub fn dom_at_cursor(&self) -> Option<&Value> {
         self.dom
             .iter()
@@ -133,7 +159,9 @@ impl Timeline {
             .map(|(_, v)| v)
     }
 
-    /// The state of the run after the events before the cursor. Support: Full.
+    /// The state of the run after the events before the cursor.
+    ///
+    /// Support: Full.
     pub fn state(&self) -> State {
         let mut state = State::default();
         for event in &self.events[..self.cursor] {

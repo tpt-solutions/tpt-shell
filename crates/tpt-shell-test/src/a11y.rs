@@ -13,9 +13,13 @@
 //! that collects focus stops, Tab traces and animations is routed to the platform agents.
 
 /// An sRGB colour with 8 bits per channel.
+///
+/// Support: Full.
 pub type Rgb = [u8; 3];
 
 /// Relative luminance of a colour, from 0 (black) to 1 (white), as WCAG 2.x defines it.
+///
+/// Support: Full.
 pub fn relative_luminance(c: Rgb) -> f64 {
     let lin = |v: u8| {
         let s = f64::from(v) / 255.0;
@@ -29,6 +33,8 @@ pub fn relative_luminance(c: Rgb) -> f64 {
 }
 
 /// Contrast ratio between two colours, from 1 (no contrast) to 21 (black on white).
+///
+/// Support: Full.
 pub fn contrast_ratio(a: Rgb, b: Rgb) -> f64 {
     let (la, lb) = (relative_luminance(a), relative_luminance(b));
     let (lighter, darker) = if la >= lb { (la, lb) } else { (lb, la) };
@@ -36,11 +42,15 @@ pub fn contrast_ratio(a: Rgb, b: Rgb) -> f64 {
 }
 
 /// Text is "large" at 24 CSS px, or 18.66 px when bold (WCAG 1.4.3).
+///
+/// Support: Full.
 pub fn is_large_text(size_px: f64, bold: bool) -> bool {
     size_px >= 24.0 || (bold && size_px >= 18.66)
 }
 
 /// The minimum contrast for text under WCAG 2.2 AA: 4.5 for normal text, 3 for large text.
+///
+/// Support: Full.
 pub fn min_text_contrast(large: bool) -> f64 {
     if large {
         3.0
@@ -50,9 +60,13 @@ pub fn min_text_contrast(large: bool) -> f64 {
 }
 
 /// Smallest side of a pointer target under WCAG 2.2 AA (2.5.8), in CSS px.
+///
+/// Support: Full.
 pub const MIN_TARGET_PX: f64 = 24.0;
 
 /// One problem a rule found.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Violation {
     /// The rule that failed, such as `contrast` or `target-size`.
@@ -61,6 +75,8 @@ pub struct Violation {
 }
 
 /// Checks text colour against its background. `large` is from [`is_large_text`].
+///
+/// Support: Full.
 pub fn check_text_contrast(fg: Rgb, bg: Rgb, large: bool) -> Option<Violation> {
     let ratio = contrast_ratio(fg, bg);
     let needed = min_text_contrast(large);
@@ -72,6 +88,9 @@ pub fn check_text_contrast(fg: Rgb, bg: Rgb, large: bool) -> Option<Violation> {
 
 /// Checks a pointer target. The spacing exception in 2.5.8 is not modelled, so a small target
 /// that is spaced well from its neighbours is still reported here.
+///
+/// Support: Partial. The spacing exception in WCAG 2.5.8 is not modelled, so a small target that is
+/// spaced well from its neighbours is still reported.
 pub fn check_target_size(width_px: f64, height_px: f64) -> Option<Violation> {
     (width_px < MIN_TARGET_PX || height_px < MIN_TARGET_PX).then(|| Violation {
         rule: "target-size",
@@ -82,6 +101,8 @@ pub fn check_target_size(width_px: f64, height_px: f64) -> Option<Violation> {
 }
 
 /// A form control as the accessibility tree reports it.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Control {
     /// The role, such as `textbox` or `checkbox`.
@@ -92,6 +113,8 @@ pub struct Control {
 
 /// Returns a violation for each input control that has no accessible name. Buttons and links
 /// are not form inputs here; they are covered by [`check_names`].
+///
+/// Support: Full.
 pub fn check_form_labels(controls: &[Control]) -> Vec<Violation> {
     const INPUT_ROLES: [&str; 5] = ["textbox", "checkbox", "radio", "combobox", "searchbox"];
     controls
@@ -106,6 +129,8 @@ pub fn check_form_labels(controls: &[Control]) -> Vec<Violation> {
 }
 
 /// Roles of controls that must have an accessible name (WCAG 4.1.2).
+///
+/// Support: Full.
 pub const INTERACTIVE_ROLES: [&str; 13] = [
     "button",
     "link",
@@ -123,6 +148,8 @@ pub const INTERACTIVE_ROLES: [&str; 13] = [
 ];
 
 /// A node of the live accessibility tree, as the page or the native tree reports it.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TreeNode {
     pub role: String,
@@ -132,6 +159,8 @@ pub struct TreeNode {
 /// Returns a violation for each interactive node without a name (WCAG 4.1.2, from the live
 /// tree rather than the DOM). Form inputs are covered by [`check_form_labels`]; this covers
 /// buttons, links and the rest.
+///
+/// Support: Full.
 pub fn check_names(nodes: &[TreeNode]) -> Vec<Violation> {
     nodes
         .iter()
@@ -145,6 +174,8 @@ pub fn check_names(nodes: &[TreeNode]) -> Vec<Violation> {
 }
 
 /// A focusable element in tab order, with its place on screen.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FocusStop {
     pub id: String,
@@ -156,6 +187,9 @@ pub struct FocusStop {
 
 /// How far a stop may sit above the previous one before it counts as out of reading order.
 /// Heuristic: it allows for a line of text in a row that is slightly lower or higher.
+///
+/// Support: Partial. A heuristic tolerance for the reading-order check. It is not tuned for every
+/// layout.
 pub const ROW_TOLERANCE_PX: f64 = 8.0;
 
 /// Checks focus order (WCAG 2.4.3). `stops` is the order Tab visits them.
@@ -163,6 +197,9 @@ pub const ROW_TOLERANCE_PX: f64 = 8.0;
 /// Reports a positive `tabindex` (it overrides the document order). It also reports a stop
 /// that sits clearly above the one before it, which usually means the tab order does not
 /// follow the visual order. That check is a heuristic: a deliberate jump can be correct.
+///
+/// Support: Partial. A heuristic: a deliberate jump in tab order can be correct, and the check
+/// still reports it.
 pub fn check_focus_order(stops: &[FocusStop]) -> Vec<Violation> {
     let mut found = Vec::new();
     for stop in stops.iter().filter(|s| s.tab_index > 0) {
@@ -194,6 +231,8 @@ pub fn check_focus_order(stops: &[FocusStop]) -> Vec<Violation> {
 /// focus should reach.
 ///
 /// A trap is a trace that returns to an element it already visited before it reaches any exit.
+///
+/// Support: Full.
 pub fn check_keyboard_trap(trace: &[String], exits: &[String]) -> Option<Violation> {
     let mut seen: Vec<&str> = Vec::new();
     for id in trace {
@@ -212,6 +251,8 @@ pub fn check_keyboard_trap(trace: &[String], exits: &[String]) -> Option<Violati
 }
 
 /// A CSS animation or transition on the page, with its computed duration.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Animation {
     pub name: String,
@@ -221,10 +262,16 @@ pub struct Animation {
 }
 
 /// Durations at or below this are treated as instant (under 5 ms is below one frame).
+///
+/// Support: Partial. A heuristic threshold: it treats the declared duration as the animation's
+/// length.
 pub const INSTANT_MS: f64 = 5.0;
 
 /// Checks reduced-motion respect (WCAG 2.3.3, as a heuristic). When the user prefers reduced
 /// motion, every non-essential animation must be effectively instant.
+///
+/// Support: Partial. A heuristic that checks the declared durations of animations, not what the
+/// page renders.
 pub fn check_reduced_motion(prefers_reduced: bool, animations: &[Animation]) -> Vec<Violation> {
     if !prefers_reduced {
         return Vec::new();
@@ -244,6 +291,8 @@ pub fn check_reduced_motion(prefers_reduced: bool, animations: &[Animation]) -> 
 
 /// Every rule name this crate can report. The seeded-violation fixture lists its expected
 /// rules from this set.
+///
+/// Support: Full.
 pub const RULES: [&str; 7] = [
     "contrast",
     "target-size",

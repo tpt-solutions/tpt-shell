@@ -126,6 +126,8 @@ impl Huffman {
 }
 
 /// Inflates a zlib stream. Fails if the output would exceed `limit` bytes.
+///
+/// Support: Full.
 pub fn zlib_decompress(data: &[u8], limit: usize) -> Result<Vec<u8>, String> {
     if data.len() < 6 {
         return Err("zlib stream is too short".into());
@@ -151,6 +153,8 @@ pub fn zlib_decompress(data: &[u8], limit: usize) -> Result<Vec<u8>, String> {
 }
 
 /// Adler-32 checksum (RFC 1950 8.2).
+///
+/// Support: Full.
 pub fn adler32(data: &[u8]) -> u32 {
     const MOD: u32 = 65521;
     let (mut a, mut b) = (1u32, 0u32);
@@ -162,6 +166,8 @@ pub fn adler32(data: &[u8]) -> u32 {
 }
 
 /// Inflates raw deflate data. Fails if the output would exceed `limit` bytes.
+///
+/// Support: Full.
 pub fn inflate(data: &[u8], limit: usize) -> Result<Vec<u8>, String> {
     let mut bits = Bits::new(data);
     let mut out: Vec<u8> = Vec::new();

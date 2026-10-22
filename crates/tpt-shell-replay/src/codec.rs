@@ -7,6 +7,8 @@
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /// Encodes bytes as base64 text.
+///
+/// Support: Full.
 pub fn encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
@@ -34,6 +36,8 @@ pub fn encode(bytes: &[u8]) -> String {
 
 /// Decodes base64 text. Refuses bad characters, bad padding and a length that is not a
 /// multiple of four. Decoding stops with an error once the output would exceed `limit`.
+///
+/// Support: Full.
 pub fn decode(text: &str, limit: usize) -> Result<Vec<u8>, String> {
     let bytes = text.as_bytes();
     if !bytes.len().is_multiple_of(4) {
