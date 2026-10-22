@@ -12,10 +12,12 @@ use std::process::ExitCode;
 use tpt_shell_audit::AuditError;
 
 mod add;
+mod audit_explain;
 mod dev;
 mod kiosk;
 mod licences;
 mod packaging;
+mod permissions;
 mod replay_cmd;
 // Windows uses its own sign-in entry, so the macOS and Linux writers are unused there.
 #[cfg_attr(windows, allow(dead_code))]
@@ -32,6 +34,8 @@ const USAGE: &str = "usage:
   tpt-shell contract diff <old-contract.json> <new-contract.json>
   tpt-shell contract check <new-contract.json> --baseline <old-contract.json>
   tpt-shell contract gen <contract.json> <out-directory>   write the TypeScript client (commands.ts)
+  tpt-shell permissions suggest <contract.json>   the capability grants the commands need
+  tpt-shell audit explain <audit-log>             plain-language summary of a verified audit log
   tpt-shell new vanilla <directory>
   tpt-shell new typescript <directory>
   tpt-shell new rust <directory> [--tpt-shell <path to crates/tpt-shell>]
@@ -146,6 +150,8 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["audit", "export", path, "--format", "csv"] => audit_export_csv(Path::new(path)),
         ["audit", "export", path, "--format", "jsonl"] => audit_export_jsonl(Path::new(path)),
         ["audit", "view", path] => audit_view(Path::new(path)),
+        ["audit", "explain", path] => audit_explain_file(Path::new(path)),
+        ["permissions", "suggest", json] => permissions::suggest(Path::new(json)),
         ["replay", rest @ ..] => replay_cmd::replay(rest),
         ["report", rest @ ..] => replay_cmd::report(rest),
         ["visual", "compare", rest @ ..] => visual_cmd::compare(rest),
@@ -417,6 +423,18 @@ fn audit_view(path: &Path) -> Result<ExitCode, String> {
             field("command"),
             field("outcome")
         );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Verifies the audit log, then prints its plain-language summary.
+fn audit_explain_file(path: &Path) -> Result<ExitCode, String> {
+    if let Err(error) = tpt_shell_audit::verify_file(path) {
+        return audit_failure(error);
+    }
+    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    for line in audit_explain::explain(&text)? {
+        println!("{line}");
     }
     Ok(ExitCode::SUCCESS)
 }

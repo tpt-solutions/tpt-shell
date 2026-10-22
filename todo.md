@@ -676,9 +676,9 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [ ] Publish the VS Code extension
 
 ### Ideas to evaluate
-- [ ] `tpt-shell permissions suggest`: propose the smallest capability grants for an app from its commands and pages
+- [x] `tpt-shell permissions suggest`: propose the smallest capability grants for an app from its commands and pages (commands only, from the contract file. Pages are not analysed, and the output says so)
 - [ ] Capability dry-run in `dev`: log would-be denials instead of failing, with a copy-paste manifest fix
-- [ ] `tpt-shell audit explain`: plain-language summary of an audit log for non-technical reviewers
+- [x] `tpt-shell audit explain`: plain-language summary of an audit log for non-technical reviewers (verifies the log first; the summary is unit-tested on synthetic records, not on a log written by an app)
 - [ ] `tpt-shell kiosk init`: signed kiosk config plus service install in one command
 - [ ] `tpt-shell report` output re-openable with `replay`
 
