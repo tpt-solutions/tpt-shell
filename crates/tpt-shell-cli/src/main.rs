@@ -31,6 +31,7 @@ const USAGE: &str = "usage:
   tpt-shell manifest check <tpt-shell.toml>
   tpt-shell contract diff <old-contract.json> <new-contract.json>
   tpt-shell contract check <new-contract.json> --baseline <old-contract.json>
+  tpt-shell contract gen <contract.json> <out-directory>   write the TypeScript client (commands.ts)
   tpt-shell new vanilla <directory>
   tpt-shell new typescript <directory>
   tpt-shell new rust <directory> [--tpt-shell <path to crates/tpt-shell>]
@@ -102,6 +103,7 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
     match args {
         ["explain", code] => Ok(explain(code)),
         ["manifest", "check", path] => manifest_check(Path::new(path)),
+        ["contract", "gen", json, out] => contract_gen(Path::new(json), Path::new(out)),
         ["contract", "diff", old, new] => contract_compare(Path::new(old), Path::new(new), false),
         ["contract", "check", new, "--baseline", old] => {
             contract_compare(Path::new(old), Path::new(new), true)
@@ -155,6 +157,24 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["uninstall-service", name] => uninstall_service(name),
         _ => Err(USAGE.to_string()),
     }
+}
+
+/// Writes the TypeScript client for the contract in `json` into `out`: `commands.ts`, always,
+/// and `tpt-shell.d.ts` when the folder does not have one. The JSON comes from an app built on
+/// tpt-shell, by running it with `--tpt-write-contract <file>`.
+fn contract_gen(json: &Path, out: &Path) -> Result<ExitCode, String> {
+    let text =
+        fs::read_to_string(json).map_err(|e| format!("cannot read {}: {e}", json.display()))?;
+    let contract = tpt_shell_ipc::contract_load::from_json(&text)?;
+    fs::create_dir_all(out).map_err(|e| format!("cannot create {}: {e}", out.display()))?;
+    let client = out.join("commands.ts");
+    write(&client, &tpt_shell_ipc::typescript::generate(&contract))?;
+    let decl = out.join("tpt-shell.d.ts");
+    if !decl.exists() {
+        write(&decl, TS_RUNTIME_DECL)?;
+    }
+    println!("wrote {}", client.display());
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Lists how `new` differs from `old`. With `check`, lists only breaking changes and exits 1

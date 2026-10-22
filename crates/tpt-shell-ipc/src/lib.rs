@@ -22,6 +22,8 @@ pub mod blob;
 pub mod contract;
 /// Support: Full.
 pub mod contract_diff;
+/// Support: Partial. Reads the JSON forms `json_schema` writes; other JSON Schema is refused.
+pub mod contract_load;
 /// Support: Full.
 pub mod executor;
 /// Support: Partial. Cancellation is cooperative: a job that never checks is_cancelled runs to the

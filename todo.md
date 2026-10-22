@@ -665,7 +665,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [ ] `tpt-shell dev`: reload the page in the window on change (note: the premise was out of date. Served pages already reload in a browser tab on change. The shell window loads `app://` assets, not the dev server, so it does not reload; that needs the window to load the dev server URL in dev mode)
 - [x] `tpt-shell dev`: a mock `window.tpt` so a page works in a plain browser tab (`js/runtime/tpt-shell-mock.js`, served and injected by `dev`; checked in Node and against the live server)
 - [ ] `tpt-shell doctor`: check the loader DLL, the project manifest and the Linux GTK/WebKit libraries; print a fix hint per failure from `tpt-shell-errors`; optional `--fix` (done: loader DLL location (warning), project manifest with its registry hint, Linux libraries. Not done: `--fix`; the WebView2 runtime and licence failures print a hint inline, not from the registry)
-- [ ] `tpt-shell contract gen`: write the contract and the TypeScript client from an app entry point
+- [x] `tpt-shell contract gen`: write the contract and the TypeScript client from an app entry point (two steps: the app runs with `--tpt-write-contract <file>`, which already existed, then `tpt-shell contract gen <file> <dir>` writes `commands.ts`. Checked end to end with a scratch app holding one command)
 - [ ] Time the three-command quickstart on a clean machine and record the result
 
 ### Distribution
