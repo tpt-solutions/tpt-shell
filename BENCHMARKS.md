@@ -95,13 +95,12 @@ The probe is `cold_start_probe` in `conformance/tests/conformance/windows.rs`, r
 | Page parsed (`DOMContentLoaded`), from the start | 2,951 ms | 743 to 3,118 ms |
 
 - The budget is first paint within 500 ms. Neither step is first paint, and the page is parsed well after the window exists, so the budget is not met on either measure.
-- About a third of the time is the window and controller. The rest is WebView2 loading the document after the handover (`load_html`), which the probe does not split further.
-- **Probe limits.** Animation frames were not used: a window that is not visible does not run them, so the probe could not detect a painted frame. The probe loads the page with `load_html`. A first attempt that navigated to the app origin, with the same inline script, never ran the script in 20 seconds. That is not explained. It may be a real defect in the navigate path, and it is worth checking before the probe is trusted for navigation.
+- About a third of the time is the window and controller. The rest is WebView2 loading the document after the handover, which the probe does not split further.
+- **Probe limits.** Animation frames were not used: a window that is not visible does not run them, so the probe could not detect a painted frame. The probe now navigates to the app origin, as the app does, and loads an external script. An earlier version used an inline script, which never ran. That is the app's content security policy at work: it blocks inline scripts on the app origin, as the `csp` check confirms. It was not a defect in navigation. Timings are the same on the navigate path as before: a median of about 3 s to `DOMContentLoaded` in the earlier runs.
 
 ## Not measured yet
 
 - First paint of the page, as a painted frame. The probe above stops at `DOMContentLoaded`, and a visible-window check is needed to time paint.
-- The cause of the navigate path's script not running (see the probe's limits above).
 - The spec's reading of the shell memory budget, which needs a decision (see above).
 - macOS and Linux builds.
 

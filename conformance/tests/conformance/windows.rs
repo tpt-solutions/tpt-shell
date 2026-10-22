@@ -565,14 +565,14 @@ fn dpi(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
     ))
 }
 
-/// The page for the cold-start probe. It sets the title when the document is parsed (DOMContentLoaded).
-/// Animation frames are not used: WebView2 does not run them in a window that is not visible.
-const FRAME_HTML: &str = "<!doctype html><title>start</title><script>document.addEventListener('DOMContentLoaded', function () { document.title = 'parsed'; });</script>";
+/// The probe script, served from the app origin. Inline scripts are blocked there by the app's
+/// content security policy (the csp check), so the probe loads an external script.
+const PROBE_JS: &str = include_str!("../../pages/probe.js");
 
 /// Cold start, timed on the host. Not a check in the report, so it is ignored by default. Run with
 /// `cargo test --manifest-path conformance/Cargo.toml --release --test conformance -- --ignored
 /// --nocapture cold_start`. Prints three times: the window returned from `create` (which waits for
-/// the WebView2 controller), the page handed over, and the page being parsed.
+/// the WebView2 controller), the navigation started, and the page being parsed.
 #[test]
 #[ignore = "a measurement, run on request"]
 fn cold_start_probe() {
@@ -585,14 +585,19 @@ fn cold_start_probe() {
     let loader = Path::new(&loader);
     let started = Instant::now();
     let mut b = backend(loader, &dir).expect("backend");
-    let id = window(&mut b, START_ONLY, None).expect("window");
+    let probe_pages: Pages = &[
+        ("index.html", "text/html", START),
+        ("page.js", "text/javascript", PROBE_JS),
+    ];
+    let id = window(&mut b, probe_pages, None).expect("window");
     let created = started.elapsed();
-    b.load_html(id, FRAME_HTML).expect("load");
+    b.navigate(id, &format!("{APP_ORIGIN}/index.html"))
+        .expect("navigate");
     let navigated = started.elapsed();
     let title = wait_title(&b, id, Duration::from_secs(20), |t| t == "parsed");
     let framed = started.elapsed();
     println!(
-        "cold start, title {title:?}: window created {:.0} ms (controller included), page handed to WebView2 {:.0} ms, page parsed {:.0} ms",
+        "cold start, title {title:?}: window created {:.0} ms (controller included), navigation started {:.0} ms, page parsed {:.0} ms",
         created.as_secs_f64() * 1000.0,
         navigated.as_secs_f64() * 1000.0,
         framed.as_secs_f64() * 1000.0
