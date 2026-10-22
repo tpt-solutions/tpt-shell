@@ -68,11 +68,10 @@ cmd_pin() {
 
   rm -rf "$out"
   mkdir -p "$out"
-  command -v expand.exe >/dev/null 2>&1 || command -v expand >/dev/null 2>&1 \
-    || { echo "expand.exe not found (Windows only)" >&2; exit 1; }
-  local expander="expand.exe"
-  command -v expand.exe >/dev/null 2>&1 || expander="expand"
-  "$expander" -F:* "$(cygpath -w "$cab" 2>/dev/null || echo "$cab")" \
+  # Use the System32 copy explicitly: on Git Bash a coreutils `expand` can shadow it and rejects -F.
+  local expander="${SYSTEMROOT:-/c/Windows}/System32/expand.exe"
+  [ -x "$expander" ] || { echo "System32 expand.exe not found (Windows only)" >&2; exit 1; }
+  "$expander" -F:*"$(cygpath -w "$cab" 2>/dev/null || echo "$cab")" \
     "$(cygpath -w "$out" 2>/dev/null || echo "$out")" >/dev/null
 
   # The Fixed Version CAB unpacks to one folder named after the version, for example

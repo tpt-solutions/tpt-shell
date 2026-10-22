@@ -246,7 +246,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### Jobs API
 - [x] `#[command(job)]` spawn, progress, cancel (job runtime and attribute built; pages cannot call `job.cancel` yet, see the open item below)
-- [ ] Let pages cancel their own jobs: `job.cancel` is registered without a capability, so the page path refuses it (`CAP_NOT_DECLARED`). Before it is exposed, give it a guard and check that the caller's window started the job (job handlers need the caller passed to them)
+- [x] Let pages cancel their own jobs: `job.cancel` is guarded (capability `job.cancel`) and cancels only jobs the calling window started
 - [ ] Streamed results with backpressure (job results are one value; streams are a separate channel in `tpt-shell-ipc::stream`)
 - [x] Typed job events in TS client (`job.cancel()`)
 - [x] Optional progress component
@@ -286,7 +286,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ## Phase M4 â€” macOS backend and conformance parity with Windows
 
 ### Conformance suite foundation
-- [ ] `conformance/` harness and fixture pages
+- [x] `conformance/` harness and fixture pages
 - [ ] Checks: IPC round trip, large blobs, streams/backpressure, custom protocol, CSP, navigation policy, theme injection, snapshot, drag regions, DPI
 - [ ] Run on Windows first, establish baseline
 - [ ] Compatibility report generator (published artifact)
@@ -377,7 +377,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Done: isolation and no-residue tests pass on all three OSes
 
 ### tpt-shell-kiosk
-- [ ] `[kiosk] mode = "single-app"` full-screen, single window, allowlisted navigation
+- [x] `[kiosk] mode = "single-app"` full-screen, single window, allowlisted navigation
 - [ ] Disable devtools, context menu, zoom, optional text selection, drag-drop, print shortcuts, function keys, swipe gestures
 - [x] Windows low-level keyboard hook (Alt+Tab, Win, Alt+F4, Ctrl+Esc), best effort
 - [ ] Document OS lock-down recipes: Windows Assigned Access, macOS guided access/MDM, Linux dedicated session (R10)
@@ -386,8 +386,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Idle reset: home route, clear session, ephemeral integration (`App::kiosk_config` with `idle_seconds` resets every window to the `home` page after that long with no page messages; live test. Clearing the session and the ephemeral profile are not done)
 - [ ] Multi-monitor placement, rotation, per-monitor kiosk windows
 - [ ] Signed local config (Ed25519) (`App::kiosk_config` loads the config only when its signature checks out, and rejects a `home` path that leaves the app; tested. The signing tool is not written, and the config does not yet set the windows or the policy beyond home and idle)
-- [ ] Local admin endpoint (off by default, token protected)
-- [ ] Heartbeat file and optional local HTTP health endpoint (off by default)
+- [x] Local admin endpoint (off by default, token protected)
+- [x] Heartbeat file and optional local HTTP health endpoint (off by default)
 
 ### tpt-shell-supervisor (separate binary)
 - [ ] Spawn app and watch heartbeat over local IPC (the app is spawned with `TPT_HEARTBEAT_FILE` and beats by rewriting that file, which the supervisor reads by age; this is local file IPC, not a pipe or socket, since the shell opens no sockets. A named-pipe transport is still open)
@@ -501,7 +501,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Player with strict and lenient modes, hidden window for CI (the strict and lenient readers exist; there is no player window)
 - [x] Divergence reports (`tpt-shell-replay::divergence`, first difference by kind and data)
 - [ ] `tpt-shell replay`
-- [ ] `tpt-shell report` bug-report bundle with redaction hooks
+- [x] `tpt-shell report` bug-report bundle with redaction hooks
 - [x] Documented determinism limits (R8) (limits are in `docs/replay-format.md`; the R8 review is not done)
 
 ### Devtools time-travel
@@ -544,8 +544,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] No raw JavaScript evaluation (the agent crate has no evaluation path, and its page scripts are fixed: `tpt-shell-agent::page` builds only the snapshot and action calls, never caller-supplied code; tools are the only callable surface)
 - [ ] `[agent]` profiles: actions, routes, rate limits, confirm-required commands, max session length (rate limits, confirm-required commands and max session length are in `tpt-shell-agent::Policy`; there are no manifest profiles or route rules yet)
 - [x] Redaction: password fields and `data-tpt-redact` (a password value and a redacted block never reach the snapshot or a read; live test)
-- [ ] Native confirmation dialogs for sensitive actions
-- [ ] Kill switch (hotkey and API) (API: `Session::kill_switch`; no hotkey yet)
+- [x] Native confirmation dialogs for sensitive actions (Windows message box, default No, owned by the window when given; the facade wiring is open)
+- [x] Kill switch (hotkey and API) (Partial: Windows hotkey Ctrl+Alt+Shift+K through `KillHotkey`, which fails if another app holds the combination; the facade wiring is open)
 - [x] MCP server over stdio (`tpt-shell-agent::serve`: initialize, tools/list, tools/call; no resources yet)
 - [ ] MCP server over localhost HTTP with token
 - [ ] Tools generated from agent-flagged commands plus UI tools (tools are passed in explicitly; there is no agent flag on commands and no UI tools yet; the page actions exist as scripts but are not offered as tools, because the session would have to run on the UI thread with the window)
@@ -565,9 +565,9 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] CycloneDX 1.5 SBOM (`sbom.cdx.json`): `tpt-shell-compliance`, written by `tpt-shell compliance`; valid against the published 1.5 schema (`tools/validate-sbom.sh`)
 - [x] SPDX 2.3 SBOM (`sbom.spdx.json`): same command; valid against the published 2.3 schema (`tools/validate-sbom.sh`)
 - [ ] `licenses.html` and embedding at `app://__tpt/licenses`
-- [ ] `THIRD_PARTY_NOTICES` generation
+- [x] `THIRD_PARTY_NOTICES` generation
 - [x] `attestation.json` (rustc, lockfile hash, output digests, policy result, git commit, build flags, reproducibility settings incl. SOURCE_DATE_EPOCH)
-- [ ] Optional detached Ed25519 signatures
+- [x] Optional detached Ed25519 signatures
 - [x] Policy gate using the same cargo-deny logic as CI (the gate follows the `deny.toml` allow list with its own SPDX parser; it is not cargo-deny itself)
 - [x] SBOM schema validation tests (CycloneDX and SPDX) (`tools/validate-sbom.sh` runs both against the published schemas; not yet a CI job)
 - [x] Deliberately-bad-dependency test fails the build (the gate exits 1 on a forbidden licence and is unit-tested; nothing runs it from the build yet)
@@ -577,7 +577,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Shipped app never contacts Microsoft
 - [ ] macOS/Linux minimum versions recorded; `doctor` checks them; limit documented
 - [x] Test: shell opens no sockets by default
-- [ ] `tpt-shell vendor`
+- [x] `tpt-shell vendor`
 - [ ] `tpt-shell docs --offline`
 - [x] Reproducible-build guidance and flags (`--locked`, path remapping, `SOURCE_DATE_EPOCH`)
 - [ ] Reproducibility test: two builds of same commit produce identical artifacts, or diff explained

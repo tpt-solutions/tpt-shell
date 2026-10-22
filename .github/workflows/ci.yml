@@ -335,3 +335,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash tools/check-runtime-size.sh
+
+  vscode-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cd editors/vscode && npm ci && npm test
+
+  packaging-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax-check every shell script
+        run: |
+          status=0
+          while IFS= read -r f; do
+            bash -n "$f" || status=1
+          done < <(find tools packaging -name '*.sh' | sort)
+          exit $status
+      - name: Signing hooks refuse to run without credentials
+        run: bash tools/sign.sh check

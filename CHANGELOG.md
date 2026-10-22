@@ -82,3 +82,18 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 ### Changed
 - Linux single instance uses an advisory lock file and a message drop instead of a UNIX socket. No socket is opened.
 - Test driver and replay crates pin their path dependency versions, so `cargo deny` bans pass.
+- VS Code extension (`editors/vscode`, not published): manifest completion, hover and diagnostics (TS0001 to TS0004), a contract explorer that copies call JSON, run and debug tasks, an audit viewer with a verify banner, and hover help for TS#### codes.
+- Packaging (`packaging/`, `tools/`): Windows portable folder and zip (verified), Inno Setup installer script (not run), macOS and Linux bundle scripts, signing hooks that run only with credentials in the environment, pinned WebView2 runtime commands, vendoring, reproducible-build guidance, procurement pack template, and release attestation. Nothing is signed, submitted or published.
+- CLI: `tpt-shell compliance` writes SBOMs, the attestation, `licenses.html` and THIRD_PARTY_NOTICES, signs outputs with `--key`, and refuses on a licence the policy does not allow (exit 1).
+- CLI: `tpt-shell audit verify` checks external anchors (`--anchors`) and rotated segments (`--rotated`).
+- CLI: `tpt-shell replay` plays a recording against the echo reference target, and `tpt-shell report` writes a bug-report bundle with redaction.
+- CLI: `tpt-shell visual compare` compares screenshot baselines and writes an HTML report.
+- CLI: `tpt-shell doctor` reports optional signing and packaging tools and the OS minimums from `packaging/config.env`. Warnings only.
+- CLI: `tpt-shell vendor` vendors dependencies, and `tpt-shell kiosk sign` signs a kiosk config after checking its signature.
+- CLI: `tpt-shell install-service` writes LaunchAgent and systemd user units on macOS and Linux (files only; the commands are printed, not run).
+- Windows: native Yes/No confirmation for agent actions, a Ctrl+Alt+Shift+K kill-switch hotkey (Partial), and an optional pinned WebView2 runtime folder.
+- Keystore: the Windows keystore holds the audit checkpoint key.
+- Facade: `agent` cargo feature (an MCP server over stdin and stdout for an enabled `[agent]` profile; confirmation is refused until a dialog is wired), `App::contract` and `App::write_contract`, and `--tpt-write-contract <path>`.
+- Facade: `app://__tpt/licenses` serves the licence page when one is embedded at build time, otherwise a short notice.
+- Facade: `admin-endpoint` and `health-endpoint` features (loopback only, off by default). Single-app kiosks refuse more than one window and set fullscreen.
+- IPC: `job.cancel` requires the `job.cancel` capability and cancels only jobs the calling window started.

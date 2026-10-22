@@ -21,7 +21,8 @@
 mode = "fixed"
 # Version as Microsoft names it (four numbers). The folder name in the CAB carries the same number.
 version = "128.0.2739.42"
-# Folder that holds msedgewebview2.exe, relative to the directory this file sits in.
+# Folder that holds msedgewebview2.exe, relative to the directory this file sits in. This is the
+# pin record's key; the app manifest key for the same folder is `fixed_dir` (see above).
 folder = "Microsoft.WebView2.FixedVersionRuntime.128.0.2739.42.x64"
 executable = "msedgewebview2.exe"
 # SHA-256 of the CAB as downloaded. Recorded so a later pin of the same version can be compared.

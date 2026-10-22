@@ -777,10 +777,13 @@ name = "tpt-shell"
 version = "0.0.0"
 dependencies = [
  "serde_json",
+ "tpt-shell-agent",
  "tpt-shell-audit",
  "tpt-shell-capabilities",
+ "tpt-shell-compliance",
  "tpt-shell-core",
  "tpt-shell-devices",
+ "tpt-shell-devtools",
  "tpt-shell-ipc",
  "tpt-shell-kiosk",
  "tpt-shell-macros",
@@ -824,9 +827,12 @@ dependencies = [
  "tpt-shell-compliance",
  "tpt-shell-errors",
  "tpt-shell-ipc",
+ "tpt-shell-kiosk",
  "tpt-shell-manifest",
  "tpt-shell-platform-windows",
  "tpt-shell-replay",
+ "tpt-shell-supervisor",
+ "tpt-shell-test",
 ]
 
 [[package]]
@@ -928,6 +934,7 @@ version = "0.0.0"
 dependencies = [
  "serde_json",
  "tpt-shell-agent",
+ "tpt-shell-audit",
  "tpt-shell-capabilities",
  "tpt-shell-core",
  "tpt-shell-ipc",
