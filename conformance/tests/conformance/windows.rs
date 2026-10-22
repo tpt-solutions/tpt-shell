@@ -248,24 +248,41 @@ fn ipc_round_trip(loader: &Path, dir: &Path) -> Result<(Outcome, String), String
 fn large_blobs(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
     let mut b = backend(loader, dir)?;
     let blob = format!("{}z", "a".repeat(BLOB_BYTES - 1));
-    let handler: MessageHandler =
-        Box::new(move |message: &str| (message == "blob").then(|| blob.clone()));
+    // When the page asked for the blob. The transfer is timed from here, so page start-up
+    // (controller creation and navigation) is not counted.
+    let asked: Rc<RefCell<Option<Instant>>> = Rc::new(RefCell::new(None));
+    let asked_at = asked.clone();
+    let handler: MessageHandler = Box::new(move |message: &str| {
+        (message == "blob").then(|| {
+            *asked_at.borrow_mut() = Some(Instant::now());
+            blob.clone()
+        })
+    });
     let started = Instant::now();
     let id = open_app(&mut b, BLOB_PAGES, Some(handler))?;
     let expected = format!("blob:{BLOB_BYTES}:z");
     let title = wait_title(&b, id, WAIT, |t| t.starts_with("blob:"));
-    let elapsed = started.elapsed().as_secs_f64();
+    let done = Instant::now();
+    let total = done.duration_since(started).as_secs_f64();
     if title != expected {
         return Ok((
             Outcome::Fail(format!("title was {title:?}, expected {expected:?}")),
             String::new(),
         ));
     }
-    let mb_per_s = (BLOB_BYTES as f64 / 1_000_000.0) / elapsed;
+    let Some(asked_at) = *asked.borrow() else {
+        return Ok((
+            Outcome::Fail("the page never asked for the blob".into()),
+            String::new(),
+        ));
+    };
+    let transfer = done.duration_since(asked_at).as_secs_f64();
+    let mb_per_s = (BLOB_BYTES as f64 / 1_000_000.0) / transfer;
     let detail = format!(
-        "{} MiB in {:.0} ms, {mb_per_s:.1} MB/s including page start-up (budget 50 MB/s, spec 13)",
+        "{} MiB host to page in {:.0} ms, {mb_per_s:.1} MB/s (budget 50 MB/s, spec 13); the whole check, page start-up included, took {:.0} ms",
         BLOB_BYTES / (1024 * 1024),
-        elapsed * 1000.0
+        transfer * 1000.0,
+        total * 1000.0
     );
     Ok((Outcome::Pass, detail))
 }

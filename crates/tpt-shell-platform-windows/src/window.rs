@@ -14,11 +14,10 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::StationsAndDesktops::{
     CloseDesktop, OpenInputDesktop, DESKTOP_READOBJECTS,
 };
-use windows_sys::Win32::System::Threading::Sleep;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW,
-    RegisterClassExW, TranslateMessage, CW_USEDEFAULT, MSG, PM_REMOVE, WNDCLASSEXW,
-    WS_OVERLAPPEDWINDOW,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, MsgWaitForMultipleObjects,
+    PeekMessageW, RegisterClassExW, TranslateMessage, CW_USEDEFAULT, MSG, PM_REMOVE, QS_ALLINPUT,
+    WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
 };
 
 use crate::com::wide;
@@ -108,8 +107,12 @@ pub fn pump_until(timeout: Duration, mut done: impl FnMut() -> bool) -> bool {
         if start.elapsed() >= timeout {
             return false;
         }
-        // SAFETY: Sleep has no preconditions.
-        unsafe { Sleep(1) };
+        // Wait for a message, up to 1 ms. A plain Sleep(1) can take a full timer tick (about
+        // 16 ms), which is far longer than any message takes to arrive.
+        // SAFETY: a null handle list with a zero count only waits on the message queue.
+        unsafe {
+            MsgWaitForMultipleObjects(0, null(), 0, 1, QS_ALLINPUT);
+        }
     }
 }
 

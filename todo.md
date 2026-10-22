@@ -697,8 +697,8 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 ### Performance (§13)
 - [x] Hello-world binary ≤ 4 MB stripped on Windows (`examples/hello`: 706,048 bytes release on 2026-10-22; see BENCHMARKS.md)
 - [ ] Cold start to first paint ≤ 500 ms; shell overhead ≤ 50 ms
-- [ ] IPC round trip small payload p95 ≤ 5 ms. **Measured and not met on Windows**: p95 16.7 ms page to host and back (WebView2 release, 2026-10-23, see BENCHMARKS.md). The router's own share is 1.5 µs p95, so the cost is in the page channel, not the router
-- [ ] Blob channel ≥ 50 MB/s sustained. **Measured and not met on Windows**: 1.4 MB/s for a 4 MiB payload, including page start-up (WebView2 release, 2026-10-23). Investigate the transport before tuning anything
+- [x] IPC round trip small payload p95 ≤ 5 ms. Met on Windows: p95 0.12 to 0.81 ms over five runs (WebView2 release, 2026-10-23, see BENCHMARKS.md). The earlier 16.7 ms was the conformance pump's `Sleep(1)`, not the channel. The router's own share is 1.5 µs p95
+- [ ] Blob channel ≥ 50 MB/s sustained. Borderline on Windows: 39 to 86 MB/s over four runs of one 4 MiB message (median about 51), timed from request to report. Sustained throughput over repeated transfers, and the facade's `app://` blob path, are not measured yet
 - [ ] Idle shell memory overhead ≤ 25 MB
 - [ ] Supervisor ≤ 5 MB idle (see the M6 item: private memory 3.2 MB, working set 7.0 MB)
 - [ ] `BENCHMARKS.md` with methodology and results (created with the method and the binary-size result; cold start, IPC, blob, memory and the macOS and Linux numbers are still to add)
