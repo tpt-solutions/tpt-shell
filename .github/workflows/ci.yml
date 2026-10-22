@@ -199,16 +199,22 @@ jobs:
       GSK_RENDERER: cairo
       LIBGL_ALWAYS_SOFTWARE: "1"
       NO_AT_BRIDGE: "1"
+      GTK_A11Y: none
+      RUST_BACKTRACE: full
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install the runtime libraries
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ${{ matrix.packages }} libgl1-mesa-dri fonts-dejavu-core
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ${{ matrix.packages }} libgl1-mesa-dri fonts-dejavu-core gdb dbus gsettings-desktop-schemas dconf-gsettings-backend adwaita-icon-theme shared-mime-info
+      - name: Build the tests
+        run: cargo test -p tpt-shell-platform-linux --no-run
       - name: Which adapter doctor reports
         run: bash tools/headless-linux.sh ${{ matrix.display }} cargo run -q -p tpt-shell-cli -- doctor || true
+      # Each test runs in its own process, so one native abort does not hide the others; a test
+      # killed by a signal is re-run under gdb for a backtrace (tools/linux-adapter-tests.sh).
       - name: Adapter tests (${{ matrix.adapter }}, ${{ matrix.display }})
-        run: bash tools/headless-linux.sh ${{ matrix.display }} cargo test -p tpt-shell-platform-linux -- --nocapture --test-threads=1
+        run: bash tools/headless-linux.sh ${{ matrix.display }} bash tools/linux-adapter-tests.sh
 
   # Merges the three result files into the compatibility report (spec §14, "generates the public
   # compatibility report"). The report is also written to the job summary.

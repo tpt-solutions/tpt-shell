@@ -95,6 +95,11 @@ pub struct Gtk4Backend {
     next: usize,
     pub(crate) windows: HashMap<usize, Box<WindowState>>,
     scheme_registered: bool,
+    /// Windows that were closed. Their state is leaked on purpose: WebKit may still call a signal
+    /// handler or the scheme handler with the state pointer after the widget is destroyed, so
+    /// the memory must stay valid. Handlers and assets are dropped; `destroyed` is set.
+    #[allow(clippy::vec_box)] // the boxed address is what WebKit callbacks hold
+    retired: Vec<Box<WindowState>>,
     transparency_css: bool,
     main_loop: Obj,
 }
@@ -211,6 +216,7 @@ impl Gtk4Backend {
             next: 1,
             windows: HashMap::new(),
             scheme_registered: false,
+            retired: Vec::new(),
             transparency_css: false,
             main_loop,
         })
@@ -327,8 +333,26 @@ impl Gtk4Backend {
     }
 
     /// Drops the entries for windows the user closed directly. Their widgets are gone.
+    /// Keeps a closed window's state alive for good (see the `retired` field).
+    fn retire(&mut self, w: Box<WindowState>) {
+        w.destroyed.set(true);
+        *w.handler.borrow_mut() = None;
+        *w.assets.borrow_mut() = None;
+        self.retired.push(w);
+    }
+
     fn prune(&mut self) {
-        self.windows.retain(|_, w| !w.destroyed.get());
+        let gone: Vec<usize> = self
+            .windows
+            .iter()
+            .filter(|(_, w)| w.destroyed.get())
+            .map(|(id, _)| *id)
+            .collect();
+        for id in gone {
+            if let Some(w) = self.windows.remove(&id) {
+                self.retire(w);
+            }
+        }
     }
 
     pub(crate) fn state(&self, id: WindowId) -> Result<&WindowState> {
@@ -598,6 +622,9 @@ unsafe extern "C" fn on_terminated(view: Obj, reason: c_int, data: *mut c_void) 
     }
     // SAFETY: see the contract above.
     let w = unsafe { &*data.cast::<WindowState>() };
+    if w.destroyed.get() {
+        return;
+    }
     let n = w.crashes.get() + 1;
     w.crashes.set(n);
     if n <= MAX_CRASH_RELOADS {
@@ -616,6 +643,9 @@ unsafe extern "C" fn on_terminated(view: Obj, reason: c_int, data: *mut c_void) 
 unsafe extern "C" fn on_script_message(_manager: Obj, value: Obj, data: *mut c_void) {
     // SAFETY: see the contract above.
     let w = unsafe { &*data.cast::<WindowState>() };
+    if w.destroyed.get() {
+        return;
+    }
     let f = &w.gtk.fns;
     if value.is_null() {
         return;
@@ -820,7 +850,9 @@ impl WindowBackend for Gtk4Backend {
         // SAFETY: the window is live. Destroying it runs `on_destroy`, which only sets a flag,
         // so the state is still valid when it is removed below.
         unsafe { (self.gtk.fns.gtk_window_destroy)(w.window) };
-        self.windows.remove(&id.0);
+        if let Some(w) = self.windows.remove(&id.0) {
+            self.retire(w);
+        }
         Ok(())
     }
 
@@ -986,6 +1018,11 @@ impl Drop for Gtk4Backend {
                 // SAFETY: the window is live until destroyed here; the state is freed after.
                 unsafe { (self.gtk.fns.gtk_window_destroy)(w.window) };
             }
+            // The state stays allocated: WebKit may still call a handler with its pointer.
+            Box::leak(w);
+        }
+        for w in std::mem::take(&mut self.retired) {
+            Box::leak(w);
         }
         // SAFETY: the loop was created by `new` and is released once.
         unsafe { (self.gtk.fns.g_main_loop_unref)(self.main_loop) };
