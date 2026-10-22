@@ -415,6 +415,7 @@ dependencies = [
  "tpt-shell-audit",
  "tpt-shell-ipc",
  "tpt-shell-manifest",
+ "tpt-shell-replay",
 ]
 
 [[package]]
@@ -432,6 +433,14 @@ version = "0.0.0"
 dependencies = [
  "serde",
  "toml",
+ "tpt-shell-core",
+]
+
+[[package]]
+name = "tpt-shell-replay"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
  "tpt-shell-core",
 ]
 
