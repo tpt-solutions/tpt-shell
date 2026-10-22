@@ -45,17 +45,43 @@ trap 'rm -rf "$work"' EXIT
 status=0
 for name in "${names[@]}"; do
   dest="$work/$name"
-  echo "== generate $name"
-  if ! "$cli" new "$name" "$dest"; then
-    echo "template $name did not generate" >&2
-    status=1
-    continue
-  fi
+  # `tpt-shell new` only scaffolds the two starter apps. Every other template is a checked-in
+  # Rust project, so it is copied as it is.
+  case "$name" in
+    vanilla | typescript)
+      echo "== generate $name"
+      if ! "$cli" new "$name" "$dest"; then
+        echo "template $name did not generate" >&2
+        status=1
+        continue
+      fi
+      ;;
+    *)
+      echo "== copy $name"
+      cp -R "$templates_dir/$name" "$dest"
+      # The templates point at the crates with a path relative to templates/<name>. The copy
+      # lives elsewhere, so the path is rewritten to this checkout.
+      # `pwd -W` gives the Windows form of the path under Git Bash; elsewhere it is plain `pwd`.
+      crates="$(cd "$root/crates" && pwd -W 2>/dev/null || pwd)"
+      sed -i "s#path = \"\.\./\.\./crates/#path = \"$crates/#" "$dest/Cargo.toml"
+      ;;
+  esac
   echo "== check $name"
   if ! "$cli" manifest check "$dest/tpt-shell.toml"; then
     echo "template $name has a manifest that does not check" >&2
     status=1
     continue
+  fi
+  # The starter apps are web projects with no Cargo.toml; `tpt-shell build` only builds Rust
+  # projects, so they are checked here and built by their own toolchain.
+  if [ ! -f "$dest/Cargo.toml" ]; then
+    echo "== skip build $name (not a Rust project)"
+    continue
+  fi
+  # `tpt-shell build` passes --locked, and the templates ship without a lock file, so the copy
+  # gets one resolved here first.
+  if [ ! -f "$dest/Cargo.lock" ]; then
+    cargo generate-lockfile --manifest-path "$dest/Cargo.toml" --quiet
   fi
   echo "== build $name"
   if ! "$cli" build "$dest"; then
