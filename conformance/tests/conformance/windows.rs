@@ -585,6 +585,7 @@ fn cold_start_probe() {
     let loader = Path::new(&loader);
     let started = Instant::now();
     let mut b = backend(loader, &dir).expect("backend");
+    let backend_ms = started.elapsed().as_secs_f64() * 1000.0;
     let probe_pages: Pages = &[
         ("index.html", "text/html", START),
         ("page.js", "text/javascript", PROBE_JS),
@@ -597,7 +598,7 @@ fn cold_start_probe() {
     let title = wait_title(&b, id, Duration::from_secs(20), |t| t == "parsed");
     let framed = started.elapsed();
     println!(
-        "cold start, title {title:?}: window created {:.0} ms (controller included), navigation started {:.0} ms, page parsed {:.0} ms",
+        "cold start, title {title:?}: backend {backend_ms:.0} ms, window created {:.0} ms (controller included), navigation started {:.0} ms, page parsed {:.0} ms",
         created.as_secs_f64() * 1000.0,
         navigated.as_secs_f64() * 1000.0,
         framed.as_secs_f64() * 1000.0
