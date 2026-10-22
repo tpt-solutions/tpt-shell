@@ -698,7 +698,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [x] Hello-world binary ≤ 4 MB stripped on Windows (`examples/hello`: 706,048 bytes release on 2026-10-22; see BENCHMARKS.md)
 - [ ] Cold start to first paint ≤ 500 ms; shell overhead ≤ 50 ms
 - [x] IPC round trip small payload p95 ≤ 5 ms. Met on Windows: p95 0.12 to 0.81 ms over five runs (WebView2 release, 2026-10-23, see BENCHMARKS.md). The earlier 16.7 ms was the conformance pump's `Sleep(1)`, not the channel. The router's own share is 1.5 µs p95
-- [ ] Blob channel ≥ 50 MB/s sustained. **Not met on Windows** (WebView2, release, 2026-10-23): the median of eight 4 MiB transfers in a row is 39 to 46 MB/s as a message, and 36 to 37 MB/s when the page reads the app's blob URL (two runs each). Not yet measured: the facade's `put_blob` store, and whether the per-request 4 MiB copy in the asset closure is a large part of the gap
+- [ ] Blob channel ≥ 50 MB/s sustained. **Not met on Windows** (WebView2, release, 2026-10-23): the median of eight 4 MiB transfers in a row is 39 to 46 MB/s as a message, and 36 to 37 MB/s when the page reads the app's blob URL (two runs each). The per-request 4 MiB copy in the asset closure is about 1.5 ms, so it is not the cause. Not yet measured: the facade's `put_blob` store, and how the rest of the time splits between WebView2's request handling and the page
 - [ ] Idle shell memory overhead ≤ 25 MB
 - [ ] Supervisor ≤ 5 MB idle (see the M6 item: private memory 3.2 MB, working set 7.0 MB)
 - [ ] `BENCHMARKS.md` with methodology and results (created with the method and the binary-size result; cold start, IPC, blob, memory and the macOS and Linux numbers are still to add)
