@@ -5,4 +5,6 @@
 //! document start, after the bridge, so `window.tpt.invoke` exists before any page script runs.
 
 /// Source of `js/runtime/tpt-shell.js`.
+///
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub const SHIM_JS: &str = include_str!("../../../js/runtime/tpt-shell.js");

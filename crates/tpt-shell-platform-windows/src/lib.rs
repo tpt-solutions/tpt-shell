@@ -9,6 +9,8 @@
 #[cfg(windows)]
 pub mod accessibility;
 #[cfg(windows)]
+pub mod agent_confirm;
+#[cfg(windows)]
 pub mod backend;
 #[cfg(windows)]
 pub mod clipboard;
@@ -26,6 +28,8 @@ pub mod event_handler;
 pub mod handler;
 #[cfg(windows)]
 pub mod keystore;
+#[cfg(windows)]
+pub mod kill_hotkey;
 #[cfg(windows)]
 pub mod loader;
 #[cfg(windows)]

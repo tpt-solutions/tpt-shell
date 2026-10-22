@@ -16,6 +16,8 @@ use tpt_shell_core::{Error, Result};
 use super::wire::{frame_rest, Kind, Message, Value};
 
 /// How long a call waits for its reply before it fails.
+///
+/// Support: Full.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(25);
 
 /// The bus name and path of the D-Bus daemon itself.
@@ -23,20 +25,31 @@ const BUS_NAME: &str = "org.freedesktop.DBus";
 const BUS_PATH: &str = "/org/freedesktop/DBus";
 
 /// A stream that can carry messages and can time out.
+///
+/// Support: Full.
 pub trait Transport: Read + Write {
     /// Sets how long a read may block. `None` waits forever.
     fn set_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()>;
 }
 
 /// The bus socket. Only exists with the `dbus` feature on a UNIX platform.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 #[cfg(all(feature = "dbus", unix))]
 pub type Stream = std::os::unix::net::UnixStream;
 
 /// Stands in for the socket when D-Bus is not built in. It never opens anything.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 #[cfg(not(all(feature = "dbus", unix)))]
 pub type Stream = Closed;
 
 /// A stream that always fails with `Unsupported`.
+///
+/// Support: Unsupported. The stand-in for the socket when the `dbus` feature is off; every read and
+/// write fails with Unsupported.
 #[derive(Debug)]
 pub struct Closed;
 
@@ -78,6 +91,8 @@ impl Transport for std::os::unix::net::UnixStream {
 }
 
 /// An authenticated connection to a bus.
+///
+/// Support: Full.
 pub struct Connection<S: Transport> {
     stream: S,
     next_serial: u32,
@@ -91,6 +106,8 @@ fn backend(msg: impl Into<String>) -> Error {
 impl<S: Transport> Connection<S> {
     /// Runs the EXTERNAL handshake as `uid` (decimal text, such as `1000`), then says Hello to
     /// get the connection's unique name.
+    ///
+    /// Support: Full.
     pub fn authenticate(mut stream: S, uid: &str) -> Result<Connection<S>> {
         stream
             .set_timeout(Some(CALL_TIMEOUT))
@@ -123,6 +140,8 @@ impl<S: Transport> Connection<S> {
     }
 
     /// The connection's unique name, such as `:1.42`.
+    ///
+    /// Support: Full.
     pub fn unique_name(&self) -> &str {
         &self.unique_name
     }
@@ -133,6 +152,8 @@ impl<S: Transport> Connection<S> {
     }
 
     /// Sends a message, giving it the next serial. Returns that serial.
+    ///
+    /// Support: Full.
     pub fn send(&mut self, msg: &mut Message) -> Result<u32> {
         msg.serial = self.next_serial;
         self.next_serial = self.next_serial.wrapping_add(1).max(1);
@@ -146,6 +167,8 @@ impl<S: Transport> Connection<S> {
 
     /// Sets how long a read may block before it fails (or, for [`Self::poll_message`], returns
     /// no message). `None` waits forever.
+    ///
+    /// Support: Full.
     pub fn set_read_timeout(&mut self, timeout: Option<Duration>) -> Result<()> {
         self.stream
             .set_timeout(timeout)
@@ -153,6 +176,8 @@ impl<S: Transport> Connection<S> {
     }
 
     /// Reads the next message from the bus. A read that times out is an error.
+    ///
+    /// Support: Full.
     pub fn read_message(&mut self) -> Result<Message> {
         match self.read_frame(false)? {
             Some(msg) => Ok(msg),
@@ -163,6 +188,8 @@ impl<S: Transport> Connection<S> {
     /// Reads the next message if one arrives before the read timeout. `None` when the timeout
     /// passes with nothing received. Once the first byte of a message has arrived, the reader
     /// keeps waiting for the rest, so a message is never split.
+    ///
+    /// Support: Full.
     pub fn poll_message(&mut self) -> Result<Option<Message>> {
         self.read_frame(true)
     }
@@ -207,6 +234,8 @@ impl<S: Transport> Connection<S> {
     /// Calls a method and returns its reply body. Signals and unrelated messages that arrive
     /// meanwhile are dropped. An incoming method call is refused, so its caller is not left
     /// waiting.
+    ///
+    /// Support: Full.
     pub fn call(
         &mut self,
         destination: &str,
@@ -289,6 +318,8 @@ fn read_line<S: Read>(stream: &mut S) -> Result<String> {
 
 /// The session bus address the environment names. `DBUS_SESSION_BUS_ADDRESS` wins; otherwise
 /// the standard socket under `XDG_RUNTIME_DIR`.
+///
+/// Support: Full.
 pub fn session_address() -> Option<String> {
     if let Some(addr) = std::env::var("DBUS_SESSION_BUS_ADDRESS")
         .ok()
@@ -304,6 +335,9 @@ pub fn session_address() -> Option<String> {
 
 /// Extracts the socket path from a `unix:path=...` address. Abstract sockets and TCP addresses
 /// are refused: the shell only connects to a file-system socket it can name.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub fn socket_path(address: &str) -> Result<String> {
     let rest = address
         .strip_prefix("unix:")
@@ -320,6 +354,9 @@ pub fn socket_path(address: &str) -> Result<String> {
 }
 
 /// Connects to the session bus. Refused with `Unsupported` unless the `dbus` feature is on.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub fn session() -> Result<Connection<Stream>> {
     #[cfg(all(feature = "dbus", unix))]
     {
@@ -336,6 +373,9 @@ pub fn session() -> Result<Connection<Stream>> {
 
 /// Connects to the bus at `address` (a `unix:path=` address) and authenticates. Refused with
 /// `Unsupported` unless the `dbus` feature is on.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub fn connect_address(address: &str) -> Result<Connection<Stream>> {
     #[cfg(all(feature = "dbus", unix))]
     {
@@ -385,6 +425,7 @@ pub(crate) mod test_support {
     use super::Transport;
     use crate::dbus::wire::Message;
 
+    /// Support: Full.
     pub struct ScriptedBus {
         pub input: VecDeque<u8>,
         pub written: Vec<u8>,
@@ -392,6 +433,8 @@ pub(crate) mod test_support {
 
     impl ScriptedBus {
         /// A bus that answers the handshake, then carries `messages` in order.
+        ///
+        /// Support: Full.
         pub fn new(messages: &[Message]) -> ScriptedBus {
             let mut input: VecDeque<u8> = b"OK 0123456789abcdef\r\n".iter().copied().collect();
             for m in messages {

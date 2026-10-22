@@ -25,9 +25,15 @@ const ITEM_IFACE: &str = "org.freedesktop.Secret.Item";
 const NO_PATH: &str = "/";
 
 /// Longest secret accepted, in bytes.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub const MAX_SECRET: usize = 64 * 1024;
 
 /// A keystore for one app id.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub struct Keystore {
     conn: Connection<Stream>,
     session: String,
@@ -39,6 +45,9 @@ impl Keystore {
     /// Opens a session and finds the default collection.
     ///
     /// `app_id` scopes the secrets: it is stored as the `service` attribute of every item.
+    ///
+    /// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+    /// Unsupported. Not run on macOS/Linux here; compile-checked.
     pub fn open(app_id: &str) -> Result<Keystore> {
         if app_id.is_empty() || app_id.len() > 128 || app_id.contains('\0') {
             return Err(Error::Backend(
@@ -77,6 +86,9 @@ impl Keystore {
     }
 
     /// Stores `secret` under `name`, replacing an earlier value with that name.
+    ///
+    /// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+    /// Unsupported. Not run on macOS/Linux here; compile-checked.
     pub fn store(&mut self, name: &str, secret: &[u8]) -> Result<()> {
         check_name(name)?;
         if secret.len() > MAX_SECRET {
@@ -105,6 +117,9 @@ impl Keystore {
     }
 
     /// Reads the secret stored under `name`. `None` when there is none.
+    ///
+    /// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+    /// Unsupported. Not run on macOS/Linux here; compile-checked.
     pub fn load(&mut self, name: &str) -> Result<Option<Vec<u8>>> {
         check_name(name)?;
         let Some(item) = self.find(name)? else {
@@ -142,6 +157,9 @@ impl Keystore {
     }
 
     /// Deletes the secret stored under `name`. Returns whether one existed.
+    ///
+    /// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+    /// Unsupported. Not run on macOS/Linux here; compile-checked.
     pub fn delete(&mut self, name: &str) -> Result<bool> {
         check_name(name)?;
         let Some(item) = self.find(name)? else {

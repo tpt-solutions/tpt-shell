@@ -23,6 +23,9 @@ const ROOT_PATH: &str = "/org/a11y/atspi/accessible/root";
 const ACCESSIBLE: &str = "org.a11y.atspi.Accessible";
 
 /// The text of a dump and how much of the tree it covers.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dump {
     pub text: String,
@@ -34,6 +37,9 @@ pub struct Dump {
 
 /// Dumps the accessibility tree of the application named `app_name`. With `None`, dumps every
 /// application the registry lists. `max_depth` and `max_nodes` bound the output.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub fn dump(app_name: Option<&str>, max_depth: usize, max_nodes: usize) -> Result<Dump> {
     let mut session_conn = session()?;
     let reply = session_conn.call(A11Y_BUS, A11Y_BUS_PATH, A11Y_BUS, "GetAddress", vec![])?;

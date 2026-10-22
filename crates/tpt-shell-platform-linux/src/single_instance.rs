@@ -18,6 +18,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Result of [`claim`].
+///
+/// Support: Partial. Uses an advisory lock file and a message drop on Linux. Not run on macOS/Linux
+/// here; compile-checked.
 #[derive(Debug)]
 pub enum Claim {
     /// This process is the running instance. Keep the guard alive for the app's lifetime.
@@ -27,6 +30,9 @@ pub enum Claim {
 }
 
 /// Holds the lock. Dropping it lets the next instance become primary.
+///
+/// Support: Partial. Uses an advisory lock file and a message drop on Linux. Not run on macOS/Linux
+/// here; compile-checked.
 #[derive(Debug)]
 pub struct InstanceGuard {
     _lock: File,
@@ -38,6 +44,9 @@ pub struct InstanceGuard {
 /// `dir` must exist or be creatable; use a per-user directory such as `$XDG_RUNTIME_DIR`.
 /// `app_id` must be ASCII letters, digits, `-`, `_` or `.`; anything else is refused, since it
 /// is used in file names.
+///
+/// Support: Partial. Uses an advisory lock file and a message drop on Linux. Not run on macOS/Linux
+/// here; compile-checked.
 pub fn claim(dir: &Path, app_id: &str, args: &[String]) -> io::Result<Claim> {
     validate_app_id(app_id)?;
     fs::create_dir_all(dir)?;
@@ -66,6 +75,9 @@ pub fn claim(dir: &Path, app_id: &str, args: &[String]) -> io::Result<Claim> {
 impl InstanceGuard {
     /// Returns the argument lists forwarded by later instances, oldest first, and deletes them.
     /// A message that cannot be read is skipped and left in place for inspection.
+    ///
+    /// Support: Partial. Uses an advisory lock file and a message drop on Linux. Not run on
+    /// macOS/Linux here; compile-checked.
     pub fn take_forwarded(&self) -> io::Result<Vec<Vec<String>>> {
         let mut paths: Vec<PathBuf> = fs::read_dir(&self.inbox)?
             .filter_map(|entry| entry.ok().map(|e| e.path()))

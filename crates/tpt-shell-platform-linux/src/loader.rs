@@ -11,6 +11,9 @@ use std::fmt;
 use libloading::Library;
 
 /// Why a library could not be used.
+///
+/// Support: Partial. Loads system libraries at run time. Not run on macOS/Linux here; compile-
+/// checked.
 #[derive(Debug)]
 pub enum LoadError {
     /// None of the candidate names could be opened.
@@ -41,6 +44,9 @@ impl fmt::Display for LoadError {
 impl std::error::Error for LoadError {}
 
 /// A loaded library. Symbols borrowed from it must not outlive it.
+///
+/// Support: Partial. Loads system libraries at run time. Not run on macOS/Linux here; compile-
+/// checked.
 pub struct SharedLibrary {
     name: String,
     lib: Library,
@@ -48,6 +54,9 @@ pub struct SharedLibrary {
 
 impl SharedLibrary {
     /// Opens the first of `names` that loads.
+    ///
+    /// Support: Partial. Loads system libraries at run time. Not run on macOS/Linux here; compile-
+    /// checked.
     pub fn open(names: &[&str]) -> Result<Self, LoadError> {
         let mut last_error = String::from("no candidate names were given");
         for name in names {
@@ -70,6 +79,9 @@ impl SharedLibrary {
     }
 
     /// The name that opened successfully.
+    ///
+    /// Support: Partial. Loads system libraries at run time. Not run on macOS/Linux here; compile-
+    /// checked.
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -79,6 +91,9 @@ impl SharedLibrary {
     /// # Safety
     /// The caller guarantees that `T` is the exact type of the exported symbol, including the
     /// calling convention. A wrong type is undefined behaviour when the symbol is called.
+    ///
+    /// Support: Partial. Loads system libraries at run time. Not run on macOS/Linux here; compile-
+    /// checked.
     pub unsafe fn symbol<T: Copy>(&self, symbol: &str) -> Result<T, LoadError> {
         // SAFETY: the caller upholds the type contract documented above.
         let sym: libloading::Symbol<'_, T> =

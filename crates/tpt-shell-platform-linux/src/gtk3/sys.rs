@@ -17,33 +17,74 @@ use std::sync::OnceLock;
 use crate::loader::{LoadError, SharedLibrary};
 
 /// An opaque GObject-derived pointer, or any other handle returned by these libraries.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub type Obj = *mut c_void;
 
 /// `GSourceFunc` and `GClosureNotify`-style callbacks that take one pointer and return gboolean.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub type IdleFn = unsafe extern "C" fn(*mut c_void) -> c_int;
 
 /// `GtkWindowType::GTK_WINDOW_TOPLEVEL`.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const GTK_WINDOW_TOPLEVEL: c_int = 0;
 /// `GtkFileChooserAction`.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const GTK_FILE_CHOOSER_ACTION_OPEN: c_int = 0;
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const GTK_FILE_CHOOSER_ACTION_SAVE: c_int = 1;
 /// `GtkResponseType` values used by the dialogs.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const GTK_RESPONSE_ACCEPT: c_int = -3;
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const GTK_RESPONSE_CANCEL: c_int = -6;
 /// `WebKitPolicyDecisionType`.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const WEBKIT_POLICY_DECISION_NAVIGATION_ACTION: c_int = 0;
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const WEBKIT_POLICY_DECISION_NEW_WINDOW_ACTION: c_int = 1;
 /// `WebKitUserContentInjectedFrames::WEBKIT_USER_CONTENT_INJECT_TOP_FRAME`.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const WEBKIT_INJECT_TOP_FRAME: c_int = 1;
 /// `WebKitUserScriptInjectionTime::WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START`.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const WEBKIT_INJECT_AT_DOCUMENT_START: c_int = 0;
 /// `WebKitSnapshotRegion::WEBKIT_SNAPSHOT_REGION_VISIBLE` and `..._OPTIONS_NONE`.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const WEBKIT_SNAPSHOT_REGION_VISIBLE: c_int = 0;
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const WEBKIT_SNAPSHOT_OPTIONS_NONE: c_int = 0;
 /// `cairo_status_t::CAIRO_STATUS_SUCCESS`.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const CAIRO_STATUS_SUCCESS: c_int = 0;
 
 /// `GdkRGBA`, the colour WebKit uses for the page background.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Rgba {
@@ -54,6 +95,9 @@ pub struct Rgba {
 }
 
 /// `GSList`, read to walk the file list a chooser returns.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 #[repr(C)]
 pub struct GSList {
     pub data: *mut c_void,
@@ -61,16 +105,36 @@ pub struct GSList {
 }
 
 /// Libraries the GTK 3 adapter uses. Each is opened with the first name that loads.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const GTK3_LIB: &[&str] = &["libgtk-3.so.0"];
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const GDK3_LIB: &[&str] = &["libgdk-3.so.0"];
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const WEBKIT41_LIB: &[&str] = &["libwebkit2gtk-4.1.so.0"];
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const JSC41_LIB: &[&str] = &["libjavascriptcoregtk-4.1.so.0"];
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const GOBJECT_LIB: &[&str] = &["libgobject-2.0.so.0"];
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const GLIB_LIB: &[&str] = &["libglib-2.0.so.0"];
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const GIO_LIB: &[&str] = &["libgio-2.0.so.0"];
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub const CAIRO_LIB: &[&str] = &["libcairo.so.2"];
 
 /// The open libraries, one per name above.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub struct Libs {
     pub gtk: SharedLibrary,
     pub gdk: SharedLibrary,
@@ -85,6 +149,9 @@ pub struct Libs {
 macro_rules! bound_functions {
     ($( $lib:ident . $field:ident = $name:literal : fn($($arg:ty),*) -> $ret:ty; )*) => {
         /// Every function the adapter calls, looked up once.
+        ///
+        /// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux
+        /// here; compile-checked.
         #[allow(non_snake_case, dead_code)]
         pub struct Fns {
             $( pub $field: unsafe extern "C" fn($($arg),*) -> $ret, )*
@@ -205,6 +272,9 @@ bound_functions! {
 /// The bound GTK 3 and WebKit 4.1 adapter. Loaded once per process and never unloaded, since
 /// unloading GTK while its callbacks may still run is unsafe. GTK itself is not thread-safe:
 /// only the main loop proxy, which calls the thread-safe `g_idle_add`, is used off the UI thread.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub struct Gtk3 {
     pub libs: Libs,
     pub fns: Fns,
@@ -229,6 +299,9 @@ fn open_all() -> Result<Gtk3, LoadError> {
 
 /// The GTK 3 and WebKit 4.1 adapter, or the reason it could not be loaded. The first call
 /// tries the libraries; later calls return the same result.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub fn load() -> Result<&'static Gtk3, &'static LoadError> {
     GTK3.get_or_init(open_all).as_ref()
 }

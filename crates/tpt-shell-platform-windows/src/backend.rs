@@ -57,7 +57,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::com::{wide, HRESULT};
 use crate::loader::OfficialLoader;
 use crate::shim::SHIM_JS;
-use crate::webview2::{create_environment, Color, Controller, Environment, WebView, APP_ORIGIN};
+use crate::webview2::{
+    check_fixed_runtime_folder, create_environment_with, Color, Controller, Environment,
+    EnvironmentOptions, ProcessFailure, WebView, APP_ORIGIN,
+};
 use crate::window::{interactive_desktop_available, pump_until};
 
 /// A task posted to the UI thread. See [`WinProxy`].
@@ -69,6 +72,12 @@ const WM_TASK: u32 = WM_APP + 1;
 const DWMWA_SYSTEMBACKDROP_TYPE: u32 = 38;
 const WINDOW_CLASS: &str = "tpt_shell_window";
 const CONTROLLER_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Receives the process failures of one window. See [`WindowsBackend::on_process_failed`].
+type ProcessFailedHandler = Box<dyn FnMut(ProcessFailure)>;
+
+/// Receives the id of each window that closed. See [`WindowsBackend::on_window_closed`].
+type ClosedHook = Box<dyn FnMut(WindowId)>;
 
 /// Where the result of [`WindowsBackend::eval_json`] lands: the status and the JSON text.
 type EvalSlot = Rc<RefCell<Option<(HRESULT, Option<String>)>>>;
@@ -116,11 +125,16 @@ struct Entry {
     backdrop: Backdrop,
     /// The drag regions last set (`set_drag_regions`), in logical pixels of the page.
     drag_regions: Vec<LogicalRect>,
+    /// Called when WebView2 reports a process failure for this window. Set by
+    /// `on_process_failed`; empty until then.
+    process_failed: Rc<RefCell<Option<ProcessFailedHandler>>>,
 }
 
 thread_local! {
     static WINDOWS: RefCell<HashMap<isize, Entry>> = RefCell::new(HashMap::new());
     static TIMERS: RefCell<TimerTable> = RefCell::new(TimerTable::default());
+    /// The one hook for closed windows, set by `on_window_closed`.
+    static CLOSED_HOOK: RefCell<Option<ClosedHook>> = const { RefCell::new(None) };
 }
 
 /// A repeating timer's callback. Shared so the tick can run while the table is not borrowed.
@@ -153,6 +167,72 @@ pub fn navigate_window(id: WindowId, url: &str) -> Result<()> {
             .web
             .navigate(url)
             .map_err(|hr| hr_error("navigate", hr))
+    })
+}
+
+/// Shows window `id` from code on the UI thread, such as a posted task. Unknown windows are
+/// refused.
+///
+/// Support: Full on Windows.
+pub fn show_window(id: WindowId) -> Result<()> {
+    let known = WINDOWS.with(|w| w.borrow().contains_key(&id.0));
+    if !known {
+        return Err(Error::UnknownWindow(id.0 as u64));
+    }
+    // SAFETY: the handle belongs to a window registered with this thread's backend.
+    unsafe { ShowWindow(id.0 as HWND, SW_SHOW) };
+    Ok(())
+}
+
+/// Sends `message` to the page of window `id` from code on the UI thread (see
+/// [`WebviewBackend::post_message`]).
+///
+/// Support: Full on Windows.
+pub fn post_window_message(id: WindowId, message: &str) -> Result<()> {
+    WINDOWS.with(|w| {
+        let windows = w.borrow();
+        let entry = windows
+            .get(&id.0)
+            .ok_or(Error::UnknownWindow(id.0 as u64))?;
+        entry
+            .web
+            .post_web_message(message)
+            .map_err(|hr| hr_error("post_web_message", hr))
+    })
+}
+
+/// Runs `script` in the page of window `id` from code on the UI thread, without waiting for it
+/// (see [`WebviewBackend::eval`]). Internal use only.
+///
+/// Support: Full on Windows.
+pub fn eval_window(id: WindowId, script: &str) -> Result<()> {
+    WINDOWS.with(|w| {
+        let windows = w.borrow();
+        let entry = windows
+            .get(&id.0)
+            .ok_or(Error::UnknownWindow(id.0 as u64))?;
+        entry
+            .web
+            .execute_script(script, |_hr| {})
+            .map_err(|hr| hr_error("ExecuteScript", hr))
+    })
+}
+
+/// Clears the browsing data of window `id`'s profile (cookies, cache, storage), from code on the
+/// UI thread. The profile is shared by every window of the environment. `on_done` runs on the UI
+/// thread when WebView2 finishes. A call that fails at once returns the error and does not run it.
+///
+/// Support: Full on Windows (`ICoreWebView2Profile2::ClearBrowsingDataAll`).
+pub fn clear_session(id: WindowId, on_done: impl FnOnce(HRESULT) + 'static) -> Result<()> {
+    WINDOWS.with(|w| {
+        let windows = w.borrow();
+        let entry = windows
+            .get(&id.0)
+            .ok_or(Error::UnknownWindow(id.0 as u64))?;
+        entry
+            .web
+            .clear_browsing_data_all(on_done)
+            .map_err(|hr| hr_error("ClearBrowsingDataAll", hr))
     })
 }
 
@@ -305,8 +385,27 @@ pub struct WindowsBackend {
 
 impl WindowsBackend {
     /// Starts COM, loads the WebView2 loader from `loader_path`, and creates the environment
-    /// in `user_data_dir`. Needs an interactive desktop and an installed WebView2 runtime.
+    /// in `user_data_dir` on the installed Evergreen runtime. Needs an interactive desktop and
+    /// an installed WebView2 runtime.
+    ///
+    /// Support: Full on Windows with an interactive desktop.
     pub fn new(loader_path: &Path, user_data_dir: &Path) -> Result<Self> {
+        Self::new_with_environment(loader_path, user_data_dir, &EnvironmentOptions::default())
+    }
+
+    /// As [`WindowsBackend::new`], but the environment uses `options`, for example a pinned
+    /// fixed-version runtime. A fixed runtime folder is checked before anything starts.
+    ///
+    /// Support: Partial. The fixed runtime is passed to WebView2 as the browser folder; its
+    /// version is not checked against a minimum here (see `EnvironmentOptions`).
+    pub fn new_with_environment(
+        loader_path: &Path,
+        user_data_dir: &Path,
+        options: &EnvironmentOptions,
+    ) -> Result<Self> {
+        if let Some(folder) = options.fixed_runtime() {
+            check_fixed_runtime_folder(folder).map_err(Error::Backend)?;
+        }
         if !interactive_desktop_available() {
             return Err(Error::Unsupported {
                 feature: "windows backend without an interactive desktop",
@@ -317,7 +416,7 @@ impl WindowsBackend {
         if hr < 0 {
             return Err(hr_error("CoInitializeEx", hr));
         }
-        match Self::start(loader_path, user_data_dir) {
+        match Self::start(loader_path, user_data_dir, options) {
             Ok((loader, env)) => {
                 // SAFETY: no pointer arguments; per-monitor V2 is process-wide, and a second
                 // call simply fails, which is fine.
@@ -353,7 +452,11 @@ impl WindowsBackend {
         }
     }
 
-    fn start(loader_path: &Path, user_data_dir: &Path) -> Result<(OfficialLoader, Environment)> {
+    fn start(
+        loader_path: &Path,
+        user_data_dir: &Path,
+        options: &EnvironmentOptions,
+    ) -> Result<(OfficialLoader, Environment)> {
         let loader = OfficialLoader::load(loader_path)
             .map_err(|e| Error::Backend(format!("loader: {e}")))?;
         let create = loader
@@ -362,8 +465,10 @@ impl WindowsBackend {
         let slot: Rc<RefCell<Option<std::result::Result<Environment, HRESULT>>>> =
             Rc::new(RefCell::new(None));
         let done = slot.clone();
-        create_environment(create, user_data_dir, move |r| *done.borrow_mut() = Some(r))
-            .map_err(|hr| hr_error("CreateCoreWebView2Environment", hr))?;
+        create_environment_with(create, user_data_dir, options, move |r| {
+            *done.borrow_mut() = Some(r)
+        })
+        .map_err(|hr| hr_error("CreateCoreWebView2Environment", hr))?;
         if !pump_until(CONTROLLER_TIMEOUT, || slot.borrow().is_some()) {
             return Err(Error::Backend("WebView2 environment timed out".into()));
         }
@@ -512,6 +617,63 @@ impl WindowsBackend {
         // SAFETY: as in `every`; KillTimer on a timer that does not exist is harmless.
         unsafe { KillTimer(self.message_hwnd, timer.0) };
         TIMERS.with(|t| t.borrow_mut().ticks.remove(&timer.0));
+    }
+
+    /// Calls `f` on the UI thread when WebView2 reports that a process of window `id` failed (the
+    /// renderer or the browser process). The page is gone when it is called. The handler decides
+    /// what to load (see `tpt_shell_kiosk::recovery`). Replaces any earlier handler.
+    ///
+    /// Support: Full on Windows (WebView2 `ProcessFailed`).
+    pub fn on_process_failed(
+        &mut self,
+        id: WindowId,
+        f: impl FnMut(ProcessFailure) + 'static,
+    ) -> Result<()> {
+        self.with_entry(id, |e| *e.process_failed.borrow_mut() = Some(Box::new(f)))
+    }
+
+    /// Calls `f` on the UI thread after a window has closed, with its id. That is when the user
+    /// closes it, or when `WindowBackend::close` destroys it. It is not called for a window that is
+    /// only hidden (`CloseAction::Hide`). Replaces any earlier hook; one hook serves all windows.
+    ///
+    /// Support: Full on Windows. Other platforms have no backend yet.
+    pub fn on_window_closed(&mut self, f: impl FnMut(WindowId) + 'static) -> Result<()> {
+        self.check_thread()?;
+        CLOSED_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f)));
+        Ok(())
+    }
+
+    /// Makes Ctrl+Shift+`key` in page `id` post `message` to the shell, on every load of the page.
+    /// The message arrives in the window's message handler like any page message. `key` must be a
+    /// letter, and `message` may only use letters, digits, `_` and `.`. The script is added at
+    /// document start, so it is in place before the page's own scripts run.
+    ///
+    /// Support: Partial. Windows only. A focused control in the page that consumes the key first
+    /// keeps it from the script.
+    pub fn page_key_message(&mut self, id: WindowId, key: char, message: &str) -> Result<()> {
+        self.check_thread()?;
+        if !key.is_ascii_alphabetic() {
+            return Err(Error::Backend("the hotkey must be a letter".into()));
+        }
+        if message.is_empty()
+            || !message
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+        {
+            return Err(Error::Backend(
+                "the hotkey message may only use letters, digits, '_' and '.'".into(),
+            ));
+        }
+        let script = format!(
+            "window.addEventListener('keydown', function (e) {{ \
+             if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && \
+             (e.key === '{upper}' || e.key === '{lower}')) {{ \
+             e.preventDefault(); window.chrome.webview.postMessage('{message}'); }} }});",
+            upper = key.to_ascii_uppercase(),
+            lower = key.to_ascii_lowercase(),
+        );
+        self.with_web(id, |w| w.add_document_start_script(&script, |_| {}))?
+            .map_err(|hr| hr_error("AddScriptToExecuteOnDocumentCreated", hr))
     }
 
     /// Title of the window's loaded document, or an empty string when none is loaded.
@@ -1220,6 +1382,15 @@ impl WindowsBackend {
         // The page runtime (`window.tpt`) goes in before any page script runs.
         web.add_document_start_script(SHIM_JS, |_| {})
             .map_err(|hr| hr_error("AddScriptToExecuteOnDocumentCreated", hr))?;
+        let process_failed: Rc<RefCell<Option<ProcessFailedHandler>>> = Rc::new(RefCell::new(None));
+        let for_failed = process_failed.clone();
+        web.on_process_failed(move |_web, failure| {
+            if let Some(handler) = for_failed.borrow_mut().as_mut() {
+                // A panic must not unwind across the WebView2 callback.
+                let _ = catch_unwind(AssertUnwindSafe(|| handler(failure)));
+            }
+        })
+        .map_err(|hr| hr_error("add_ProcessFailed", hr))?;
         let bounds =
             client_rect(hwnd).ok_or_else(|| Error::Backend("GetClientRect failed".into()))?;
         controller
@@ -1238,6 +1409,7 @@ impl WindowsBackend {
             transparent: false,
             backdrop: Backdrop::None,
             drag_regions: Vec::new(),
+            process_failed,
         })
     }
 }
@@ -1412,6 +1584,19 @@ unsafe extern "system" fn wnd_proc(
                     EnableWindow(owner, 1);
                 }
                 let _ = entry.controller.close();
+                // The window has left the registry, so the hook may look at the rest. The hook is
+                // taken out while it runs; a hook set during the call replaces it.
+                let mut hook = CLOSED_HOOK.with(|h| h.borrow_mut().take());
+                if let Some(f) = hook.as_mut() {
+                    let id = WindowId(hwnd as isize);
+                    let _ = catch_unwind(AssertUnwindSafe(|| f(id)));
+                }
+                CLOSED_HOOK.with(|h| {
+                    let mut slot = h.borrow_mut();
+                    if slot.is_none() {
+                        *slot = hook;
+                    }
+                });
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
@@ -2274,6 +2459,120 @@ document.title = 'ready';
             });
             assert!(destroyed, "default close should destroy the window");
             assert!(matches!(b.show(gone), Err(Error::UnknownWindow(_))));
+
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn the_closed_hook_sees_a_destroyed_window_but_not_a_hidden_one() {
+            let Some((mut b, dir, _serial)) = start("closed-hook") else {
+                return;
+            };
+            let closed: std::rc::Rc<RefCell<Vec<WindowId>>> = Default::default();
+            let seen = closed.clone();
+            b.on_window_closed(move |id| seen.borrow_mut().push(id))
+                .expect("hook");
+            let hidden = b.create(&spec("hidden")).expect("create hidden");
+            b.set_close_action(hidden, CloseAction::Hide)
+                .expect("set action");
+            // SAFETY: posting WM_CLOSE to a live window is the same as a user close request.
+            unsafe { PostMessageW(hidden.0 as HWND, WM_CLOSE, 0, 0) };
+            pump_until(Duration::from_millis(300), || false);
+            assert!(closed.borrow().is_empty(), "a hidden window is not closed");
+
+            let gone = b.create(&spec("gone")).expect("create gone");
+            // SAFETY: as above.
+            unsafe { PostMessageW(gone.0 as HWND, WM_CLOSE, 0, 0) };
+            let reported = pump_until(Duration::from_secs(5), || closed.borrow().contains(&gone));
+            assert!(reported, "the hook was not told about the closed window");
+            assert_eq!(closed.borrow().as_slice(), &[gone]);
+
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn work_queued_from_another_thread_shows_a_window_on_the_ui_thread() {
+            let Some((mut b, dir, _serial)) = start("ui-thread") else {
+                return;
+            };
+            let id = b.create(&spec("posted")).expect("create");
+            let proxy = b.proxy();
+            std::thread::spawn(move || {
+                proxy
+                    .post(Box::new(move || {
+                        let _ = show_window(id);
+                    }))
+                    .expect("post");
+            })
+            .join()
+            .expect("thread");
+            let visible = pump_until(Duration::from_secs(5), || {
+                // SAFETY: read-only query on the handle.
+                unsafe { IsWindowVisible(id.0 as HWND) != 0 }
+            });
+            assert!(visible, "the posted task did not show the window");
+            assert!(
+                show_window(WindowId(0)).is_err(),
+                "an unknown window is refused"
+            );
+
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_renderer_crash_reaches_the_process_failed_handler() {
+            let Some((mut b, dir, _serial)) = start("process-failed") else {
+                return;
+            };
+            let id = b.create(&spec("crash")).expect("create");
+            b.show(id).expect("show");
+            // Crash only once the page has really rendered, so a renderer exists to crash.
+            b.load_html(id, "<title>ready</title><p>page</p>")
+                .expect("load");
+            let rendered = pump_until(Duration::from_secs(30), || {
+                b.document_title(id).ok().as_deref() == Some("ready")
+            });
+            assert!(rendered, "the page never rendered");
+            let failures: std::rc::Rc<RefCell<Vec<ProcessFailure>>> = Default::default();
+            let seen = failures.clone();
+            b.on_process_failed(id, move |f| seen.borrow_mut().push(f))
+                .expect("hook");
+            b.with_web(id, |w| w.call_devtools_protocol("Page.crash", "{}", |_| {}))
+                .expect("window")
+                .expect("crash call");
+            let reported = pump_until(Duration::from_secs(30), || !failures.borrow().is_empty());
+            assert!(reported, "the page crash was not reported");
+
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn clearing_the_session_completes_and_the_page_hook_rejects_bad_input() {
+            let Some((mut b, dir, _serial)) = start("clear") else {
+                return;
+            };
+            let id = b.create(&spec("clear")).expect("create");
+            let done: std::rc::Rc<std::cell::Cell<Option<HRESULT>>> = Default::default();
+            let slot = done.clone();
+            clear_session(id, move |hr| slot.set(Some(hr))).expect("clear starts");
+            let finished = pump_until(Duration::from_secs(20), || done.get().is_some());
+            assert!(finished, "ClearBrowsingDataAll never completed");
+            assert_eq!(done.get(), Some(0), "ClearBrowsingDataAll failed");
+
+            assert!(
+                b.page_key_message(id, '1', "msg").is_err(),
+                "a digit is not a key"
+            );
+            assert!(
+                b.page_key_message(id, 'd', "a'b").is_err(),
+                "quotes are refused"
+            );
+            b.page_key_message(id, 'd', "tpt_devtools_hotkey")
+                .expect("a plain message is accepted");
 
             drop(b);
             let _ = std::fs::remove_dir_all(&dir);

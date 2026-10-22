@@ -544,6 +544,8 @@ mod message_tests {
         )
         .expect("the open dialog should be created");
         assert!(dialog.query(&IID_IFILE_OPEN_DIALOG).is_ok());
+        // The dialog must be released before the apartment is torn down.
+        drop(dialog);
         // SAFETY: balances the successful CoInitializeEx above.
         unsafe { windows_sys::Win32::System::Com::CoUninitialize() };
     }

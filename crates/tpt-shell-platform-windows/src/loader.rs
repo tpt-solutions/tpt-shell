@@ -106,18 +106,33 @@ impl OfficialLoader {
 
     /// Version of the installed WebView2 Evergreen runtime, for example "155.0.4283.62".
     pub fn runtime_version(&self) -> Result<String, LoadError> {
+        self.runtime_version_in(None)
+    }
+
+    /// Version of the runtime in `browser_folder` (a fixed-version runtime), or of the installed
+    /// Evergreen runtime when `None`.
+    ///
+    /// Support: Full.
+    pub fn runtime_version_in(&self, browser_folder: Option<&Path>) -> Result<String, LoadError> {
         let proc = self
             .raw_export("GetAvailableCoreWebView2BrowserVersionString")
             .ok_or(LoadError::MissingExport(
                 "GetAvailableCoreWebView2BrowserVersionString",
             ))?;
         // SAFETY: the export has the documented signature `HRESULT f(LPCWSTR, LPWSTR*)`.
-        // Passing a null folder selects the installed Evergreen runtime.
         let get_version: GetVersionFn = unsafe { std::mem::transmute(proc) };
+        // Kept alive for the call. A null folder selects the installed Evergreen runtime.
+        let folder: Option<Vec<u16>> = browser_folder.map(|p| {
+            p.as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect()
+        });
+        let folder_ptr = folder.as_ref().map_or(std::ptr::null(), |f| f.as_ptr());
         let mut out: *mut u16 = std::ptr::null_mut();
         // SAFETY: `out` is a valid out-pointer. On success the callee allocates the string with
         // CoTaskMemFree semantics, which we honour below.
-        let hr = unsafe { get_version(std::ptr::null(), &mut out) };
+        let hr = unsafe { get_version(folder_ptr, &mut out) };
         if hr < 0 {
             return Err(LoadError::VersionQueryFailed(hr));
         }

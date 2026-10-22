@@ -40,6 +40,8 @@ fn frameless_style() -> NSWindowStyleMask {
 define_class!(
     /// An `NSWindow` that can take key and main status even without a title bar. Without this a
     /// borderless window never becomes key, so its web view gets no keyboard input.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     #[unsafe(super(NSWindow))]
     #[thread_kind = MainThreadOnly]
     #[name = "TptWindow"]
@@ -59,6 +61,8 @@ define_class!(
 );
 
 /// A top-level window with a web view filling its content area.
+///
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub struct MacWindow {
     window: Retained<NSWindow>,
     web: Retained<WKWebView>,
@@ -72,6 +76,8 @@ pub struct MacWindow {
 impl MacWindow {
     /// Creates a hidden window of `width` by `height` points, whose navigations are limited to
     /// the app origin and `allowlist`. Must run on the main thread.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn new(
         mtm: MainThreadMarker,
         title: &str,
@@ -145,6 +151,8 @@ impl MacWindow {
     }
 
     /// Loads an HTML document. The page has no base URL, so relative loads do not resolve.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn load_html(&self, html: &str) {
         let body = NSString::from_str(html);
         // SAFETY: a nil base URL is a valid argument for loadHTMLString.
@@ -152,6 +160,8 @@ impl MacWindow {
     }
 
     /// Loads an `app://` URL. Other URLs are refused by the caller.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn navigate(&self, url: &str) -> Result<(), String> {
         if !is_app_url(url) {
             return Err(format!("navigation blocked: {url}"));
@@ -168,55 +178,71 @@ impl MacWindow {
     }
 
     /// Runs `script` in the page without waiting for it.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn eval(&self, script: &str) {
         evaluate(&self.web, script);
     }
 
     /// Sends `message` to the page's `message` listeners.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn post_message(&self, message: &str) {
         evaluate(&self.web, &crate::policy::deliver_script(message));
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_message_handler(&self, handler: MessageHandler) {
         self.messages.set_handler(handler);
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_asset_source(&self, source: AssetSource) {
         self.scheme.set_source(source);
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_close_action(&self, action: CloseAction) {
         self.close.set_close_action(action);
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn show(&self) {
         self.window.makeKeyAndOrderFront(None);
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn hide(&self) {
         self.window.orderOut(None);
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_title(&self, title: &str) {
         self.window.setTitle(&NSString::from_str(title));
     }
 
     /// Sets the content size in points.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_size(&self, width: f64, height: f64) {
         self.window.setContentSize(NSSize::new(width, height));
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn is_fullscreen(&self) -> bool {
         self.window
             .styleMask()
             .contains(NSWindowStyleMask::FullScreen)
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn toggle_fullscreen(&self) {
         self.window.toggleFullScreen(None);
     }
 
     /// Removes or restores the title bar and border. The content keeps its size.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_frameless(&self, on: bool) {
         let style = if on {
             frameless_style()
@@ -226,6 +252,7 @@ impl MacWindow {
         self.window.setStyleMask(style);
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_always_on_top(&self, on: bool) {
         let level = if on {
             NSFloatingWindowLevel
@@ -237,6 +264,8 @@ impl MacWindow {
 
     /// Makes the window and the web view background clear, so the desktop shows where the page
     /// does not paint. Turning it off restores the opaque window and the page background.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_transparent(&self, on: bool) {
         // SAFETY: main thread; the colours are created and used at once.
         unsafe {
@@ -254,6 +283,7 @@ impl MacWindow {
         }
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn close(&self) {
         self.window.close();
     }

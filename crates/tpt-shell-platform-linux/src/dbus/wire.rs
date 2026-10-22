@@ -10,9 +10,13 @@
 use std::fmt;
 
 /// Largest message accepted, the limit the D-Bus daemon itself enforces.
+///
+/// Support: Full.
 pub const MAX_MESSAGE: usize = 128 * 1024 * 1024;
 
 /// A D-Bus value. `Array` keeps its element signature, so an empty array still has a type.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Byte(u8),
@@ -34,19 +38,24 @@ pub enum Value {
 }
 
 impl Value {
+    /// Support: Full.
     pub fn str(s: &str) -> Value {
         Value::Str(s.to_string())
     }
 
+    /// Support: Full.
     pub fn object_path(s: &str) -> Value {
         Value::ObjectPath(s.to_string())
     }
 
+    /// Support: Full.
     pub fn variant(v: Value) -> Value {
         Value::Variant(Box::new(v))
     }
 
     /// An `a{sv}` dictionary from string keys and values.
+    ///
+    /// Support: Full.
     pub fn dict_sv(entries: Vec<(&str, Value)>) -> Value {
         Value::Array(
             "{sv}".to_string(),
@@ -60,6 +69,8 @@ impl Value {
     }
 
     /// An `ay` byte array.
+    ///
+    /// Support: Full.
     pub fn bytes(data: &[u8]) -> Value {
         Value::Array(
             "y".to_string(),
@@ -68,6 +79,8 @@ impl Value {
     }
 
     /// The D-Bus signature of this value.
+    ///
+    /// Support: Full.
     pub fn signature(&self) -> String {
         let mut out = String::new();
         self.write_signature(&mut out);
@@ -112,6 +125,7 @@ impl Value {
         });
     }
 
+    /// Support: Full.
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Value::Str(s) | Value::ObjectPath(s) | Value::Signature(s) => Some(s),
@@ -119,6 +133,7 @@ impl Value {
         }
     }
 
+    /// Support: Full.
     pub fn as_u32(&self) -> Option<u32> {
         match self {
             Value::Uint32(v) => Some(*v),
@@ -126,6 +141,7 @@ impl Value {
         }
     }
 
+    /// Support: Full.
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(v) => Some(*v),
@@ -133,6 +149,7 @@ impl Value {
         }
     }
 
+    /// Support: Full.
     pub fn as_array(&self) -> Option<&[Value]> {
         match self {
             Value::Array(_, items) => Some(items),
@@ -140,6 +157,7 @@ impl Value {
         }
     }
 
+    /// Support: Full.
     pub fn as_struct(&self) -> Option<&[Value]> {
         match self {
             Value::Struct(fields) => Some(fields),
@@ -148,6 +166,8 @@ impl Value {
     }
 
     /// Looks through any number of variant wrappers.
+    ///
+    /// Support: Full.
     pub fn unwrap_variant(&self) -> &Value {
         match self {
             Value::Variant(inner) => inner.unwrap_variant(),
@@ -156,6 +176,8 @@ impl Value {
     }
 
     /// The bytes of an `ay` array, or `None` if the value is another type.
+    ///
+    /// Support: Full.
     pub fn as_bytes(&self) -> Option<Vec<u8>> {
         let items = self.as_array()?;
         items
@@ -169,6 +191,8 @@ impl Value {
 }
 
 /// Message kinds (D-Bus specification, message types).
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     MethodCall,
@@ -199,6 +223,8 @@ impl Kind {
 }
 
 /// The header fields this crate reads and writes.
+///
+/// Support: Full.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Header {
     pub path: Option<String>,
@@ -211,6 +237,8 @@ pub struct Header {
 }
 
 /// One D-Bus message.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Message {
     pub kind: Kind,
@@ -220,6 +248,8 @@ pub struct Message {
 }
 
 /// A malformed or unsupported message.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WireError(pub String);
 
@@ -238,6 +268,7 @@ fn bad<T>(what: &str) -> WireResult<T> {
 }
 
 impl Message {
+    /// Support: Full.
     pub fn method_call(
         destination: &str,
         path: &str,
@@ -260,6 +291,8 @@ impl Message {
     }
 
     /// A successful reply to `call`. The serial is set by the sender.
+    ///
+    /// Support: Full.
     pub fn method_return(call: &Message, body: Vec<Value>) -> Message {
         Message {
             kind: Kind::MethodReturn,
@@ -274,6 +307,8 @@ impl Message {
     }
 
     /// An error reply to `call`.
+    ///
+    /// Support: Full.
     pub fn error(call: &Message, name: &str, text: &str) -> Message {
         Message {
             kind: Kind::Error,
@@ -289,11 +324,15 @@ impl Message {
     }
 
     /// The body signature, the concatenation of the value signatures.
+    ///
+    /// Support: Full.
     pub fn signature(&self) -> String {
         self.body.iter().map(Value::signature).collect()
     }
 
     /// Encodes the message in little-endian form.
+    ///
+    /// Support: Full.
     pub fn encode(&self) -> Vec<u8> {
         let mut body = Encoder::default();
         for v in &self.body {
@@ -340,6 +379,8 @@ impl Message {
 
     /// Decodes one complete message. `data` must hold exactly the bytes of one message, as
     /// reported by [`frame_rest`].
+    ///
+    /// Support: Full.
     pub fn decode(data: &[u8]) -> WireResult<Message> {
         let mut d = Decoder::new(data);
         let endian = d.u8()?;
@@ -418,6 +459,8 @@ impl Message {
 
 /// How many bytes follow the fixed 16-byte part of a message, so a reader can take one message
 /// off a stream. The caller reads 16 bytes first and passes them here.
+///
+/// Support: Full.
 pub fn frame_rest(fixed: &[u8; 16]) -> WireResult<usize> {
     let body_len = u32::from_le_bytes([fixed[4], fixed[5], fixed[6], fixed[7]]) as usize;
     let fields_len = u32::from_le_bytes([fixed[12], fixed[13], fixed[14], fixed[15]]) as usize;

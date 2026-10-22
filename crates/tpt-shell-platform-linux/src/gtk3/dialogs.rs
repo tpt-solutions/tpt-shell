@@ -26,6 +26,8 @@ use super::{cstring, from_c, Gtk3Backend, WindowId};
 const MAX_FILTER_NAME: usize = 64;
 
 /// One filter in the dialog's type list.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileFilter {
     pub name: String,
@@ -34,6 +36,9 @@ pub struct FileFilter {
 }
 
 /// What the dialog shows.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FileDialog {
     pub title: String,
@@ -46,6 +51,8 @@ pub struct FileDialog {
 
 /// Checks a dialog before any GTK call. Refuses a bad filter name or pattern, or a name with a
 /// NUL byte, so nothing unsafe reaches the toolkit.
+///
+/// Support: Full.
 pub fn validate(dialog: &FileDialog) -> Result<()> {
     if dialog.title.contains('\0') {
         return Err(Error::Backend("the dialog title holds a NUL byte".into()));
@@ -80,6 +87,9 @@ pub fn validate(dialog: &FileDialog) -> Result<()> {
 
 impl Gtk3Backend {
     /// Asks the user to pick one or more existing files. `None` when the dialog is cancelled.
+    ///
+    /// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+    /// compile-checked.
     pub fn open_files(
         &mut self,
         parent: Option<WindowId>,
@@ -89,6 +99,9 @@ impl Gtk3Backend {
     }
 
     /// Asks the user where to save a file. `None` when the dialog is cancelled.
+    ///
+    /// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+    /// compile-checked.
     pub fn save_file(
         &mut self,
         parent: Option<WindowId>,

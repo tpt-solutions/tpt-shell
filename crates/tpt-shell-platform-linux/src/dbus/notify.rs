@@ -16,9 +16,13 @@ const PATH: &str = "/org/freedesktop/Notifications";
 const INTERFACE: &str = "org.freedesktop.Notifications";
 
 /// The longest summary or body accepted, in bytes. A longer text is refused, not cut.
+///
+/// Support: Full.
 pub const MAX_TEXT: usize = 1024;
 
 /// One notification to show.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notification {
     pub app_name: String,
@@ -29,17 +33,26 @@ pub struct Notification {
 }
 
 /// A connection used to show notifications.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub struct Notifier {
     conn: Connection<Stream>,
 }
 
 impl Notifier {
     /// Connects to the session bus. Fails with `Unsupported` without the `dbus` feature.
+    ///
+    /// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+    /// Unsupported. Not run on macOS/Linux here; compile-checked.
     pub fn connect() -> Result<Notifier> {
         Ok(Notifier { conn: session()? })
     }
 
     /// Shows the notification and returns the id the server gave it.
+    ///
+    /// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+    /// Unsupported. Not run on macOS/Linux here; compile-checked.
     pub fn show(&mut self, note: &Notification) -> Result<u32> {
         check_text(&note.summary)?;
         check_text(&note.body)?;
@@ -76,6 +89,8 @@ fn check_text(text: &str) -> Result<()> {
 
 /// Escapes the three characters the server reads as markup, so page text cannot inject
 /// formatting or links into the notification.
+///
+/// Support: Full.
 pub fn escape_markup(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {

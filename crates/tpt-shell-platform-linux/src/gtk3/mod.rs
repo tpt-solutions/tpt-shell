@@ -17,8 +17,13 @@
 //!   five times.
 //! - Unsupported here: drag regions, backdrops, child and modal windows.
 
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub mod dialogs;
+/// Support: Full.
 pub mod route;
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub mod sys;
 
 use std::cell::{Cell, RefCell};
@@ -45,6 +50,9 @@ const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 const VIEW_KEY: &CStr = c"tpt-shell-window";
 
 /// Handle to a window managed by [`Gtk3Backend`].
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WindowId(pub usize);
 
@@ -64,6 +72,9 @@ pub(crate) struct WindowState {
 }
 
 /// Owns the GTK windows. Create it on the thread that will run the event loop.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 pub struct Gtk3Backend {
     pub(crate) gtk: &'static Gtk3,
     next: usize,
@@ -98,6 +109,9 @@ pub(crate) unsafe fn from_c(ptr: *const c_char) -> String {
 impl Gtk3Backend {
     /// Starts GTK on the current thread. Fails when no display is available or GTK cannot open
     /// one. The error names the library or display that was missing.
+    ///
+    /// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+    /// compile-checked.
     pub fn new() -> Result<Gtk3Backend> {
         let gtk = sys::load().map_err(|e| Error::Backend(e.to_string()))?;
         let has_display = ["DISPLAY", "WAYLAND_DISPLAY"]
@@ -122,6 +136,9 @@ impl Gtk3Backend {
     }
 
     /// Runs the GTK main loop until [`EventLoopBackend::quit`] is called.
+    ///
+    /// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+    /// compile-checked.
     pub fn run(&mut self) {
         // SAFETY: called on the thread that started GTK.
         unsafe { (self.gtk.fns.gtk_main)() };
@@ -227,6 +244,9 @@ impl Gtk3Backend {
     }
 
     /// Current position and size, in logical units.
+    ///
+    /// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+    /// compile-checked.
     pub fn bounds(&self, id: WindowId) -> Result<LogicalRect> {
         let w = self.state(id)?;
         let (mut x, mut y, mut width, mut height) = (0, 0, 0, 0);
@@ -244,6 +264,9 @@ impl Gtk3Backend {
     }
 
     /// Moves and resizes the window. A Wayland compositor may decide the position itself.
+    ///
+    /// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+    /// compile-checked.
     pub fn set_bounds(&mut self, id: WindowId, rect: LogicalRect) -> Result<()> {
         let w = self.state(id)?;
         // SAFETY: the window is live.
@@ -256,6 +279,9 @@ impl Gtk3Backend {
 
     /// Captures the visible region of the page as PNG. Blocks the UI thread (it runs a nested
     /// main loop) for up to [`SNAPSHOT_TIMEOUT`].
+    ///
+    /// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+    /// compile-checked.
     pub fn snapshot_png(&mut self, id: WindowId) -> Result<Vec<u8>> {
         let view = self.state(id)?.view;
         let f = &self.gtk.fns;
@@ -824,6 +850,9 @@ impl Drop for Gtk3Backend {
 
 /// Cross-thread handle to the GTK main loop. Posting uses `g_idle_add`, which GLib makes safe
 /// to call from any thread.
+///
+/// Support: Partial. Needs GTK 3 and WebKit2GTK 4.1 at run time. Not run on macOS/Linux here;
+/// compile-checked.
 #[derive(Clone, Copy)]
 pub struct Gtk3Proxy {
     gtk: &'static Gtk3,

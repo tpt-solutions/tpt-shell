@@ -7,14 +7,20 @@
 
 /// The origin the app's pages are served from. The blob route is `app://__tpt/blob/<id>`
 /// (the `__tpt` host), which [`asset_key`] maps to `__tpt/blob/<id>`.
+///
+/// Support: Full.
 pub const APP_ORIGIN: &str = "app://tpt-app";
 
 /// The host that names the blob channel.
+///
+/// Support: Full.
 pub const BLOB_HOST: &str = "__tpt";
 
 /// Page script the shell injects before any page script runs. It provides the
 /// `window.chrome.webview` surface the JavaScript runtime expects, backed by the WebKit message
 /// handler named `tptShell`.
+///
+/// Support: Full.
 pub const PAGE_POLYFILL: &str = r#"(function () {
   if (window.chrome && window.chrome.webview) { return; }
   window.chrome = window.chrome || {};
@@ -32,9 +38,13 @@ pub const PAGE_POLYFILL: &str = r#"(function () {
 })();"#;
 
 /// The name of the script message handler the page posts to.
+///
+/// Support: Full.
 pub const MESSAGE_HANDLER: &str = "tptShell";
 
 /// True for URLs on the app origin, such as `app://tpt-app/index.html`.
+///
+/// Support: Full.
 pub fn is_app_uri(uri: &str) -> bool {
     match uri.strip_prefix(APP_ORIGIN) {
         Some(rest) => {
@@ -52,6 +62,8 @@ pub fn is_app_uri(uri: &str) -> bool {
 /// `app://tpt-app/` and `app://tpt-app/index.html` map to `index.html`. The blob host maps as
 /// `app://__tpt/blob/<id>` to `__tpt/blob/<id>`. A key with `..`, a backslash, a NUL or an
 /// empty segment is refused (`None`), so a request cannot name a path outside the app.
+///
+/// Support: Full.
 pub fn asset_key(uri: &str) -> Option<String> {
     let rest = uri.strip_prefix("app://")?;
     let rest = rest.split(['?', '#']).next()?;
@@ -86,6 +98,8 @@ pub fn asset_key(uri: &str) -> Option<String> {
 /// Whether a navigation may proceed. The app origin and `about:blank` always may. Anything else
 /// needs a prefix from the window's allowlist, matched at a host boundary: the prefix
 /// `https://example.com` admits `https://example.com/x` but not `https://example.com.evil.net`.
+///
+/// Support: Full.
 pub fn navigation_allowed(uri: &str, allow: &[String]) -> bool {
     if is_app_uri(uri) || uri == "about:blank" {
         return true;
@@ -95,6 +109,8 @@ pub fn navigation_allowed(uri: &str, allow: &[String]) -> bool {
 
 /// Host-boundary prefix match. Only `https://` prefixes are honoured, so an allowlist entry can
 /// never admit a `file:`, `data:` or `javascript:` URL.
+///
+/// Support: Full.
 pub fn prefix_matches(uri: &str, prefix: &str) -> bool {
     if !prefix.starts_with("https://") || prefix.len() <= "https://".len() {
         return false;
@@ -107,6 +123,8 @@ pub fn prefix_matches(uri: &str, prefix: &str) -> bool {
 
 /// Quotes `text` as a JavaScript string literal. The result can be placed in a script without
 /// the text being able to end the literal or the script.
+///
+/// Support: Full.
 pub fn js_string_literal(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
     out.push('"');
@@ -132,6 +150,8 @@ pub fn js_string_literal(text: &str) -> String {
 
 /// The script that delivers `message` to the page's `message` listeners, as a `MessageEvent`
 /// (the same event the Windows backend produces with `PostWebMessageAsString`).
+///
+/// Support: Full.
 pub fn dispatch_script(message: &str) -> String {
     format!(
         "window.dispatchEvent(new MessageEvent('message', {{ data: {} }}));",
@@ -140,6 +160,8 @@ pub fn dispatch_script(message: &str) -> String {
 }
 
 /// Decodes `%XX` escapes in a path. `None` for a malformed escape or bytes that are not UTF-8.
+///
+/// Support: Full.
 pub fn percent_decode(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -161,6 +183,8 @@ pub fn percent_decode(text: &str) -> Option<String> {
 
 /// A file-dialog filter pattern: `*.txt`, `report-??.pdf` and the like. Only letters, digits,
 /// `*`, `?`, `.`, `_` and `-` are allowed, so a pattern cannot carry anything but a name match.
+///
+/// Support: Full.
 pub fn valid_glob(pattern: &str) -> bool {
     !pattern.is_empty()
         && pattern.len() <= 64

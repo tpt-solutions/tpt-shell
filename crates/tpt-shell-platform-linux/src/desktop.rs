@@ -16,6 +16,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// What [`register`] did.
+///
+/// Support: Partial. Writes an XDG desktop entry under the data home. Not run on macOS/Linux here;
+/// compile-checked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Registration {
     /// The desktop entry that was written.
@@ -29,6 +32,9 @@ pub struct Registration {
 /// `schemes` are URI schemes such as `myapp`. Each must match the RFC 3986 scheme grammar
 /// (letter, then letters, digits, `+`, `-` or `.`). `exec` must be an absolute path with no
 /// control characters. Anything else is refused before a file is written.
+///
+/// Support: Partial. Writes an XDG desktop entry under the data home. Not run on macOS/Linux here;
+/// compile-checked.
 pub fn register(
     data_home: &Path,
     app_id: &str,
@@ -84,6 +90,8 @@ pub fn register(
 }
 
 /// Builds the text of a desktop entry. Exposed so the format can be tested directly.
+///
+/// Support: Full.
 pub fn desktop_entry(app_name: &str, exec: &Path, schemes: &[&str]) -> String {
     let mime: String = schemes
         .iter()

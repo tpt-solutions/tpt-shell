@@ -95,6 +95,21 @@ const IID_WEBVIEW_13: Guid = Guid {
     data4: [0x88, 0xd6, 0xc8, 0x77, 0x3f, 0x31, 0x5e, 0x84],
 };
 
+/// `ICoreWebView2Profile2`: the profile's browsing-data calls (WebView2.h, 1.0.4312 prerelease).
+const IID_PROFILE2: Guid = Guid {
+    data1: 0xfa74_0d4b,
+    data2: 0x5eae,
+    data3: 0x4344,
+    data4: [0xa8, 0xad, 0x74, 0xbe, 0x31, 0x92, 0x53, 0x97],
+};
+/// `ICoreWebView2ClearBrowsingDataCompletedHandler`.
+const IID_CLEAR_BROWSING_DATA_DONE_HANDLER: Guid = Guid {
+    data1: 0xe971_0a06,
+    data2: 0x1d1d,
+    data3: 0x49b2,
+    data4: [0x82, 0x34, 0x22, 0x6f, 0x35, 0x84, 0x6a, 0xe5],
+};
+
 /// `COREWEBVIEW2_COLOR`: a background colour, one byte per channel.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -234,6 +249,17 @@ struct ProfileVtbl {
     _before_scheme: [usize; 5],
     _get_scheme: usize,
     put_preferred_color_scheme: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
+}
+
+/// `ICoreWebView2Profile2`: ClearBrowsingData = 10, ClearBrowsingDataInTimeRange = 11,
+/// ClearBrowsingDataAll = 12. The base interface takes slots 3-9.
+#[repr(C)]
+struct Profile2Vtbl {
+    base: IUnknownVtbl,
+    _before_clear: [usize; 7],
+    _clear_browsing_data: usize,
+    _before_clear_all: [usize; 1],
+    clear_browsing_data_all: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
 }
 
 /// `ICoreWebView2WebResourceRequestedEventArgs`: get_Request = 0, put_Response = 2.
@@ -411,13 +437,86 @@ pub fn default_user_data_dir(local_app_data: &Path, app_id: &str) -> Result<Path
         .join("webview2"))
 }
 
-/// Starts environment creation. `on_done` runs on the UI thread, from the message pump.
+/// Which WebView2 runtime an environment uses. The default is the installed Evergreen runtime.
+///
+/// Support: Partial. A fixed-version runtime folder is passed to WebView2 as the browser folder,
+/// and it must hold `msedgewebview2.exe` ([`check_fixed_runtime_folder`]). The folder's version
+/// is not compared with a minimum here; that check belongs to the build.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EnvironmentOptions {
+    fixed_runtime: Option<PathBuf>,
+}
+
+impl EnvironmentOptions {
+    /// Uses the fixed-version runtime in `folder` instead of the installed Evergreen runtime.
+    ///
+    /// Support: Partial. See the type's note on the version check.
+    pub fn with_fixed_runtime(mut self, folder: impl Into<PathBuf>) -> Self {
+        self.fixed_runtime = Some(folder.into());
+        self
+    }
+
+    /// The fixed-version runtime folder, or `None` for the Evergreen runtime.
+    ///
+    /// Support: Full.
+    pub fn fixed_runtime(&self) -> Option<&Path> {
+        self.fixed_runtime.as_deref()
+    }
+}
+
+/// Checks that a fixed-version runtime folder exists and holds `msedgewebview2.exe`.
+///
+/// Support: Full. It checks presence only; it does not start the runtime or read its version.
+pub fn check_fixed_runtime_folder(folder: &Path) -> Result<(), String> {
+    if !folder.is_dir() {
+        return Err(format!(
+            "the fixed WebView2 runtime folder {} does not exist",
+            folder.display()
+        ));
+    }
+    if !folder.join("msedgewebview2.exe").is_file() {
+        return Err(format!(
+            "{} holds no msedgewebview2.exe; point the runtime path at the fixed-version folder",
+            folder.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Starts environment creation with the installed Evergreen runtime. `on_done` runs on the UI
+/// thread, from the message pump.
+///
+/// Support: Full. Same as [`create_environment_with`] with the default options.
 pub fn create_environment(
     create: CreateEnvironmentFn,
     user_data_dir: &Path,
     on_done: impl FnOnce(Result<Environment, HRESULT>) + 'static,
 ) -> Result<(), HRESULT> {
+    create_environment_with(
+        create,
+        user_data_dir,
+        &EnvironmentOptions::default(),
+        on_done,
+    )
+}
+
+/// Starts environment creation with `options`. `on_done` runs on the UI thread, from the
+/// message pump.
+///
+/// Support: Partial. Uses the fixed runtime when `options` names one; see [`EnvironmentOptions`].
+pub fn create_environment_with(
+    create: CreateEnvironmentFn,
+    user_data_dir: &Path,
+    options: &EnvironmentOptions,
+    on_done: impl FnOnce(Result<Environment, HRESULT>) + 'static,
+) -> Result<(), HRESULT> {
     let user_data = wide(&user_data_dir.to_string_lossy());
+    // Kept alive until the call returns. A null pointer selects the Evergreen runtime.
+    let browser = options
+        .fixed_runtime
+        .as_ref()
+        .map(|folder| wide(&folder.to_string_lossy()));
+    let browser_ptr = browser.as_ref().map_or(std::ptr::null(), |w| w.as_ptr());
     let handler = new_completed_handler(IID_ENVIRONMENT_COMPLETED_HANDLER, move |hr, obj| {
         let result = if hr < 0 {
             Err(hr)
@@ -429,9 +528,9 @@ pub fn create_environment(
         };
         on_done(result);
     });
-    // SAFETY: a null browser folder selects the installed Evergreen runtime, a null options
-    // pointer selects defaults, and `user_data` and `handler` are valid for the call.
-    let hr = unsafe { create(std::ptr::null(), user_data.as_ptr(), null_mut(), handler) };
+    // SAFETY: `browser_ptr` is null or points at `browser`, which lives for the call; a null
+    // options pointer selects defaults; `user_data` and `handler` are valid for the call.
+    let hr = unsafe { create(browser_ptr, user_data.as_ptr(), null_mut(), handler) };
     // SAFETY: we release our own reference. A runtime that keeps the handler took its own.
     unsafe { release(handler) };
     if hr < 0 {
@@ -543,6 +642,33 @@ impl WebView {
         let vt: &ProfileVtbl = profile.vtbl();
         // SAFETY: `profile` is a live ICoreWebView2Profile object.
         check(unsafe { (vt.put_preferred_color_scheme)(profile.as_ptr(), scheme) })
+    }
+
+    /// Clears all browsing data of the webview's profile: cookies, cache, local storage and the
+    /// rest (`ClearBrowsingDataAll`). The profile is shared by every window of the environment.
+    /// `on_done` receives the HRESULT when WebView2 finishes; the call itself returns at once.
+    ///
+    /// Support: Full on Windows (WebView2 runtime with `ICoreWebView2Profile2`).
+    pub fn clear_browsing_data_all(
+        &self,
+        on_done: impl FnOnce(HRESULT) + 'static,
+    ) -> Result<(), HRESULT> {
+        let v13 = self.0.query(&IID_WEBVIEW_13)?;
+        let mut out: *mut c_void = null_mut();
+        // SAFETY: `v13` is a live ICoreWebView2_13 object; `out` is a valid out-pointer.
+        check(unsafe { (v13.vtbl::<Webview13Vtbl>().get_profile)(v13.as_ptr(), &mut out) })?;
+        // SAFETY: on success the callee returned a new reference that we now own.
+        let profile = unsafe { ComPtr::from_owned(out) }.ok_or(E_POINTER)?;
+        let profile2 = profile.query(&IID_PROFILE2)?;
+        let handler = new_completed_handler(IID_CLEAR_BROWSING_DATA_DONE_HANDLER, move |hr, _| {
+            on_done(hr)
+        });
+        let vt: &Profile2Vtbl = profile2.vtbl();
+        // SAFETY: `profile2` is a live ICoreWebView2Profile2 object; `handler` is live for the call.
+        let hr = unsafe { (vt.clear_browsing_data_all)(profile2.as_ptr(), handler) };
+        // SAFETY: we release our reference. The profile keeps its own while it needs the callback.
+        unsafe { release(handler) };
+        check(hr)
     }
 }
 
@@ -980,7 +1106,7 @@ mod header_tests {
     use std::path::PathBuf;
 
     /// (interface, header index, method name) for every slot we call.
-    const USED_SLOTS: [(&str, usize, &str); 35] = [
+    const USED_SLOTS: [(&str, usize, &str); 37] = [
         (
             "ICoreWebView2Environment",
             0,
@@ -1046,6 +1172,9 @@ mod header_tests {
         ),
         ("ICoreWebView2_13", 0, "get_Profile"),
         ("ICoreWebView2Profile", 6, "put_PreferredColorScheme"),
+        // ICoreWebView2Profile2 own methods: ClearBrowsingData (C slot 10), ClearBrowsingDataAll (12).
+        ("ICoreWebView2Profile2", 0, "ClearBrowsingData"),
+        ("ICoreWebView2Profile2", 2, "ClearBrowsingDataAll"),
     ];
 
     /// Method names of `iface`, in declaration order, from the header text.
@@ -1125,6 +1254,27 @@ mod path_tests {
                 "accepted `{bad}`"
             );
         }
+    }
+
+    #[test]
+    fn the_default_environment_uses_evergreen_and_a_fixed_folder_is_checked() {
+        assert_eq!(EnvironmentOptions::default().fixed_runtime(), None);
+        let options = EnvironmentOptions::default().with_fixed_runtime(r"C:\app\runtime");
+        assert_eq!(options.fixed_runtime(), Some(Path::new(r"C:\app\runtime")));
+
+        let missing = std::env::temp_dir().join(format!("tpt-no-runtime-{}", std::process::id()));
+        assert!(check_fixed_runtime_folder(&missing).is_err());
+
+        let folder = std::env::temp_dir().join(format!("tpt-fixed-runtime-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        assert!(
+            check_fixed_runtime_folder(&folder).is_err(),
+            "a folder without the executable was accepted"
+        );
+        std::fs::write(folder.join("msedgewebview2.exe"), b"").unwrap();
+        assert!(check_fixed_runtime_folder(&folder).is_ok());
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }
 

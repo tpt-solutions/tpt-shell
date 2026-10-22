@@ -9,15 +9,21 @@
 use tpt_shell_core::navigation::url_is_allowlisted;
 
 /// Origin of the app's own pages on macOS. Served by the `app` scheme handler.
+///
+/// Support: Full.
 pub const APP_ORIGIN: &str = "app://localhost";
 
 /// Content-Security-Policy for every response the shell serves (spec §9). Same policy as the
 /// Windows backend, so the conformance suite compares like with like.
+///
+/// Support: Full.
 pub const PAGE_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; \
 img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; \
 form-action 'none'; frame-ancestors 'none'";
 
 /// Whether `url` is under the app origin: the origin itself, or a path, query or fragment on it.
+///
+/// Support: Full.
 pub fn is_app_url(url: &str) -> bool {
     match url.strip_prefix(APP_ORIGIN) {
         Some(rest) => rest.is_empty() || rest.starts_with(['/', '?', '#']),
@@ -28,6 +34,8 @@ pub fn is_app_url(url: &str) -> bool {
 /// The path under the app origin that `uri` names, or `None` if it is not a safe app path. An
 /// empty path or `/` means `index.html`. A query or fragment is ignored. A `..` segment or a
 /// backslash is refused, so a path cannot reach outside what the app supplies.
+///
+/// Support: Full.
 pub fn app_path(uri: &str) -> Option<String> {
     if !is_app_url(uri) {
         return None;
@@ -50,6 +58,8 @@ pub fn app_path(uri: &str) -> Option<String> {
 /// Whether a navigation to `url` is allowed. Allowed: the app origin, `about:blank` (what a
 /// page loaded with `loadHTMLString` reports as its URL), and any URL the window's allowlist
 /// covers. Everything else is cancelled, including `file:` and other schemes.
+///
+/// Support: Full.
 pub fn navigation_allowed(url: &str, allowlist: &[String]) -> bool {
     is_app_url(url) || url == "about:blank" || url_is_allowlisted(url, allowlist)
 }
@@ -57,6 +67,8 @@ pub fn navigation_allowed(url: &str, allowlist: &[String]) -> bool {
 /// `value` as a JavaScript string literal (double-quoted), safe to splice into a script.
 /// Escapes quotes, backslashes, control characters, `<` (so `</script>` cannot appear) and the
 /// two line separators, which older JavaScript engines treat as line ends.
+///
+/// Support: Full.
 pub fn js_string_literal(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
     out.push('"');
@@ -80,11 +92,15 @@ pub fn js_string_literal(value: &str) -> String {
 
 /// The script that hands a host message to the page's `message` listeners. The bridge script
 /// (see `webview::BRIDGE_JS`) defines `window.__tptDeliver`, which fires those listeners.
+///
+/// Support: Full.
 pub fn deliver_script(message: &str) -> String {
     format!("window.__tptDeliver({});", js_string_literal(message))
 }
 
 /// Headers for a response the shell serves: the content type and the page policy.
+///
+/// Support: Full.
 pub fn response_headers(content_type: &str) -> [(&'static str, String); 2] {
     [
         ("Content-Type", content_type.to_string()),

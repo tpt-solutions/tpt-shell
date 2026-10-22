@@ -28,6 +28,8 @@ use crate::policy::{app_path, deliver_script, navigation_allowed, response_heade
 /// runtime (`js/runtime/tpt-shell.js`). It gives the runtime a `window.chrome.webview` with the
 /// same shape as WebView2: `postMessage` to the shell, and a `message` listener for messages
 /// from it.
+///
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub const BRIDGE_JS: &str = "(function () {\
   if (window.chrome && window.chrome.webview) { return; }\
   var listeners = [];\
@@ -43,12 +45,18 @@ pub const BRIDGE_JS: &str = "(function () {\
 })();";
 
 /// Name of the message handler the page posts to: `window.webkit.messageHandlers.tptShell`.
+///
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub const MESSAGE_HANDLER_NAME: &str = "tptShell";
 
 /// URL scheme the app's pages are served from.
+///
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub const APP_SCHEME: &str = "app";
 
 /// Runs `script` in the page. Errors the script throws are not reported.
+///
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub fn evaluate(web: &WKWebView, script: &str) {
     let source = NSString::from_str(script);
     // SAFETY: main thread; a nil completion handler is allowed.
@@ -62,12 +70,15 @@ fn url_text(url: Option<Retained<NSURL>>) -> String {
         .unwrap_or_default()
 }
 
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub struct MessageIvars {
     handler: RefCell<Option<MessageHandler>>,
 }
 
 define_class!(
     /// Receives `window.webkit.messageHandlers.tptShell.postMessage(...)` from the page.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "TptScriptMessageHandler"]
@@ -108,6 +119,7 @@ define_class!(
 );
 
 impl ScriptMessageHandler {
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn new(mtm: MainThreadMarker) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(MessageIvars {
             handler: RefCell::new(None),
@@ -116,17 +128,21 @@ impl ScriptMessageHandler {
         unsafe { msg_send![super(this), init] }
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_handler(&self, handler: MessageHandler) {
         *self.ivars().handler.borrow_mut() = Some(handler);
     }
 }
 
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub struct NavigationIvars {
     allowlist: RefCell<Vec<String>>,
 }
 
 define_class!(
     /// Decides, for each navigation in any frame, whether WebKit may load it (spec §9).
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "TptNavigationDelegate"]
@@ -157,6 +173,7 @@ define_class!(
 );
 
 impl NavigationDelegate {
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn new(mtm: MainThreadMarker, allowlist: Vec<String>) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(NavigationIvars {
             allowlist: RefCell::new(allowlist),
@@ -166,6 +183,7 @@ impl NavigationDelegate {
     }
 }
 
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub struct SchemeIvars {
     source: RefCell<Option<AssetSource>>,
 }
@@ -173,6 +191,8 @@ pub struct SchemeIvars {
 define_class!(
     /// Answers requests for `app://` URLs from the window's asset source, with the page policy
     /// on every answer. Requests are answered inside `start`, so no task outlives its stop.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "TptSchemeHandler"]
@@ -193,6 +213,7 @@ define_class!(
 );
 
 impl SchemeHandler {
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn new(mtm: MainThreadMarker) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(SchemeIvars {
             source: RefCell::new(None),
@@ -201,6 +222,7 @@ impl SchemeHandler {
         unsafe { msg_send![super(this), init] }
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_source(&self, source: AssetSource) {
         *self.ivars().source.borrow_mut() = Some(source);
     }
@@ -254,12 +276,15 @@ impl SchemeHandler {
     }
 }
 
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub struct WindowDelegateIvars {
     close_action: Cell<CloseAction>,
 }
 
 define_class!(
     /// Handles the user's close request for one window (title bar button, Cmd+W).
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "TptWindowDelegate"]
@@ -283,6 +308,7 @@ define_class!(
 );
 
 impl WindowDelegate {
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn new(mtm: MainThreadMarker) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(WindowDelegateIvars {
             close_action: Cell::new(CloseAction::Close),
@@ -291,6 +317,7 @@ impl WindowDelegate {
         unsafe { msg_send![super(this), init] }
     }
 
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_close_action(&self, action: CloseAction) {
         self.ivars().close_action.set(action);
     }

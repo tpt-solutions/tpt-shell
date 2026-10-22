@@ -14,10 +14,17 @@
 //! - [`probe`]: which GTK and WebKit libraries are installed, for `doctor`.
 //! - [`gtk3`]: the GTK 3 and WebKit2GTK 4.1 adapter.
 
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod dbus;
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod desktop;
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod gtk3;
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod hotkey;
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod loader;
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod probe;
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod single_instance;

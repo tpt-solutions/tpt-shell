@@ -11,6 +11,9 @@ use crate::gtk3;
 use crate::loader::SharedLibrary;
 
 /// An adapter this crate can run.
+///
+/// Support: Partial. Loads system libraries at run time. Not run on macOS/Linux here; compile-
+/// checked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Adapter {
     /// GTK 3 with WebKit2GTK 4.1.
@@ -18,6 +21,9 @@ pub enum Adapter {
 }
 
 /// The display the session offers.
+///
+/// Support: Partial. Loads system libraries at run time. Not run on macOS/Linux here; compile-
+/// checked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Display {
     X11,
@@ -28,6 +34,9 @@ pub enum Display {
 }
 
 /// What was found on this machine.
+///
+/// Support: Partial. Loads system libraries at run time. Not run on macOS/Linux here; compile-
+/// checked.
 #[derive(Debug)]
 pub struct Probe {
     /// `Ok` with the library names that opened, or the reason it did not.
@@ -41,6 +50,9 @@ pub struct Probe {
 
 /// Probes the libraries and the display. Opens libraries but calls no GTK function, so it does
 /// not start GTK or need a display.
+///
+/// Support: Partial. Loads system libraries at run time. Not run on macOS/Linux here; compile-
+/// checked.
 pub fn probe() -> Probe {
     let gtk3_result = match gtk3::sys::load() {
         Ok(_) => Ok("GTK 3 and WebKit2GTK 4.1 loaded".to_string()),
@@ -65,6 +77,9 @@ pub fn probe() -> Probe {
 }
 
 /// The display from the environment. Pure apart from reading variables.
+///
+/// Support: Partial. Loads system libraries at run time. Not run on macOS/Linux here; compile-
+/// checked.
 pub fn display() -> Display {
     let set = |name: &str| std::env::var_os(name).is_some_and(|v| !v.is_empty());
     match (set("DISPLAY"), set("WAYLAND_DISPLAY")) {
@@ -77,6 +92,9 @@ pub fn display() -> Display {
 
 impl Probe {
     /// One line per fact, for the `doctor` output.
+    ///
+    /// Support: Partial. Loads system libraries at run time. Not run on macOS/Linux here; compile-
+    /// checked.
     pub fn report(&self) -> Vec<String> {
         let mut lines = Vec::new();
         lines.push(match &self.gtk3 {

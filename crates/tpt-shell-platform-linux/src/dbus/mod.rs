@@ -15,12 +15,25 @@
 //! - [`tray`]: a StatusNotifier tray icon.
 //! - [`atspi`]: a dump of an application's accessibility tree.
 
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub mod atspi;
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub mod bus;
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub mod notify;
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub mod secrets;
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub mod settings;
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub mod tray;
+/// Support: Full.
 pub mod wire;
 
 pub use bus::{session, Connection, Stream};

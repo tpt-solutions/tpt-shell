@@ -10,13 +10,18 @@
 //! are tested on every host. The event loop, dialogs, pasteboard, notifications, tray, deep
 //! links, single instance, keystore and accessibility are not built.
 
+/// Support: Full.
 pub mod policy;
 
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 #[cfg(target_os = "macos")]
 pub mod backend;
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 #[cfg(target_os = "macos")]
 pub mod shim;
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 #[cfg(target_os = "macos")]
 pub mod webview;
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 #[cfg(target_os = "macos")]
 pub mod window;

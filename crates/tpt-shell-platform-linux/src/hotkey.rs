@@ -20,10 +20,16 @@ use crate::loader::SharedLibrary;
 
 /// Identifies a registered hotkey. Returned by [`Hotkeys::register`] and reported by
 /// [`Hotkeys::poll`].
+///
+/// Support: Partial. X11 only; Wayland is unsupported. Not run on macOS/Linux here; compile-
+/// checked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct HotkeyId(pub u32);
 
 /// A parsed hotkey: the modifiers and the key, named the way Xlib names keysyms.
+///
+/// Support: Partial. X11 only; Wayland is unsupported. Not run on macOS/Linux here; compile-
+/// checked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Accelerator {
     pub ctrl: bool,
@@ -36,6 +42,8 @@ pub struct Accelerator {
 
 /// Parses an accelerator such as `Ctrl+Shift+K` or `Super+F5`. Names are case-insensitive.
 /// Refused: no modifier, two keys, an unknown key name, or a repeated modifier.
+///
+/// Support: Full.
 pub fn parse(text: &str) -> std::result::Result<Accelerator, String> {
     let parts: Vec<&str> = text.split('+').map(str::trim).collect();
     let (key, mods) = parts
@@ -230,6 +238,9 @@ struct Binding {
 }
 
 /// Global hotkeys on the X11 display. Use from the UI thread only.
+///
+/// Support: Partial. X11 only; Wayland is unsupported. Not run on macOS/Linux here; compile-
+/// checked.
 pub struct Hotkeys {
     xlib: Xlib,
     display: *mut c_void,
@@ -241,6 +252,9 @@ pub struct Hotkeys {
 impl Hotkeys {
     /// Connects to the X display. Refused with [`Error::Unsupported`] when there is none, so a
     /// Wayland-only session reports that global hotkeys are not available.
+    ///
+    /// Support: Partial. X11 only; Wayland is unsupported. Not run on macOS/Linux here; compile-
+    /// checked.
     pub fn open() -> Result<Hotkeys> {
         let display_var = std::env::var("DISPLAY").unwrap_or_default();
         if display_var.is_empty() {
@@ -273,6 +287,9 @@ impl Hotkeys {
 
     /// Grabs the accelerator. Fails when the text does not parse, the key name is unknown, or
     /// another client already holds the key.
+    ///
+    /// Support: Partial. X11 only; Wayland is unsupported. Not run on macOS/Linux here; compile-
+    /// checked.
     pub fn register(&mut self, accelerator: &str) -> Result<HotkeyId> {
         let accel = parse(accelerator)
             .map_err(|m| Error::Backend(format!("hotkey `{accelerator}`: {m}")))?;
@@ -329,6 +346,9 @@ impl Hotkeys {
     }
 
     /// Releases a hotkey. An unknown id does nothing.
+    ///
+    /// Support: Partial. X11 only; Wayland is unsupported. Not run on macOS/Linux here; compile-
+    /// checked.
     pub fn unregister(&mut self, id: HotkeyId) {
         self.remove(id);
     }
@@ -345,6 +365,9 @@ impl Hotkeys {
     }
 
     /// Returns the hotkeys pressed since the last call. Does not block.
+    ///
+    /// Support: Partial. X11 only; Wayland is unsupported. Not run on macOS/Linux here; compile-
+    /// checked.
     pub fn poll(&mut self) -> Vec<HotkeyId> {
         let mut fired = Vec::new();
         // SAFETY: `XEvent` is a union of at most 192 bytes on 64-bit Linux. The buffer is larger

@@ -148,6 +148,21 @@ impl Keystore {
     }
 }
 
+/// The audit log's secret store. The audit crate reads and writes its checkpoint seed through
+/// this trait, so the DPAPI keystore backs `StoreKeySupplier` and `enroll_key` directly.
+///
+/// Support: Full on Windows. Secrets are DPAPI-protected for the current user; the audit
+/// trait's errors are the same plain text this keystore already returns.
+impl tpt_shell_audit::keys::KeyStore for Keystore {
+    fn get(&self, name: &str) -> Result<Option<Vec<u8>>, String> {
+        Keystore::get(self, name)
+    }
+
+    fn set(&self, name: &str, secret: &[u8]) -> Result<(), String> {
+        Keystore::set(self, name, secret)
+    }
+}
+
 /// The folder a keystore uses for `app_id`: `%LOCALAPPDATA%\tpt-shell\<app>\keystore`.
 pub fn default_keystore_dir(local_app_data: &Path, app_id: &str) -> PathBuf {
     local_app_data
@@ -192,6 +207,23 @@ mod tests {
         );
         assert!(store.delete("audit-key").expect("delete"));
         assert!(!store.delete("audit-key").expect("delete again"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_audit_key_enrolled_in_the_keystore_signs_after_a_reload() {
+        use tpt_shell_audit::keys::{enroll_key, KeySupplier, StoreKeySupplier};
+
+        let dir = std::env::temp_dir().join(format!("tpt-keystore-audit-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let seed = [7u8; 32];
+        let public = enroll_key(&Keystore::new(&dir), "audit", &seed).expect("enroll");
+        // A fresh Keystore value reads what the first one wrote, as after a restart.
+        let signer = StoreKeySupplier::new(Keystore::new(&dir), "audit")
+            .signer()
+            .expect("signer");
+        assert_eq!(signer.verifying_key(), public);
+        assert!(enroll_key(&Keystore::new(&dir), "audit", &[9u8; 32]).is_err());
         let _ = fs::remove_dir_all(&dir);
     }
 

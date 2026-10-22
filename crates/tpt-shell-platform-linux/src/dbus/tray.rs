@@ -31,6 +31,8 @@ const NO_MENU: &str = "/NO_DBUSMENU";
 const POLL: Duration = Duration::from_millis(200);
 
 /// What the tray shows.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrayOptions {
     /// Identifies the item to the host. Letters, digits, `-`, `_` or `.`.
@@ -42,6 +44,9 @@ pub struct TrayOptions {
 }
 
 /// A running tray item. Dropping it removes the item from the host and stops the thread.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub struct Tray {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -49,6 +54,9 @@ pub struct Tray {
 
 impl Tray {
     /// Shows the item. `on_activate(x, y)` runs on the tray thread for each left click.
+    ///
+    /// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+    /// Unsupported. Not run on macOS/Linux here; compile-checked.
     pub fn start(
         options: TrayOptions,
         on_activate: Box<dyn FnMut(i32, i32) + Send>,

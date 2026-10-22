@@ -21,10 +21,14 @@ use crate::policy::is_app_url;
 use crate::window::MacWindow;
 
 /// Handle to a window managed by [`MacBackend`].
+///
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowId(pub usize);
 
 /// Owns the windows. Create it on the main thread.
+///
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub struct MacBackend {
     mtm: MainThreadMarker,
     next: usize,
@@ -33,6 +37,8 @@ pub struct MacBackend {
 
 impl MacBackend {
     /// `None` when the caller is not on the main thread.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn new() -> Option<Self> {
         MainThreadMarker::new().map(|mtm| MacBackend {
             mtm,

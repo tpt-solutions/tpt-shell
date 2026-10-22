@@ -17,6 +17,8 @@ const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const SETTINGS_IFACE: &str = "org.freedesktop.portal.Settings";
 
 /// Maps the portal's `color-scheme` value to a [`ColorScheme`].
+///
+/// Support: Full.
 pub fn scheme_from_portal(value: u32) -> ColorScheme {
     match value {
         1 => ColorScheme::Dark,
@@ -25,6 +27,9 @@ pub fn scheme_from_portal(value: u32) -> ColorScheme {
 }
 
 /// Reads the colour scheme. Needs a running desktop portal; otherwise it fails with an error.
+///
+/// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
+/// Unsupported. Not run on macOS/Linux here; compile-checked.
 pub fn color_scheme() -> Result<ColorScheme> {
     let mut conn: Connection<Stream> = session()?;
     read_color_scheme(&mut conn)
