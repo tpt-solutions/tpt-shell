@@ -58,6 +58,7 @@ pub mod __private {
     /// The asset that the app's asset source serves for `path` under the app origin, when the path
     /// is a stored blob (`__tpt/blob/<id>`). The same lookup the app uses, so the conformance
     /// harness can time the blob path that real blobs take. Not for apps.
+    #[cfg(windows)]
     pub fn blob_asset_for_path(path: &str) -> Option<tpt_shell_core::backend::Asset> {
         path.strip_prefix("__tpt/blob/")
             .and_then(crate::blob::blob_asset)
