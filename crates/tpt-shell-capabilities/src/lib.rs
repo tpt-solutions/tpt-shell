@@ -272,6 +272,20 @@ impl Engine {
         capability: &str,
         request: Request,
     ) -> Decision {
+        self.check_with(window, origin, capability, request, false)
+    }
+
+    /// The body of [`Engine::check`]. With `resolve_roots`, granted roots are compared in their
+    /// real form too, so a real path (from [`real_path`]) matches a root given through a link
+    /// or a short (8.3) name.
+    fn check_with(
+        &self,
+        window: &str,
+        origin: &str,
+        capability: &str,
+        request: Request,
+        resolve_roots: bool,
+    ) -> Decision {
         let mut matching = self
             .grants
             .iter()
@@ -286,7 +300,7 @@ impl Engine {
 
         let mut out_of_scope = None;
         for grant in matching {
-            match in_scope(&grant.scope, request) {
+            match in_scope(&grant.scope, request, resolve_roots) {
                 Ok(()) => {
                     return if grant.consent {
                         match self.consent.get(window, capability) {
@@ -374,7 +388,7 @@ impl Engine {
 
     fn check_real(&self, window: &str, origin: &str, capability: &str, raw: &str) -> Decision {
         match real_path(raw) {
-            Ok(real) => self.check(window, origin, capability, Request::Path(&real)),
+            Ok(real) => self.check_with(window, origin, capability, Request::Path(&real), true),
             Err(why) => Decision::Deny(bad_request(format!(
                 "`{raw}` cannot be checked against the scope: {why}"
             ))),
@@ -431,7 +445,7 @@ fn outside(capability_hint: &str) -> Denial {
     }
 }
 
-fn in_scope(scope: &Scope, request: Request) -> Result<(), Denial> {
+fn in_scope(scope: &Scope, request: Request, resolve_roots: bool) -> Result<(), Denial> {
     match scope {
         Scope::Unrestricted => Ok(()),
         Scope::Paths(roots) => {
@@ -440,7 +454,11 @@ fn in_scope(scope: &Scope, request: Request) -> Result<(), Denial> {
             };
             let path = normalize_path(raw).map_err(bad_request)?;
             let inside = roots.iter().any(|root| {
-                let root = normalize_path(root).unwrap_or_default();
+                // A root that cannot be resolved (no such directory) keeps its lexical form.
+                let root = match resolve_roots.then(|| real_path(root)) {
+                    Some(Ok(real)) => real,
+                    _ => normalize_path(root).unwrap_or_default(),
+                };
                 path == root
                     || path.starts_with(&root)
                         && (root.ends_with('/') || path[root.len()..].starts_with('/'))
@@ -1265,6 +1283,24 @@ mod tests {
         let new_file = root.join("new.txt").to_string_lossy().into_owned();
         assert_eq!(
             e.check_path_on_disk("main", ORIGIN, "fs.read", &new_file),
+            Decision::Allow
+        );
+    }
+
+    /// The grant and the request both use the link path (as a short 8.3 name would be spelled),
+    /// while the file really lives under the target. The real path must match the real root.
+    #[test]
+    fn a_file_under_a_root_given_through_a_link_is_allowed_on_disk() {
+        let target = fresh_dir("target");
+        fs::write(target.join("a.txt"), b"x").unwrap();
+        let alias = fresh_dir("alias").join("root");
+        if !link_dir(&target, &alias) {
+            return;
+        }
+        let e = engine_for_root(&alias);
+        let raw = alias.join("a.txt").to_string_lossy().into_owned();
+        assert_eq!(
+            e.check_path_on_disk("main", ORIGIN, "fs.read", &raw),
             Decision::Allow
         );
     }
