@@ -4,6 +4,12 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Changed
+- Contributions are accepted as issues only. Pull requests are not taken.
+
+### Removed
+- `CODE_OF_CONDUCT.md`.
+
 ### Added
 - Repository skeleton: Cargo workspace, empty facade crate `tpt-shell`.
 - Dual licence: MIT and Apache-2.0 (TPT Solutions).

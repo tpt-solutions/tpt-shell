@@ -1,11 +1,13 @@
 # Contributing to tpt-shell
 
-Thanks for helping. By contributing you agree that your work is licensed under MIT OR Apache-2.0, with no additional terms (see the Contribution section of [README.md](README.md)).
+Thanks for helping. Contributions are accepted as issues only. Open an issue to report a bug, ask for a feature or suggest a change. Do not open pull requests: the maintainers make the changes themselves.
 
-## Before you start
+By reporting an issue you agree that any suggestion you make is licensed under MIT OR Apache-2.0, with no additional terms (see the Contribution section of [README.md](README.md)).
+
+## Before you open an issue
 
 - Read [spec.txt](spec.txt) for the design and [todo.md](todo.md) for what is planned and in progress.
-- For a change to the design, the public API or the contract, open an RFC first (see [docs/rfcs/](docs/rfcs/)).
+- For a change to the design, the public API or the contract, say so in the issue. An RFC (see [docs/rfcs/](docs/rfcs/)) may be asked for.
 - Security issues go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## Dependency rules
@@ -27,7 +29,7 @@ Thanks for helping. By contributing you agree that your work is licensed under M
 - Every error has a stable `TS####` code, an explanation and a fix hint.
 - Do not claim "first" or "only" in docs without evidence in `docs/competitive-scan.md`.
 
-## Checks to run before opening a PR
+## Checks the maintainers run
 
 ```sh
 cargo fmt --all -- --check
@@ -44,12 +46,6 @@ cargo deny check
 - The MSRV was measured, not assumed: the whole workspace builds and passes its tests on Rust 1.90.0. Older installed toolchains fail, either on a dependency that needs a newer Rust or on `unsigned_is_multiple_of` (stable in 1.87).
 - Raising the MSRV is a minor-version change at the least. It is recorded in CHANGELOG under "Unreleased" with the reason, and it happens only when a dependency or a language or library feature needs it.
 - Deprecations are announced in the CHANGELOG for at least one minor release before removal, once releases exist.
-
-## Pull requests
-
-- Use the PR template. Keep a PR to one logical change.
-- Update [CHANGELOG.md](CHANGELOG.md) under "Unreleased" for user-visible changes.
-- Tick the matching item in [todo.md](todo.md) when a task is finished.
 
 ## Support tags and conformance
 

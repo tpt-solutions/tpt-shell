@@ -655,7 +655,6 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [x] Linux: persistent storage for the owned context (GTK3 `WebsiteDataManager`, GTK4 `webkit_network_session_new(data, cache)`, symbols in `sys.rs`) and `with_data_dir` on both backends; verified only by the `linux-adapters` CI job
 - [x] README: replace the stale "M0 in progress, no usable API yet" status with the real state, a quickstart and an example snippet
 - [x] Docs that promise more than exists: `quickstart.md` "Not yet", `cookbook.md` replays, `security.md` Secret Service / fuzz targets / compliance outputs
-- [ ] `CODE_OF_CONDUCT.md`: fill in the contact placeholder
 
 ### Onboarding
 - [ ] `tpt-shell new` writes a runnable project (`Cargo.toml`, `src/main.rs`, manifest, assets) so `cargo run` opens a window

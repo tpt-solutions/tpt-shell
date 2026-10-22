@@ -78,4 +78,4 @@ Report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Contributions are accepted as issues only. See [CONTRIBUTING.md](CONTRIBUTING.md).
