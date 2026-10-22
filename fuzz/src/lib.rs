@@ -14,7 +14,7 @@ use tpt_shell_ipc::schema::{validate, Field, Schema};
 use tpt_shell_ipc::Limits;
 
 /// The names of the targets, in the order the driver lists them.
-pub const TARGETS: [&str; 4] = ["envelope", "validator", "manifest", "audit_chain"];
+pub const TARGETS: [&str; 5] = ["envelope", "validator", "manifest", "audit_chain", "replay"];
 
 /// Runs the target called `name` on `data`. Returns `false` for an unknown name.
 pub fn run_target(name: &str, data: &[u8]) -> bool {
@@ -23,9 +23,19 @@ pub fn run_target(name: &str, data: &[u8]) -> bool {
         "validator" => validator(data),
         "manifest" => manifest(data),
         "audit_chain" => audit_chain(data),
+        "replay" => replay(data),
         _ => return false,
     }
     true
+}
+
+/// Replay reader: any text, read strictly and leniently. A recording that cannot be read is an
+/// error, never a panic.
+pub fn replay(data: &[u8]) {
+    if let Ok(text) = std::str::from_utf8(data) {
+        let _ = tpt_shell_replay::read(text, tpt_shell_replay::Mode::Strict);
+        let _ = tpt_shell_replay::read(text, tpt_shell_replay::Mode::Lenient);
+    }
 }
 
 /// Envelope parser: any bytes, as one JS -> Rust message.
@@ -212,6 +222,13 @@ pub fn seeds() -> Vec<Vec<u8>> {
         b"[app]\nname = \"demo\"\nversion = \"1.0.0\"\n\n[[windows]]\nname = \"main\"\ntitle = \"Main\"\nwidth = 640\nheight = 480\n"
             .to_vec(),
         br#"{"seq":0,"actor":"page","command":"ping","outcome":"ok"}"#.to_vec(),
+        concat!(
+            "{\"app\":\"demo\",\"format\":\"tptreplay\",\"platform\":\"windows\",\"version\":2}\n",
+            "{\"data\":{\"cmd\":\"ping\",\"id\":1},\"kind\":\"ipc_request\",\"seq\":0,\"t_ns\":0}\n",
+            "{\"data\":{\"data\":\"pong\",\"id\":1,\"ok\":true},\"kind\":\"ipc_response\",\"seq\":1,\"t_ns\":5}\n",
+        )
+        .as_bytes()
+        .to_vec(),
     ]
 }
 
@@ -287,6 +304,23 @@ mod smoke {
         for _ in 0..200 {
             let n = rng.bytes(512);
             audit_chain(&n);
+        }
+    }
+
+    #[test]
+    fn replay_target_never_panics() {
+        let mut rng = Rng::new(0x6a09_e667_f3bc_c908);
+        for input in fixed_inputs() {
+            replay(&input);
+        }
+        for seed in seeds() {
+            for _ in 0..ITERATIONS {
+                replay(&rng.mutate(&seed));
+            }
+        }
+        for _ in 0..ITERATIONS {
+            let n = rng.bytes(256);
+            replay(&n);
         }
     }
 

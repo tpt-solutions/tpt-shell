@@ -687,7 +687,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 ## Phase M12 — Hardening and v1.0.0
 
 ### Fuzzing and security
-- [ ] Fuzz envelope parser, validator, manifest parser, audit chain, replay reader (extended runs)
+- [ ] Fuzz envelope parser, validator, manifest parser, audit chain, replay reader (extended runs). Progress: the replay reader is now a fifth target in `fuzz/` (its smoke test runs with the others). Each of the five targets ran 40 s in release with no panic (about 230 million runs, audit chain about 38 thousand, since each run writes a file). Extended runs of hours are still to do, and so is a libFuzzer harness, which the licence policy blocks (see `fuzz/Cargo.toml`)
 - [ ] Security test pass: capability bypass, oversized/malformed messages, path-scope escapes
 - [ ] External or internal security review
 - [ ] Control-channel review (R7)

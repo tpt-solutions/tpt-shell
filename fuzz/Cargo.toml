@@ -31,3 +31,4 @@ serde_json = "1"
 tpt-shell-ipc = { path = "../crates/tpt-shell-ipc" }
 tpt-shell-manifest = { path = "../crates/tpt-shell-manifest" }
 tpt-shell-audit = { path = "../crates/tpt-shell-audit" }
+tpt-shell-replay = { path = "../crates/tpt-shell-replay" }
