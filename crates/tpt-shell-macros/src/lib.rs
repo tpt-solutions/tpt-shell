@@ -20,6 +20,8 @@ use quote::quote;
 use syn::{parse_macro_input, DeriveInput, LitStr};
 
 #[proc_macro]
+/// Support: Partial. Cargo does not rerun the build when a file is added to the directory, only
+/// when an embedded file changes; touch a source file after adding one.
 pub fn embed_dir(input: TokenStream) -> TokenStream {
     let dir = parse_macro_input!(input as LitStr);
     let manifest = std::env::var_os("CARGO_MANIFEST_DIR")
@@ -86,6 +88,9 @@ fn content_type(path: &str) -> &'static str {
 /// The file is parsed at compile time, so a broken manifest is a compile error with its line.
 /// The file is also tracked by `include_str!`, so an edit rebuilds the crate. Pass the text to
 /// `App::manifest_audit` or any other reader.
+///
+/// Support: Partial. No test in this workspace expands it yet; the manifest check it runs is tested
+/// in tpt-shell-manifest.
 #[proc_macro]
 pub fn include_manifest(input: TokenStream) -> TokenStream {
     let rel = parse_macro_input!(input as LitStr);
@@ -111,6 +116,8 @@ pub fn include_manifest(input: TokenStream) -> TokenStream {
 /// `#[derive(Contract)]` gives a struct or a unit-variant enum its argument schema, so it can be
 /// a command argument. Bounds go on fields: `#[contract(max_len = 16, chars = "a-z")]`.
 /// See the `derive` module for the rules.
+///
+/// Support: Full.
 #[proc_macro_derive(Contract, attributes(contract))]
 pub fn derive_contract(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -131,6 +138,8 @@ pub fn derive_contract(input: TokenStream) -> TokenStream {
 ///   `&JobContext` parameter and answers with a job id. `job` is shorthand for `kind = "job"`;
 /// - `ui` and `agent`: flags, both off by default (`ui` runs on the UI thread; `agent` exposes
 ///   the command to the agent surface).
+///
+/// Support: Full.
 #[proc_macro_attribute]
 pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item = parse_macro_input!(item as syn::ItemFn);
@@ -141,6 +150,8 @@ pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// `commands![a, b]` builds a `Contract` from `#[command]` functions in the same module.
+///
+/// Support: Full.
 #[proc_macro]
 pub fn commands(input: TokenStream) -> TokenStream {
     match command::expand_commands(input.into()) {
@@ -150,6 +161,8 @@ pub fn commands(input: TokenStream) -> TokenStream {
 }
 
 /// `register_commands!(&mut router, a, b)` registers each `#[command]` handler on the router.
+///
+/// Support: Full.
 #[proc_macro]
 pub fn register_commands(input: TokenStream) -> TokenStream {
     match command::expand_register(input.into()) {

@@ -15,18 +15,30 @@ use serde::Deserialize;
 use toml::Spanned;
 
 /// Error codes. Stable: they are published in the error registry (`tpt-shell explain`).
+///
+/// Support: Full.
 pub mod codes {
     /// The file is not valid TOML, or a value has the wrong type.
+    ///
+    /// Support: Full.
     pub const SYNTAX: &str = "TS0001";
     /// A key is not part of the schema.
+    ///
+    /// Support: Full.
     pub const UNKNOWN_KEY: &str = "TS0002";
     /// A value is present but not allowed (empty name, bad size, bad capability name).
+    ///
+    /// Support: Full.
     pub const INVALID_VALUE: &str = "TS0003";
     /// A required key is missing.
+    ///
+    /// Support: Full.
     pub const MISSING_KEY: &str = "TS0004";
 }
 
 /// One problem found in a manifest.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ManifestError {
     pub code: &'static str,
@@ -47,6 +59,9 @@ impl fmt::Display for ManifestError {
 impl std::error::Error for ManifestError {}
 
 /// A validated manifest.
+///
+/// Support: Partial. The sections for kiosk, devices, agent, replay, test, profiles and compliance
+/// are accepted and kept as raw TOML, not validated; their own parsers come with those phases.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Manifest {
     pub app: App,
@@ -59,6 +74,8 @@ pub struct Manifest {
 
 /// `[audit]`: what the audit writer keeps from action parameters. The defaults keep only the
 /// hash, which is what `tpt_shell_audit::Policy::default()` does too.
+///
+/// Support: Full.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AuditSettings {
     /// Keep a copy of the parameters, with `redact` applied. Off means only the hash.
@@ -68,12 +85,14 @@ pub struct AuditSettings {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Support: Full.
 pub struct App {
     pub name: String,
     pub version: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Support: Full.
 pub struct Window {
     pub name: String,
     pub title: String,
@@ -147,6 +166,9 @@ struct RawCapabilities {
 }
 
 /// Parses and validates the text of a `tpt-shell.toml`.
+///
+/// Support: Partial. The sections for kiosk, devices, agent, replay, test, profiles and compliance
+/// are accepted and kept as raw TOML, not validated; their own parsers come with those phases.
 pub fn parse(text: &str) -> Result<Manifest, ManifestError> {
     let raw: RawManifest = toml::from_str(text).map_err(|e| from_toml_error(text, &e))?;
     let line_of = |offset: usize| text[..offset.min(text.len())].matches('\n').count() + 1;

@@ -21,6 +21,8 @@ use serde_json::{Map, Value};
 use crate::contract::CONTRACT_VERSION;
 
 /// One difference between two contracts.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Change {
     /// Where the change is: a command (`ping`), an argument (`ping.args.name`), and so on.
@@ -31,6 +33,8 @@ pub struct Change {
 }
 
 /// Compares two contract files given as text, returning every change in a stable order.
+///
+/// Support: Full.
 pub fn diff(old: &str, new: &str) -> Result<Vec<Change>, String> {
     let old = parse(old, "the old contract")?;
     let new = parse(new, "the new contract")?;

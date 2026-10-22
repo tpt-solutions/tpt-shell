@@ -22,13 +22,19 @@ use crate::schema::Schema;
 
 /// Longest path accepted in a [`ScopedPath`] (bytes). Windows paths are limited to 32767 UTF-16
 /// units, but a much shorter limit is enough for a command argument.
+///
+/// Support: Full.
 pub const MAX_PATH_LEN: usize = 1024;
 /// Longest device identifier accepted in a [`DeviceId`] (bytes).
+///
+/// Support: Full.
 pub const MAX_DEVICE_ID_LEN: usize = 128;
 /// Characters allowed in a device identifier, besides ASCII letters and digits.
 const DEVICE_ID_EXTRA: &str = "_.:-";
 
 /// Why a scoped value was refused. The message names the problem and is safe to show a page.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScopeError(pub String);
 
@@ -42,12 +48,16 @@ impl std::error::Error for ScopeError {}
 
 /// An absolute, lexically safe path from the page. The text is kept as given, so the handler can
 /// open it. Build one with [`ScopedPath::new`]; the serde and argument paths go through it too.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct ScopedPath(String);
 
 impl ScopedPath {
     /// Checks `raw` and wraps it.
+    ///
+    /// Support: Full.
     pub fn new(raw: &str) -> Result<Self, ScopeError> {
         if raw.len() > MAX_PATH_LEN {
             return Err(ScopeError(format!(
@@ -61,12 +71,16 @@ impl ScopedPath {
     }
 
     /// The path as given.
+    ///
+    /// Support: Full.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
     /// The lexically normalized path, for comparing with a scope. See
     /// [`tpt_shell_capabilities::normalize_path`].
+    ///
+    /// Support: Full.
     pub fn normalized(&self) -> String {
         // Checked in `new`, so this does not fail.
         tpt_shell_capabilities::normalize_path(&self.0).unwrap_or_default()
@@ -98,12 +112,16 @@ impl ToSchema for ScopedPath {
 
 /// A device identifier from the page, such as `serial:COM3`. See the module documentation for
 /// the allowed characters.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct DeviceId(String);
 
 impl DeviceId {
     /// Checks `raw` and wraps it.
+    ///
+    /// Support: Full.
     pub fn new(raw: &str) -> Result<Self, ScopeError> {
         if raw.is_empty() {
             return Err(ScopeError("device id is empty".into()));
@@ -126,6 +144,8 @@ impl DeviceId {
     }
 
     /// The identifier.
+    ///
+    /// Support: Full.
     pub fn as_str(&self) -> &str {
         &self.0
     }

@@ -25,6 +25,8 @@ use std::io;
 use std::path::PathBuf;
 
 /// What a grant lets through.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Scope {
     Unrestricted,
@@ -41,6 +43,8 @@ pub enum Scope {
 }
 
 /// One permission given to one window and origin.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Grant {
     pub capability: String,
@@ -52,6 +56,8 @@ pub struct Grant {
 }
 
 /// What a command wants to do, checked against the scope.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Request<'a> {
     /// No target: only unrestricted grants allow it.
@@ -63,6 +69,8 @@ pub enum Request<'a> {
 }
 
 /// Why a request was refused.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Denial {
     /// Stable code for the page: `CAP_NO_GRANT`, `CAP_OUT_OF_SCOPE`, `CAP_BAD_REQUEST`,
@@ -72,6 +80,7 @@ pub struct Denial {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// Support: Full.
 pub enum Decision {
     Allow,
     Deny(Denial),
@@ -80,21 +89,29 @@ pub enum Decision {
 }
 
 /// Rejected when a grant is added with a scope that cannot be used safely.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GrantError(pub String);
 
 /// Asks the user. Implemented by the platform (a native dialog, never web content).
+///
+/// Support: Full.
 pub trait ConsentPrompt {
     fn ask(&mut self, window: &str, capability: &str) -> bool;
 }
 
 /// Remembers consent answers, keyed by window and capability.
+///
+/// Support: Full.
 pub trait ConsentStore {
     fn get(&self, window: &str, capability: &str) -> Option<bool>;
     fn set(&mut self, window: &str, capability: &str, allowed: bool);
 }
 
 /// In-memory consent store.
+///
+/// Support: Full.
 #[derive(Default)]
 pub struct MemoryConsent {
     answers: HashMap<(String, String), bool>,
@@ -119,6 +136,8 @@ impl ConsentStore for MemoryConsent {
 ///
 /// A save that fails keeps the answer for this run only, so the user may be asked again next
 /// start. Lines that do not parse are skipped, which asks again rather than allowing.
+///
+/// Support: Full.
 pub struct FileConsent {
     path: PathBuf,
     answers: HashMap<(String, String), bool>,
@@ -126,6 +145,8 @@ pub struct FileConsent {
 
 impl FileConsent {
     /// Opens the store at `path`. A missing file is an empty store.
+    ///
+    /// Support: Full.
     pub fn open(path: impl Into<PathBuf>) -> io::Result<Self> {
         let path = path.into();
         let text = match fs::read_to_string(&path) {
@@ -183,6 +204,8 @@ impl ConsentStore for FileConsent {
 }
 
 /// Holds grants and checks requests against them.
+///
+/// Support: Full.
 pub struct Engine {
     grants: Vec<Grant>,
     consent: Box<dyn ConsentStore>,
@@ -198,11 +221,14 @@ impl Default for Engine {
 }
 
 impl Engine {
+    /// Support: Full.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Uses `store` for consent answers instead of the in-memory default.
+    ///
+    /// Support: Full.
     pub fn with_consent_store(store: Box<dyn ConsentStore>) -> Self {
         Engine {
             grants: Vec::new(),
@@ -211,6 +237,8 @@ impl Engine {
     }
 
     /// Adds a grant. Path roots are normalized now, so a bad root fails here, not per request.
+    ///
+    /// Support: Full.
     pub fn add_grant(&mut self, grant: Grant) -> Result<(), GrantError> {
         if !is_capability_name(&grant.capability) {
             return Err(GrantError(format!(
@@ -235,6 +263,8 @@ impl Engine {
     }
 
     /// Checks a request without asking anyone.
+    ///
+    /// Support: Full.
     pub fn check(
         &self,
         window: &str,
@@ -278,6 +308,8 @@ impl Engine {
     }
 
     /// Like [`Engine::check`], but asks `prompt` when consent is needed, and stores the answer.
+    ///
+    /// Support: Full.
     pub fn authorize(
         &mut self,
         prompt: &mut dyn ConsentPrompt,
@@ -306,6 +338,9 @@ impl Engine {
     /// path is first checked lexically; then its real location (symbolic links and junctions
     /// followed, see [`real_path`]) must also be inside the scope. A path that cannot be
     /// resolved is denied.
+    ///
+    /// Support: Partial. The on-disk check follows symbolic links and junctions, which is tested on
+    /// Windows only; not run on macOS/Linux here; compile-checked.
     pub fn check_path_on_disk(
         &self,
         window: &str,
@@ -320,6 +355,9 @@ impl Engine {
     }
 
     /// Like [`Engine::check_path_on_disk`], but asks `prompt` when consent is needed.
+    ///
+    /// Support: Partial. The on-disk check follows symbolic links and junctions, which is tested on
+    /// Windows only; not run on macOS/Linux here; compile-checked.
     pub fn authorize_path_on_disk(
         &mut self,
         prompt: &mut dyn ConsentPrompt,
@@ -348,6 +386,9 @@ impl Engine {
 /// junctions are followed, so a link inside a granted root that points outside it gives a path
 /// outside the root. A path that does not exist yet (a file to be created) is resolved through
 /// its parent directory. A dangling link is an error, never a path to trust.
+///
+/// Support: Partial. Link following is tested on Windows only; not run on macOS/Linux here;
+/// compile-checked.
 pub fn real_path(raw: &str) -> Result<String, String> {
     let path = std::path::Path::new(raw);
     let real = match fs::canonicalize(path) {
@@ -481,6 +522,8 @@ const RESERVED_NAMES: [&str; 22] = [
 ///
 /// The result is lowercase with `/` separators. It is for comparison only, not for opening
 /// files.
+///
+/// Support: Full.
 pub fn normalize_path(raw: &str) -> Result<String, String> {
     if raw.contains('\0') {
         return Err("path contains a NUL byte".into());

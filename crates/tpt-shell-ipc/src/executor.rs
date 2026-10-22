@@ -29,6 +29,8 @@ impl Wake for Unpark {
 ///
 /// The thread sleeps between polls, so a future that is ready at once costs nothing, and one
 /// that waits on I/O or a channel is woken by its waker.
+///
+/// Support: Full.
 pub fn block_on<F: Future>(future: F) -> F::Output {
     let waker = Waker::from(Arc::new(Unpark(thread::current())));
     let mut cx = Context::from_waker(&waker);

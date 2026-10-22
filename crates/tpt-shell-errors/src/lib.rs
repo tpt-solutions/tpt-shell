@@ -5,6 +5,8 @@
 //! published. `tpt-shell explain <code>` prints the entry for a code.
 
 /// One registered error code.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub code: &'static str,
@@ -14,6 +16,8 @@ pub struct Entry {
 }
 
 /// Every registered code, in code order.
+///
+/// Support: Full.
 pub const REGISTRY: &[Entry] = &[
     Entry {
         code: "TS0001",
@@ -144,6 +148,8 @@ pub const REGISTRY: &[Entry] = &[
 ];
 
 /// Looks up a code. The match ignores ASCII case, so `ts0001` finds `TS0001`.
+///
+/// Support: Full.
 pub fn lookup(code: &str) -> Option<&'static Entry> {
     REGISTRY
         .iter()

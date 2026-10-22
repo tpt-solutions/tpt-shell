@@ -10,6 +10,8 @@
 use std::collections::VecDeque;
 
 /// Why a send was refused.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SendError {
     /// No credit left. Wait for the receiver to grant more.
@@ -33,6 +35,8 @@ impl std::fmt::Display for SendError {
 impl std::error::Error for SendError {}
 
 /// The sending end. It holds credit and queues chunks until the receiver takes them.
+///
+/// Support: Full.
 pub struct Sender {
     credit: u32,
     max_chunk: usize,
@@ -42,6 +46,8 @@ pub struct Sender {
 
 impl Sender {
     /// `initial_credit` chunks may be in flight before the receiver grants more.
+    ///
+    /// Support: Full.
     pub fn new(initial_credit: u32, max_chunk: usize) -> Self {
         Sender {
             credit: initial_credit,
@@ -52,6 +58,8 @@ impl Sender {
     }
 
     /// Queues one chunk, spending one credit.
+    ///
+    /// Support: Full.
     pub fn send(&mut self, chunk: Vec<u8>) -> Result<(), SendError> {
         if self.closed {
             return Err(SendError::Closed);
@@ -71,24 +79,32 @@ impl Sender {
     }
 
     /// The receiver takes the next queued chunk, if any.
+    ///
+    /// Support: Full.
     pub fn take(&mut self) -> Option<Vec<u8>> {
         self.queue.pop_front()
     }
 
     /// The receiver grants `n` more chunks of credit.
+    ///
+    /// Support: Full.
     pub fn grant(&mut self, n: u32) {
         self.credit = self.credit.saturating_add(n);
     }
 
+    /// Support: Full.
     pub fn credit(&self) -> u32 {
         self.credit
     }
 
     /// Ends the stream. Queued chunks can still be taken; nothing more can be sent.
+    ///
+    /// Support: Full.
     pub fn close(&mut self) {
         self.closed = true;
     }
 
+    /// Support: Full.
     pub fn is_closed(&self) -> bool {
         self.closed
     }

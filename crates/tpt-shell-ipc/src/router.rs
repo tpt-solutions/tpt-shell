@@ -22,10 +22,14 @@ use crate::{
 };
 
 /// Jobs that may run at once, unless the router is given another limit.
+///
+/// Support: Full.
 pub const DEFAULT_JOB_LIMIT: usize = 4;
 
 /// A failed command. `code` is stable and meant for the page; `message` is for developers.
 /// `details` is optional structured data for the page, such as the path of a bad argument.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandError {
     pub code: String,
@@ -34,6 +38,7 @@ pub struct CommandError {
 }
 
 impl CommandError {
+    /// Support: Full.
     pub fn new(code: &str, message: &str) -> Self {
         CommandError {
             code: code.to_string(),
@@ -43,6 +48,8 @@ impl CommandError {
     }
 
     /// Attaches structured details, sent as `error.details` in the response.
+    ///
+    /// Support: Full.
     pub fn with_details(mut self, details: Value) -> Self {
         self.details = Some(details);
         self
@@ -51,16 +58,24 @@ impl CommandError {
 
 type Handler = Box<dyn Fn(&Value) -> Result<Value, CommandError>>;
 
+/// A guarded handler that also receives who sent the call (see `Router::register_guarded_with_caller`).
+type CallerHandler = Box<dyn Fn(&Value, &Caller) -> Result<Value, CommandError>>;
+
 /// Maps command names to handlers. Each handler receives the request's `args` object.
+///
+/// Support: Full.
 #[derive(Default)]
 pub struct Router {
     handlers: HashMap<String, Handler>,
+    callers: HashMap<String, CallerHandler>,
     guards: HashMap<String, Guard>,
     jobs: Option<Rc<RefCell<Jobs>>>,
 }
 
 /// What a guarded command acts on, read from its arguments and checked against the caller's
 /// grant. [`Target::None`] matches only an unrestricted grant.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     None,
@@ -84,6 +99,8 @@ impl Target {
 }
 
 /// Who sent a message. Grants are per window and per origin, so both are needed to check one.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Caller {
     pub window: String,
@@ -98,23 +115,29 @@ struct Guard {
 }
 
 impl Router {
+    /// Support: Full.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Registers `handler` for `cmd`. A later registration for the same name replaces the earlier one.
+    ///
+    /// Support: Full.
     pub fn register(
         &mut self,
         cmd: &str,
         handler: impl Fn(&Value) -> Result<Value, CommandError> + 'static,
     ) {
         self.guards.remove(cmd);
+        self.callers.remove(cmd);
         self.handlers.insert(cmd.to_string(), Box::new(handler));
     }
 
     /// Registers `handler` for `cmd`, behind `capability`. `target_of` reads what the call acts
     /// on from its arguments. Only [`Router::handle_authorized`] runs a guarded command; the
     /// unauthorized entry points refuse it.
+    ///
+    /// Support: Full.
     pub fn register_guarded(
         &mut self,
         cmd: &str,
@@ -122,7 +145,30 @@ impl Router {
         target_of: impl Fn(&Value) -> Target + 'static,
         handler: impl Fn(&Value) -> Result<Value, CommandError> + 'static,
     ) {
+        self.callers.remove(cmd);
         self.handlers.insert(cmd.to_string(), Box::new(handler));
+        self.guards.insert(
+            cmd.to_string(),
+            Guard {
+                capability: capability.to_string(),
+                target_of: Box::new(target_of),
+            },
+        );
+    }
+
+    /// Like `register_guarded`, but the handler also receives the `Caller`, so it can act only on
+    /// what that window started. It runs only after the grant allows the call.
+    ///
+    /// Support: Full.
+    pub fn register_guarded_with_caller(
+        &mut self,
+        cmd: &str,
+        capability: &str,
+        target_of: impl Fn(&Value) -> Target + 'static,
+        handler: impl Fn(&Value, &Caller) -> Result<Value, CommandError> + 'static,
+    ) {
+        self.handlers.remove(cmd);
+        self.callers.insert(cmd.to_string(), Box::new(handler));
         self.guards.insert(
             cmd.to_string(),
             Guard {
@@ -134,6 +180,8 @@ impl Router {
 
     /// Registers `handler` for `cmd`, guarded by `schema`. The arguments are checked first; a
     /// bad value is answered with `IPC_INVALID_ARGS` and the handler never runs.
+    ///
+    /// Support: Full.
     pub fn register_validated(
         &mut self,
         cmd: &str,
@@ -145,6 +193,8 @@ impl Router {
 
     /// Registers `handler` for `cmd`, behind `capability`, with its arguments checked against
     /// `schema`. The grant is checked first, then the arguments, then the handler runs.
+    ///
+    /// Support: Full.
     pub fn register_guarded_validated(
         &mut self,
         cmd: &str,
@@ -157,32 +207,48 @@ impl Router {
     }
 
     /// The job runner shared by this router's job commands. It is created on first use, with
-    /// [`DEFAULT_JOB_LIMIT`] running jobs and the `job.cancel` command registered beside it.
-    /// The UI thread drains it with [`Router::drain_job_events`].
+    /// [`DEFAULT_JOB_LIMIT`] running jobs and the guarded `job.cancel` command registered beside it.
+    /// `job.cancel` needs the `job.cancel` capability with no scope, and it stops only a job that
+    /// the calling window started. The UI thread drains it with [`Router::drain_job_events`].
+    ///
+    /// Support: Full.
     pub fn jobs(&mut self) -> Rc<RefCell<Jobs>> {
         if let Some(jobs) = &self.jobs {
             return jobs.clone();
         }
         let jobs = Rc::new(RefCell::new(Jobs::new(DEFAULT_JOB_LIMIT)));
         let cancel_jobs = jobs.clone();
-        let schema = Schema::Struct(&[crate::schema::Field {
-            name: "job",
-            schema: Schema::Int {
-                min: 0,
-                max: i64::MAX,
+        self.register_guarded_with_caller(
+            "job.cancel",
+            "job.cancel",
+            |_| Target::None,
+            move |args, caller| {
+                let schema = Schema::Struct(&[crate::schema::Field {
+                    name: "job",
+                    schema: Schema::Int {
+                        min: 0,
+                        max: i64::MAX,
+                    },
+                }]);
+                validate(&schema, args, "args").map_err(|e| {
+                    CommandError::new(schema::INVALID_ARGS, &e.to_string())
+                        .with_details(json!({ "path": e.path }))
+                })?;
+                let id = args["job"].as_u64().unwrap_or(0);
+                let stopped = cancel_jobs
+                    .borrow_mut()
+                    .cancel_owned(&caller.window, jobs::JobId(id));
+                Ok(json!({ "cancelled": stopped }))
             },
-        }]);
-        self.register_validated("job.cancel", schema, move |args| {
-            let id = args["job"].as_u64().unwrap_or(0);
-            let stopped = cancel_jobs.borrow_mut().cancel(jobs::JobId(id));
-            Ok(json!({ "cancelled": stopped }))
-        });
+        );
         self.jobs = Some(jobs.clone());
         jobs
     }
 
     /// Registers a job command, `start`, which receives the arguments and the shared job runner.
     /// `start` returns the page's answer, normally `{"job": id}` from [`jobs::start_shared`].
+    ///
+    /// Support: Full.
     pub fn register_job(
         &mut self,
         cmd: &str,
@@ -195,6 +261,8 @@ impl Router {
 
     /// Like [`Router::register_job`], behind `capability`, with `target_of` naming what the call
     /// acts on (see [`Router::register_guarded`]).
+    ///
+    /// Support: Full.
     pub fn register_job_guarded(
         &mut self,
         cmd: &str,
@@ -211,6 +279,8 @@ impl Router {
 
     /// Collects the job events reported since the last call, as envelope events ready to send to
     /// the page. Empty when no job has been started.
+    ///
+    /// Support: Full.
     pub fn drain_job_events(&self) -> Vec<Value> {
         match &self.jobs {
             Some(jobs) => jobs
@@ -225,6 +295,8 @@ impl Router {
 
     /// Handles one raw message from the page and returns the response text to send back.
     /// Malformed messages get an error response with a null id; they are never dispatched.
+    ///
+    /// Support: Full.
     pub fn handle(&self, bytes: &[u8], limits: &Limits) -> String {
         let value = match parse_request(bytes, limits) {
             Ok(request) => self.dispatch(&request),
@@ -236,6 +308,8 @@ impl Router {
     /// Like [`Router::handle`], but a well-formed request is refused with `IPC_RATE_LIMITED`
     /// when `limiter` has no token left at `now`. Malformed messages do not use a token: the
     /// size cap already bounds the cost of rejecting them.
+    ///
+    /// Support: Full.
     pub fn handle_limited(
         &self,
         bytes: &[u8],
@@ -257,6 +331,8 @@ impl Router {
 
     /// The capability a command is registered behind, or `None` for an unguarded or unknown
     /// command.
+    ///
+    /// Support: Full.
     pub fn capability_of(&self, cmd: &str) -> Option<&str> {
         self.guards.get(cmd).map(|guard| guard.capability.as_str())
     }
@@ -264,6 +340,8 @@ impl Router {
     /// Like [`Router::handle`], but the message comes from `caller` and every command is
     /// capability-checked: the grant for `caller` must allow the call before its handler runs.
     /// A `consent` grant asks `prompt` the first time and then remembers the answer.
+    ///
+    /// Support: Full.
     pub fn handle_authorized(
         &self,
         caller: &Caller,
@@ -310,13 +388,13 @@ impl Router {
         engine: &mut Engine,
         prompt: &mut dyn ConsentPrompt,
     ) -> Value {
-        let Some(handler) = self.handlers.get(&request.cmd) else {
+        if !self.handlers.contains_key(&request.cmd) && !self.callers.contains_key(&request.cmd) {
             return err_response(
                 request.id,
                 "IPC_UNKNOWN_COMMAND",
                 &format!("no command named `{}`", request.cmd),
             );
-        };
+        }
         let Some(guard) = self.guards.get(&request.cmd) else {
             return err_response(
                 request.id,
@@ -336,7 +414,7 @@ impl Router {
             target.as_request(),
         );
         match decision {
-            Decision::Allow => match handler(&request.args) {
+            Decision::Allow => match self.run_for(request, caller) {
                 Ok(data) => ok_response(request.id, data),
                 Err(err) => error_response(request.id, &err),
             },
@@ -347,6 +425,28 @@ impl Router {
                 "the user has not answered the consent prompt",
             ),
         }
+    }
+
+    /// Runs an allowed guarded command. While a plain handler runs, the job runner records
+    /// `caller`'s window as the owner of any job the handler starts.
+    fn run_for(&self, request: &Request, caller: &Caller) -> Result<Value, CommandError> {
+        if let Some(handler) = self.callers.get(&request.cmd) {
+            return handler(&request.args, caller);
+        }
+        let Some(handler) = self.handlers.get(&request.cmd) else {
+            return Err(CommandError::new(
+                "IPC_UNKNOWN_COMMAND",
+                &format!("no command named `{}`", request.cmd),
+            ));
+        };
+        if let Some(jobs) = &self.jobs {
+            jobs.borrow_mut().set_owner(&caller.window);
+        }
+        let result = handler(&request.args);
+        if let Some(jobs) = &self.jobs {
+            jobs.borrow_mut().set_owner("");
+        }
+        result
     }
 }
 
@@ -375,8 +475,174 @@ fn checked(
 }
 
 /// Serializes a response value to the text sent over the wire.
+///
+/// Support: Full.
 pub fn encode(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| r#"{"id":null,"ok":false}"#.to_string())
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+    use tpt_shell_capabilities::{Grant, Scope};
+
+    const ORIGIN: &str = "https://tpt-app.localhost";
+
+    struct Decline;
+
+    impl ConsentPrompt for Decline {
+        fn ask(&mut self, _window: &str, _capability: &str) -> bool {
+            false
+        }
+    }
+
+    fn caller(window: &str) -> Caller {
+        Caller {
+            window: window.into(),
+            origin: ORIGIN.into(),
+        }
+    }
+
+    fn grant(window: &str, capability: &str) -> Grant {
+        Grant {
+            capability: capability.into(),
+            window: window.into(),
+            origin: ORIGIN.into(),
+            scope: Scope::Unrestricted,
+            consent: false,
+        }
+    }
+
+    /// A router with a job command, `start_slow`, that runs until it is cancelled (or 10 s).
+    fn router_with_slow_job() -> Router {
+        let mut router = Router::new();
+        router.register_job_guarded(
+            "start_slow",
+            "job.start",
+            Schema::Struct(&[]),
+            |_| Target::None,
+            |_, jobs| {
+                crate::jobs::start_shared(jobs, |ctx| {
+                    let until = Instant::now() + Duration::from_secs(10);
+                    while !ctx.is_cancelled() && Instant::now() < until {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Ok(json!("stopped"))
+                })
+            },
+        );
+        router
+    }
+
+    fn send(router: &Router, engine: &mut Engine, window: &str, text: &str) -> Value {
+        let reply = router.handle_authorized(
+            &caller(window),
+            engine,
+            &mut Decline,
+            text.as_bytes(),
+            &Limits::default(),
+        );
+        serde_json::from_str(&reply).unwrap()
+    }
+
+    fn job_id(reply: &Value) -> u64 {
+        reply["data"]["job"].as_u64().expect("a job id")
+    }
+
+    #[test]
+    fn job_cancel_needs_its_own_grant_and_no_scope() {
+        let router = router_with_slow_job();
+        let mut engine = Engine::new();
+        engine.add_grant(grant("main", "job.start")).unwrap();
+        let started = send(
+            &router,
+            &mut engine,
+            "main",
+            r#"{"v":1,"id":1,"cmd":"start_slow","args":{}}"#,
+        );
+        let cancel = format!(
+            r#"{{"v":1,"id":2,"cmd":"job.cancel","args":{{"job":{}}}}}"#,
+            job_id(&started)
+        );
+
+        let refused = send(&router, &mut engine, "main", &cancel);
+        assert_eq!(refused["error"]["code"], "CAP_NO_GRANT");
+
+        // A grant for another capability does not allow it either.
+        engine.add_grant(grant("main", "job.cancel")).unwrap();
+        let mut scoped = grant("other", "job.cancel");
+        scoped.scope = Scope::Paths(vec!["C:/data".into()]);
+        engine.add_grant(scoped).unwrap();
+        let scoped_refusal = send(&router, &mut engine, "other", &cancel);
+        assert_ne!(scoped_refusal["ok"], true, "a scoped grant must not cancel");
+
+        let by_owner = send(&router, &mut engine, "main", &cancel);
+        assert_eq!(
+            by_owner["data"]["cancelled"], true,
+            "the owner still may cancel"
+        );
+    }
+
+    #[test]
+    fn job_cancel_stops_only_a_job_the_same_window_started() {
+        let router = router_with_slow_job();
+        let mut engine = Engine::new();
+        engine.add_grant(grant("main", "job.start")).unwrap();
+        engine.add_grant(grant("main", "job.cancel")).unwrap();
+        engine.add_grant(grant("other", "job.cancel")).unwrap();
+        let started = send(
+            &router,
+            &mut engine,
+            "main",
+            r#"{"v":1,"id":1,"cmd":"start_slow","args":{}}"#,
+        );
+        let id = job_id(&started);
+        let cancel = format!(r#"{{"v":1,"id":2,"cmd":"job.cancel","args":{{"job":{id}}}}}"#);
+
+        let by_other = send(&router, &mut engine, "other", &cancel);
+        assert_eq!(by_other["ok"], true);
+        assert_eq!(by_other["data"]["cancelled"], false);
+
+        let by_owner = send(&router, &mut engine, "main", &cancel);
+        assert_eq!(by_owner["data"]["cancelled"], true);
+    }
+
+    #[test]
+    fn a_job_is_owned_by_the_window_whose_call_started_it() {
+        let mut jobs = Jobs::new(4);
+        jobs.set_owner("main");
+        let id = jobs.start(|_| Ok(json!(null))).expect("start");
+        assert_eq!(jobs.owner_of(id), Some("main"));
+        assert!(!jobs.cancel_owned("other", id));
+        assert!(!jobs.cancel_owned("", id));
+        assert!(jobs.cancel_owned("main", id));
+    }
+
+    #[test]
+    fn a_guarded_command_with_caller_receives_the_caller() {
+        let mut router = Router::new();
+        router.register_guarded_with_caller(
+            "who",
+            "who.ask",
+            |_| Target::None,
+            |_, caller| Ok(json!(caller.window)),
+        );
+        let mut engine = Engine::new();
+        engine.add_grant(grant("main", "who.ask")).unwrap();
+        let reply = send(
+            &router,
+            &mut engine,
+            "main",
+            r#"{"v":1,"id":1,"cmd":"who","args":{}}"#,
+        );
+        assert_eq!(reply["data"], "main");
+        let plain = router.handle(
+            br#"{"v":1,"id":2,"cmd":"who","args":{}}"#,
+            &Limits::default(),
+        );
+        assert!(plain.contains("CAP_NO_GRANT"), "{plain}");
+    }
 }
 
 #[cfg(test)]

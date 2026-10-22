@@ -9,6 +9,8 @@
 use std::time::Duration;
 
 /// How many commands a window may send: `burst` at once, refilled at `per_second`.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RateLimit {
     pub burst: u32,
@@ -25,6 +27,8 @@ impl Default for RateLimit {
 }
 
 /// Token bucket. A bucket starts full.
+///
+/// Support: Full.
 #[derive(Clone, Debug)]
 pub struct RateLimiter {
     limit: RateLimit,
@@ -33,6 +37,7 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
+    /// Support: Full.
     pub fn new(limit: RateLimit) -> Self {
         RateLimiter {
             limit,
@@ -43,6 +48,8 @@ impl RateLimiter {
 
     /// Takes one token if one is available at time `now`. `now` must come from one monotonic
     /// source; a time earlier than the last call refills nothing.
+    ///
+    /// Support: Full.
     pub fn allow(&mut self, now: Duration) -> bool {
         if let Some(last) = self.last {
             let elapsed = now.saturating_sub(last).as_secs_f64();

@@ -198,6 +198,7 @@ fn target_of(target: Option<&(TargetKind, String)>) -> TokenStream2 {
     }
 }
 
+/// Support: Full.
 pub fn expand_command(attr: TokenStream2, item: ItemFn) -> syn::Result<TokenStream2> {
     let options = parse_options(attr)?;
     if !item.sig.generics.params.is_empty() {
@@ -433,6 +434,8 @@ pub fn expand_command(attr: TokenStream2, item: ItemFn) -> syn::Result<TokenStre
 }
 
 /// `commands![a, b]` builds a `Contract` from commands declared with `#[command]` in this module.
+///
+/// Support: Full.
 pub fn expand_commands(input: TokenStream2) -> syn::Result<TokenStream2> {
     let names = Punctuated::<Ident, Token![,]>::parse_terminated.parse2(input)?;
     let adds = names.iter().map(|name| {
@@ -466,6 +469,8 @@ impl Parse for RegisterInput {
 }
 
 /// `register_commands!(&mut router, a, b)` registers each command's handler.
+///
+/// Support: Full.
 pub fn expand_register(input: TokenStream2) -> syn::Result<TokenStream2> {
     let RegisterInput { router, names } = syn::parse2(input)?;
     let registers = names.iter().map(|name| {

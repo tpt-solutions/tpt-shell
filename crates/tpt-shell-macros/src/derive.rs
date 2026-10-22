@@ -29,6 +29,7 @@ struct Bounds {
     chars: Option<String>,
 }
 
+/// Support: Full.
 pub fn expand(input: DeriveInput) -> syn::Result<TokenStream2> {
     if !input.generics.params.is_empty() {
         return Err(syn::Error::new_spanned(

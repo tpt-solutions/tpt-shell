@@ -11,9 +11,13 @@
 use serde_json::{Map, Value};
 
 /// Stable code for every argument problem.
+///
+/// Support: Full.
 pub const INVALID_ARGS: &str = "IPC_INVALID_ARGS";
 
 /// Describes one value the page may send.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Schema {
     Bool,
@@ -51,6 +55,8 @@ pub enum Schema {
 }
 
 /// One field of a [`Schema::Struct`].
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Field {
     pub name: &'static str,
@@ -58,6 +64,8 @@ pub struct Field {
 }
 
 /// The first problem found. `path` starts at `args`.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidationError {
     pub path: String,
@@ -73,6 +81,8 @@ impl std::fmt::Display for ValidationError {
 impl std::error::Error for ValidationError {}
 
 /// Checks `value` against `schema`. `root` names the value in error paths (usually `"args"`).
+///
+/// Support: Full.
 pub fn validate(schema: &Schema, value: &Value, root: &str) -> Result<(), ValidationError> {
     check(schema, value, root.to_string())
 }

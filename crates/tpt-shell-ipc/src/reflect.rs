@@ -11,13 +11,19 @@ use std::collections::HashMap;
 use crate::schema::Schema;
 
 /// Types that can be an argument of a command.
+///
+/// Support: Full.
 pub trait ToSchema {
     fn schema() -> Schema;
 }
 
 /// Longest string argument accepted by default (bytes).
+///
+/// Support: Full.
 pub const DEFAULT_MAX_STRING: usize = 64 * 1024;
 /// Longest list or map argument accepted by default (items).
+///
+/// Support: Full.
 pub const DEFAULT_MAX_ITEMS: usize = 4096;
 
 impl ToSchema for bool {
@@ -85,6 +91,8 @@ fn leak(schema: Schema) -> &'static Schema {
 }
 
 /// Support for generated code. Not part of the public API.
+///
+/// Support: Full. Internal support for generated code; not for direct use.
 #[doc(hidden)]
 pub mod __private {
     use serde::de::DeserializeOwned;
@@ -96,11 +104,15 @@ pub mod __private {
     pub use serde_json;
 
     /// Leaks a struct's fields so the schema can hold them.
+    ///
+    /// Support: Full.
     pub fn struct_schema(fields: Vec<Field>) -> Schema {
         Schema::Struct(Box::leak(fields.into_boxed_slice()))
     }
 
     /// Reads one argument. A missing argument is read as `null`, which `Option` accepts.
+    ///
+    /// Support: Full.
     pub fn arg<T: DeserializeOwned>(args: &Value, name: &str) -> Result<T, CommandError> {
         let value = args.get(name).cloned().unwrap_or(Value::Null);
         serde_json::from_value(value).map_err(|e| {
@@ -110,6 +122,8 @@ pub mod __private {
 
     /// Bounds a `#[derive(Contract)]` field may set. Each one applies only to the schema kind it
     /// belongs to (see [`bounded`]).
+    ///
+    /// Support: Full.
     #[derive(Clone, Copy, Debug, Default)]
     pub struct Bounds {
         pub min: Option<i64>,
@@ -122,6 +136,8 @@ pub mod __private {
     /// Applies a field's bounds to the schema of its type. Panics when a bound does not fit the
     /// type (`max_len` on a number, for example): the schema is built at start-up, so the
     /// mistake shows at once instead of silently dropping the limit.
+    ///
+    /// Support: Full.
     pub fn bounded(schema: Schema, b: Bounds) -> Schema {
         fn misplaced(name: &str) -> ! {
             panic!("contract bound `{name}` does not apply to this field's type")
@@ -194,6 +210,8 @@ pub mod __private {
     }
 
     /// Serializes a handler's result.
+    ///
+    /// Support: Full.
     pub fn to_value<T: serde::Serialize>(value: &T) -> Result<Value, CommandError> {
         serde_json::to_value(value).map_err(|e| CommandError::new("IPC_BAD_RESULT", &e.to_string()))
     }

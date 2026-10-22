@@ -24,10 +24,14 @@ use serde_json::{json, Value};
 use crate::router::CommandError;
 
 /// Identifies one job within a [`Jobs`] runner.
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct JobId(pub u64);
 
 /// Something a job reports.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub enum JobEvent {
     Progress {
@@ -50,6 +54,7 @@ pub enum JobEvent {
 }
 
 impl JobEvent {
+    /// Support: Full.
     pub fn job(&self) -> JobId {
         match self {
             JobEvent::Progress { job, .. }
@@ -60,11 +65,15 @@ impl JobEvent {
     }
 
     /// Whether this is the job's last event.
+    ///
+    /// Support: Full.
     pub fn is_terminal(&self) -> bool {
         !matches!(self, JobEvent::Progress { .. })
     }
 
     /// The envelope event sent to the page, for example `{"event":"job.progress","data":{...}}`.
+    ///
+    /// Support: Full.
     pub fn to_envelope(&self) -> Value {
         match self {
             JobEvent::Progress { job, done, total } => crate::event(
@@ -84,6 +93,8 @@ impl JobEvent {
 }
 
 /// Handed to a job's body.
+///
+/// Support: Full.
 pub struct JobContext {
     job: JobId,
     cancel: Arc<AtomicBool>,
@@ -92,6 +103,8 @@ pub struct JobContext {
 
 impl JobContext {
     /// Reports progress. `total` is the amount of work; `done` is how much is finished.
+    ///
+    /// Support: Full.
     pub fn progress(&self, done: u32, total: u32) {
         let _ = self.events.send(JobEvent::Progress {
             job: self.job,
@@ -100,12 +113,15 @@ impl JobContext {
         });
     }
 
+    /// Support: Full.
     pub fn is_cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
     }
 }
 
 /// Why a job could not start.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StartError {
     /// The limit on running jobs is reached.
@@ -115,19 +131,28 @@ pub enum StartError {
 struct Running {
     cancel: Arc<AtomicBool>,
     finished: bool,
+    /// The window that started the job. Empty when no window was calling.
+    owner: String,
 }
 
 /// Runs jobs and collects their events.
+///
+/// Support: Partial. Cancellation is cooperative: a job that never checks is_cancelled runs to the
+/// end.
 pub struct Jobs {
     limit: usize,
     next: u64,
     running: HashMap<JobId, Running>,
     events_tx: Sender<JobEvent>,
     events_rx: Receiver<JobEvent>,
+    /// The window whose call is running now. A job started meanwhile belongs to it.
+    owner: String,
 }
 
 impl Jobs {
     /// `limit` is the most jobs that may be running at once.
+    ///
+    /// Support: Full.
     pub fn new(limit: usize) -> Self {
         let (events_tx, events_rx) = channel();
         Jobs {
@@ -136,10 +161,28 @@ impl Jobs {
             running: HashMap::new(),
             events_tx,
             events_rx,
+            owner: String::new(),
         }
     }
 
+    /// Sets the window that owns jobs started from now on. The router sets it around each
+    /// guarded command, and clears it with an empty name afterwards.
+    ///
+    /// Support: Full.
+    pub fn set_owner(&mut self, window: &str) {
+        self.owner = window.to_string();
+    }
+
+    /// The window that started job `id`, while the job is known.
+    ///
+    /// Support: Full.
+    pub fn owner_of(&self, id: JobId) -> Option<&str> {
+        self.running.get(&id).map(|job| job.owner.as_str())
+    }
+
     /// Starts `body` on a new thread and returns its id.
+    ///
+    /// Support: Full.
     pub fn start<F>(&mut self, body: F) -> Result<JobId, StartError>
     where
         F: FnOnce(&JobContext) -> Result<Value, CommandError> + Send + 'static,
@@ -156,6 +199,7 @@ impl Jobs {
             Running {
                 cancel: cancel.clone(),
                 finished: false,
+                owner: self.owner.clone(),
             },
         );
         let ctx = JobContext {
@@ -181,6 +225,9 @@ impl Jobs {
     }
 
     /// Asks a job to stop. Returns `false` when the id is unknown or the job already ended.
+    ///
+    /// Support: Partial. Cancellation is cooperative: a job that never checks is_cancelled runs to
+    /// the end.
     pub fn cancel(&mut self, id: JobId) -> bool {
         match self.running.get(&id) {
             Some(job) if !job.finished => {
@@ -191,8 +238,25 @@ impl Jobs {
         }
     }
 
+    /// Asks a job to stop, but only when `window` started it. Returns `false` for any other
+    /// window, an unknown id, or a job that already ended.
+    ///
+    /// Support: Partial. Cancellation is cooperative: a job that never checks is_cancelled runs to
+    /// the end.
+    pub fn cancel_owned(&mut self, window: &str, id: JobId) -> bool {
+        match self.running.get(&id) {
+            Some(job) if !job.finished && !window.is_empty() && job.owner == window => {
+                job.cancel.store(true, Ordering::SeqCst);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Collects every event reported so far, in the order they were sent. Call this on the UI
     /// thread; it never blocks.
+    ///
+    /// Support: Full.
     pub fn drain(&mut self) -> Vec<JobEvent> {
         let mut out = Vec::new();
         while let Ok(event) = self.events_rx.try_recv() {
@@ -208,6 +272,8 @@ impl Jobs {
     }
 
     /// Jobs that have not reported a terminal event yet.
+    ///
+    /// Support: Full.
     pub fn active(&self) -> usize {
         self.running.values().filter(|j| !j.finished).count()
     }
@@ -219,6 +285,8 @@ impl Jobs {
 
 /// Starts `body` on a runner shared by a router's job commands (see `Router::jobs`) and returns
 /// the page's answer, `{"job": id}`. A refused start is `JOB_LIMIT`, with a hint.
+///
+/// Support: Full.
 pub fn start_shared<F>(jobs: &Rc<RefCell<Jobs>>, body: F) -> Result<Value, CommandError>
 where
     F: FnOnce(&JobContext) -> Result<Value, CommandError> + Send + 'static,
@@ -263,8 +331,19 @@ mod tests {
 
     #[test]
     fn job_cancel_is_a_command_that_stops_a_job() {
+        use tpt_shell_capabilities::{Engine, Grant, Scope};
+
+        struct Decline;
+        impl tpt_shell_capabilities::ConsentPrompt for Decline {
+            fn ask(&mut self, _window: &str, _capability: &str) -> bool {
+                false
+            }
+        }
+
         let mut router = Router::new();
         let jobs = router.jobs();
+        // The job belongs to window "main", the one whose call starts it.
+        jobs.borrow_mut().set_owner("main");
         let answer = start_shared(&jobs, |ctx| {
             while !ctx.is_cancelled() {
                 thread::sleep(Duration::from_millis(1));
@@ -272,9 +351,30 @@ mod tests {
             Err(CommandError::new("JOB_STOPPED", "stopped"))
         })
         .unwrap();
+        jobs.borrow_mut().set_owner("");
+        // job.cancel is guarded, so it needs a grant for the calling window.
+        let mut engine = Engine::new();
+        engine
+            .add_grant(Grant {
+                capability: "job.cancel".into(),
+                window: "main".into(),
+                origin: "https://tpt-app.localhost".into(),
+                scope: Scope::Unrestricted,
+                consent: false,
+            })
+            .unwrap();
         let request =
             json!({ "v": 1, "id": 1, "cmd": "job.cancel", "args": { "job": answer["job"] } });
-        let reply = router.handle(request.to_string().as_bytes(), &crate::Limits::default());
+        let reply = router.handle_authorized(
+            &crate::Caller {
+                window: "main".into(),
+                origin: "https://tpt-app.localhost".into(),
+            },
+            &mut engine,
+            &mut Decline,
+            request.to_string().as_bytes(),
+            &crate::Limits::default(),
+        );
         let reply: Value = serde_json::from_str(&reply).unwrap();
         assert_eq!(reply["data"]["cancelled"], true);
     }

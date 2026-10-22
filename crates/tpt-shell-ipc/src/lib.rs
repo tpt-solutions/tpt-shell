@@ -16,23 +16,40 @@ pub use router::{encode, Caller, CommandError, Router, Target};
 pub use scoped::{DeviceId, ScopeError, ScopedPath};
 pub use serde_json::Value;
 
+/// Support: Full.
 pub mod blob;
+/// Support: Full.
 pub mod contract;
+/// Support: Full.
 pub mod contract_diff;
+/// Support: Full.
 pub mod executor;
+/// Support: Partial. Cancellation is cooperative: a job that never checks is_cancelled runs to the
+/// end.
 pub mod jobs;
+/// Support: Full.
 pub mod rate_limit;
+/// Support: Full.
 pub mod reflect;
+/// Support: Full.
 pub mod router;
+/// Support: Full.
 pub mod schema;
+/// Support: Full.
 pub mod scoped;
+/// Support: Full.
 pub mod stream;
+/// Support: Partial. Contracts do not describe results yet, so wrappers return `Promise<unknown>`.
 pub mod typescript;
 
 /// The only envelope version this crate understands.
+///
+/// Support: Full.
 pub const VERSION: u64 = 1;
 
 /// Input limits, all configurable (spec §5.5).
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     /// Largest accepted message, in bytes.
@@ -54,6 +71,8 @@ impl Default for Limits {
 }
 
 /// A parsed, shape-checked request. Argument validation against the contract is a later step.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Request {
     pub id: u64,
@@ -62,6 +81,8 @@ pub struct Request {
 }
 
 /// Why a message was refused. Each variant has a stable code (see [`ParseError::code`]).
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParseError {
     TooLarge { size: usize, max: usize },
@@ -78,6 +99,8 @@ pub enum ParseError {
 
 impl ParseError {
     /// Stable machine-readable code, sent to the page in error responses.
+    ///
+    /// Support: Full.
     pub fn code(&self) -> &'static str {
         match self {
             ParseError::TooLarge { .. } => "IPC_TOO_LARGE",
@@ -121,6 +144,8 @@ impl std::fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 /// Parses and shape-checks one JS -> Rust message.
+///
+/// Support: Full.
 pub fn parse_request(bytes: &[u8], limits: &Limits) -> Result<Request, ParseError> {
     if bytes.len() > limits.max_message_bytes {
         return Err(ParseError::TooLarge {
@@ -199,21 +224,29 @@ fn depth(v: &Value) -> usize {
 }
 
 /// Success response for request `id`.
+///
+/// Support: Full.
 pub fn ok_response(id: u64, data: Value) -> Value {
     json!({ "id": id, "ok": true, "data": data })
 }
 
 /// Error response for request `id`.
+///
+/// Support: Full.
 pub fn err_response(id: u64, code: &str, message: &str) -> Value {
     json!({ "id": id, "ok": false, "error": { "code": code, "message": message } })
 }
 
 /// Error response for a message that could not be parsed. There is no id, so it is `null`.
+///
+/// Support: Full.
 pub fn parse_error_response(err: &ParseError) -> Value {
     json!({ "id": null, "ok": false, "error": { "code": err.code(), "message": err.to_string() } })
 }
 
 /// Event sent from Rust to the page.
+///
+/// Support: Full.
 pub fn event(name: &str, data: Value) -> Value {
     json!({ "event": name, "data": data })
 }

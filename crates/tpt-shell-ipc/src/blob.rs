@@ -11,6 +11,8 @@
 use std::collections::HashMap;
 
 /// A stored payload and its media type.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Blob {
     pub media_type: String,
@@ -18,6 +20,8 @@ pub struct Blob {
 }
 
 /// Why a blob could not be stored.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BlobError {
     /// The id is not 32 lowercase hex digits.
@@ -44,6 +48,8 @@ impl std::error::Error for BlobError {}
 
 /// Blobs held for one app, with a total size cap. Each blob may name an owner (a window), so
 /// that the blobs of a window can be removed when it closes.
+///
+/// Support: Full.
 pub struct BlobStore {
     limit: usize,
     used: usize,
@@ -52,6 +58,7 @@ pub struct BlobStore {
 }
 
 impl BlobStore {
+    /// Support: Full.
     pub fn new(limit: usize) -> Self {
         BlobStore {
             limit,
@@ -62,11 +69,15 @@ impl BlobStore {
     }
 
     /// Stores `bytes` under `id`, with no owner.
+    ///
+    /// Support: Full.
     pub fn put(&mut self, id: &str, media_type: &str, bytes: Vec<u8>) -> Result<(), BlobError> {
         self.put_owned(None, id, media_type, bytes)
     }
 
     /// Stores `bytes` under `id`, owned by `owner` (a window name) when one is given.
+    ///
+    /// Support: Full.
     pub fn put_owned(
         &mut self,
         owner: Option<&str>,
@@ -100,11 +111,14 @@ impl BlobStore {
         Ok(())
     }
 
+    /// Support: Full.
     pub fn get(&self, id: &str) -> Option<&Blob> {
         self.blobs.get(id)
     }
 
     /// Removes a blob and returns its size. Removing frees its quota.
+    ///
+    /// Support: Full.
     pub fn remove(&mut self, id: &str) -> Option<usize> {
         let blob = self.blobs.remove(id)?;
         self.owners.remove(id);
@@ -113,6 +127,8 @@ impl BlobStore {
     }
 
     /// Removes every blob owned by `owner`, and returns how many were removed.
+    ///
+    /// Support: Full.
     pub fn remove_owned(&mut self, owner: &str) -> usize {
         let ids: Vec<String> = self
             .owners
@@ -127,22 +143,29 @@ impl BlobStore {
     }
 
     /// The total size allowed for this store.
+    ///
+    /// Support: Full.
     pub fn limit(&self) -> usize {
         self.limit
     }
 
     /// Changes the total size allowed. Blobs already stored are kept; a lower limit only refuses
     /// new blobs until enough are removed.
+    ///
+    /// Support: Full.
     pub fn set_limit(&mut self, limit: usize) {
         self.limit = limit;
     }
 
+    /// Support: Full.
     pub fn used(&self) -> usize {
         self.used
     }
 }
 
 /// An id is exactly 32 lowercase hex digits (128 bits).
+///
+/// Support: Full.
 pub fn is_valid_id(id: &str) -> bool {
     id.len() == 32
         && id
@@ -151,10 +174,14 @@ pub fn is_valid_id(id: &str) -> bool {
 }
 
 /// Path prefix of blob routes, after the origin.
+///
+/// Support: Full.
 pub const ROUTE_PREFIX: &str = "/__tpt/blob/";
 
 /// Parses the id out of a blob route. Accepts a path (`/__tpt/blob/<id>`) or a full URL with
 /// any origin, and rejects anything with a query, a fragment or extra path segments.
+///
+/// Support: Full.
 pub fn id_from_route(url_or_path: &str) -> Option<&str> {
     // The app scheme names its host: app://__tpt/blob/<id>.
     if let Some(rest) = url_or_path.strip_prefix("app://") {

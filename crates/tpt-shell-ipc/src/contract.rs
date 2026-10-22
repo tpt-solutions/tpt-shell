@@ -12,11 +12,15 @@ use serde_json::{json, Map, Value};
 use crate::schema::Schema;
 
 /// Version of the contract file format.
+///
+/// Support: Full.
 pub const CONTRACT_VERSION: u64 = 1;
 
 /// How a command runs. `Sync` runs to completion in its handler. `Async` is a future that the
 /// handler drives with [`crate::block_on`]. `Job` returns a job id at once and reports through
 /// the jobs runner (see [`crate::jobs`]). Streams are not a command kind yet.
+///
+/// Support: Partial. Streams are not a command kind yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Sync,
@@ -37,6 +41,8 @@ impl Kind {
 /// Flags a command carries besides its kind. Both default to off: a command runs on the worker
 /// side unless it says otherwise, and an agent does not see a command unless it is marked for
 /// the agent surface (spec §8, §10.4).
+///
+/// Support: Full.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Flags {
     /// Runs on the UI thread (`#[command(ui)]`).
@@ -46,6 +52,8 @@ pub struct Flags {
 }
 
 /// One command's public description.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Command {
     pub name: &'static str,
@@ -56,6 +64,8 @@ pub struct Command {
 }
 
 /// A set of commands with unique names.
+///
+/// Support: Full.
 #[derive(Default)]
 pub struct Contract {
     commands: BTreeMap<&'static str, Command>,
@@ -63,19 +73,25 @@ pub struct Contract {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+/// Support: Full.
 pub struct DuplicateCommand(pub &'static str);
 
 impl Contract {
+    /// Support: Full.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Adds a command with default flags.
+    ///
+    /// Support: Full.
     pub fn add(&mut self, command: Command) -> Result<(), DuplicateCommand> {
         self.add_flagged(command, Flags::default())
     }
 
     /// Adds a command with its flags.
+    ///
+    /// Support: Full.
     pub fn add_flagged(&mut self, command: Command, flags: Flags) -> Result<(), DuplicateCommand> {
         if self.commands.contains_key(command.name) {
             return Err(DuplicateCommand(command.name));
@@ -86,16 +102,22 @@ impl Contract {
     }
 
     /// The commands, sorted by name.
+    ///
+    /// Support: Full.
     pub fn commands(&self) -> impl Iterator<Item = &Command> {
         self.commands.values()
     }
 
     /// The flags of the command called `name`, or `None` when there is no such command.
+    ///
+    /// Support: Full.
     pub fn flags(&self, name: &str) -> Option<Flags> {
         self.flags.get(name).copied()
     }
 
     /// The contract as pretty-printed JSON with a trailing newline.
+    ///
+    /// Support: Full.
     pub fn to_json_string(&self) -> String {
         let commands: Vec<Value> = self
             .commands
@@ -127,6 +149,8 @@ fn command_json(c: &Command) -> Value {
 }
 
 /// Converts one [`Schema`] to a JSON Schema (draft 2020-12 keywords).
+///
+/// Support: Full.
 pub fn json_schema(schema: &Schema) -> Value {
     match schema {
         Schema::Bool => json!({ "type": "boolean" }),
