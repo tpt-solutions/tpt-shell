@@ -66,11 +66,29 @@ Method: `TPT_WEBVIEW2_LOADER=<path to WebView2Loader.dll> cargo test --release -
 
 Method: start `tpt-shell-supervisor -- supervisor-child beat` (release builds), wait 8 seconds, read the supervisor process's counters with `Get-Process`. The working set includes shared system DLL pages, so it is the larger number. The budget in §13 does not say which one it means.
 
+## Hello example on Windows: cold start, idle memory, size (release, 2026-10-23)
+
+Measured with the release `examples/hello`, a WebView2 loader from the Microsoft.Web.WebView2 package, and the Evergreen runtime 155.0.4283.45. Desktop in use during the runs.
+
+| Measure | Result | Budget |
+|---|---|---|
+| Binary size, release `hello.exe` | 1,049,600 bytes | 4 MB stripped: met |
+| Cold start: launch to the window appearing, 3 runs | 1,584, 1,690, 1,830 ms | to first paint ≤ 500 ms: **not met** |
+| Shell process private memory, 12 s after the window appeared | 5.4 MB | ≤ 25 MB: met |
+| Shell process working set, same run | 23.2 MB | ≤ 25 MB: met |
+| WebView2 processes started by the shell (6), private memory, same run | 139.7 MB | not in the shell's budget (see below) |
+| WebView2 processes, working set, same run | 299.8 MB | not in the shell's budget (see below) |
+
+- **Cold start.** The window appears only after the WebView2 controller exists, because `create` waits for it. So the 1.6 to 1.8 s is mostly WebView2 set-up, which matches the 0.8 to 2.0 s controller creation noted under M1. First paint of the page itself is not timed separately, so this is an upper bound on the window and not a first-paint figure. The budget is not met.
+- **Memory.** The spec does not say which memory measure its budget means, or whether the WebView2 runtime counts toward it. My recommendation, which you can change: the budget applies to the shell's own process, measured as private memory, and the runtime is reported separately. On that reading the shell is well inside the budget. Under working set it is also inside, at 23.2 MB.
+- **Size.** The earlier figure of 706,048 bytes (2026-10-22) is out of date. The release build is now 1,049,600 bytes. Still within the 4 MB budget.
+
+Method: `Start-Process` on the release example, polling the process for a non-zero main-window handle, every 5 ms. Memory is read with `Get-Process` after 12 seconds, with the WebView2 children found through their parent process IDs.
+
 ## Not measured yet
 
-- Cold start to first paint (spec §13 budget 500 ms). Partial numbers are in `todo.md`
-  under M1 (controller creation 0.8–2.0 s, total 2.1–2.3 s, so the budget is not met).
-- Idle shell memory (budget ≤ 25 MB) and supervisor idle memory (budget ≤ 5 MB).
+- First paint of the page, separately from the window appearing, and a split of the WebView2 set-up time.
+- The spec's reading of the shell memory budget, which needs a decision (see above).
 - macOS and Linux builds.
 
 The benchmark run is scripted in `tools/run-benchmarks.sh`. Use it so every result follows the same method.
