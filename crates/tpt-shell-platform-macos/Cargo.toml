@@ -20,3 +20,13 @@ objc2-foundation = "0.3"
 objc2-app-kit = "0.3"
 objc2-web-kit = "0.3"
 block2 = "0.6"
+# Keychain (Security framework). Licence: Zlib OR Apache-2.0 OR MIT, so the MIT branch applies.
+objc2-security = "0.3"
+objc2-core-foundation = "0.3"
+
+# Runs on the process main thread (AppKit requires it), so the default test harness, which
+# runs tests on spawned threads, cannot be used. Each check skips with a message when there is
+# no GUI session.
+[[test]]
+name = "runtime"
+harness = false

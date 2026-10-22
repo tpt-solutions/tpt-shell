@@ -952,6 +952,10 @@ mod tests {
             eprintln!("skipped: no display or no GTK 3 and WebKit 4.1 libraries");
             return;
         }
+        // GTK 3 and GTK 4 cannot share a process, and GTK runs one test at a time.
+        let Some(_gui) = crate::testutil::gui_session("gtk3") else {
+            return;
+        };
         let mut backend = Gtk3Backend::new().expect("GTK starts when a display is present");
         let spec = WindowSpec {
             name: "main".into(),

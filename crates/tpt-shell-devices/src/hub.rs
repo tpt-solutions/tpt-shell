@@ -11,7 +11,8 @@
 use std::sync::{Arc, Mutex};
 
 use crate::id::{DeviceId, DeviceScope};
-use crate::transport::{DeviceError, Transport};
+use crate::options::OpenOptions;
+use crate::transport::{ControlRequest, DeviceError, Transport};
 
 /// What happened to a device, for the audit log.
 ///
@@ -29,6 +30,8 @@ pub struct Event {
 pub enum EventKind {
     Open,
     Write,
+    /// A control transfer. The byte count is the data stage sent or received.
+    Control,
     Close,
 }
 
@@ -39,6 +42,9 @@ type Sink = Arc<Mutex<dyn FnMut(&Event) + Send>>;
 /// Support: Full.
 pub struct DeviceHub {
     available: Vec<Box<dyn Transport>>,
+    /// Real devices opened through `open_with`. Never removed, like the built-in devices, which
+    /// are not offered again once opened.
+    in_use: Vec<DeviceId>,
     sink: Sink,
 }
 
@@ -52,6 +58,7 @@ impl DeviceHub {
     ) -> Self {
         DeviceHub {
             available: devices,
+            in_use: Vec::new(),
             sink: Arc::new(Mutex::new(audit)),
         }
     }
@@ -88,6 +95,54 @@ impl DeviceHub {
             sink: self.sink.clone(),
         })
     }
+
+    /// Opens the device `id` with `options`. A device the hub was built with is used as it is
+    /// (its settings are fixed, so `options` are only validated). Otherwise the real device is
+    /// opened through the platform (see [`crate::native`]), with the scope checked first and the
+    /// open audited like any other. A real device is not offered again while it is open here,
+    /// but the hub cannot know that another process has it.
+    ///
+    /// Support: Partial. Real devices exist only where [`crate::native`] has a backend.
+    pub fn open_with(
+        &mut self,
+        id: &DeviceId,
+        scope: &DeviceScope,
+        options: &OpenOptions,
+    ) -> Result<OpenDevice, DeviceError> {
+        options.validate()?;
+        if !scope.matches(id) {
+            return Err(DeviceError::Denied(format!(
+                "{id} is outside the granted scope"
+            )));
+        }
+        if self.available.iter().any(|d| d.id() == id) {
+            return self.open(id, scope);
+        }
+        if self.in_use.iter().any(|d| d == id) {
+            return Err(DeviceError::Denied(format!("{id} is already open")));
+        }
+        let transport = crate::native::open(id, scope, options)?;
+        self.in_use.push(id.clone());
+        record(&self.sink, EventKind::Open, id, 0);
+        Ok(OpenDevice {
+            transport,
+            sink: self.sink.clone(),
+        })
+    }
+
+    /// The real devices the platform lists that `scope` covers, plus the hub's own. Nothing is
+    /// opened.
+    ///
+    /// Support: Partial. See [`crate::native::discover`].
+    pub fn discover(&self, scope: &DeviceScope) -> Vec<DeviceId> {
+        let mut ids = self.list(scope);
+        for id in crate::native::discover(scope) {
+            if !ids.contains(&id) && !self.in_use.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids
+    }
 }
 
 /// An open device. Dropping it closes the device, and the close is audited.
@@ -116,6 +171,21 @@ impl OpenDevice {
             bytes.len(),
         );
         Ok(())
+    }
+
+    /// Runs a control transfer, and audits the number of data bytes sent or received.
+    ///
+    /// Support: Partial. Only raw USB (Linux usbfs) has control transfers; other transports
+    /// return [`DeviceError::NotSupported`].
+    pub fn control(&mut self, request: &ControlRequest) -> Result<Vec<u8>, DeviceError> {
+        let data = self.transport.control(request)?;
+        let bytes = if request.direction_in {
+            data.len()
+        } else {
+            request.data.len()
+        };
+        record(&self.sink, EventKind::Control, self.transport.id(), bytes);
+        Ok(data)
     }
 
     /// Reads up to `max` bytes. Reads are not audited.
@@ -185,6 +255,79 @@ mod tests {
             vec![EventKind::Open, EventKind::Write, EventKind::Close]
         );
         assert_eq!(seen[1].bytes, 3);
+    }
+
+    #[test]
+    fn open_with_uses_a_built_in_device_and_checks_the_scope() {
+        let mut hub = DeviceHub::new(
+            vec![Box::new(VirtualSerial::loopback(port("COM7")))],
+            |_| {},
+        );
+        let scope = DeviceScope::Serial {
+            port: "COM*".into(),
+        };
+        let narrow = DeviceScope::Serial {
+            port: "COM1".into(),
+        };
+        let options = OpenOptions::default();
+        assert!(matches!(
+            hub.open_with(&port("COM7"), &narrow, &options),
+            Err(DeviceError::Denied(_))
+        ));
+        let bad = OpenOptions {
+            timeout_ms: 0,
+            ..OpenOptions::default()
+        };
+        assert!(matches!(
+            hub.open_with(&port("COM7"), &scope, &bad),
+            Err(DeviceError::Denied(_))
+        ));
+        assert!(hub.open_with(&port("COM7"), &scope, &options).is_ok());
+    }
+
+    #[test]
+    fn a_missing_real_device_is_denied_through_open_with() {
+        let mut hub = DeviceHub::new(Vec::new(), |_| {});
+        let id: DeviceId = "hid:ffff:fffe".parse().expect("id");
+        let scope = DeviceScope::Hid {
+            vendor: None,
+            product: None,
+        };
+        let result = hub.open_with(&id, &scope, &OpenOptions::default());
+        assert!(matches!(
+            result,
+            Err(DeviceError::Denied(_)) | Err(DeviceError::NotSupported(_))
+        ));
+    }
+
+    #[test]
+    fn control_is_refused_by_a_byte_stream_and_not_audited() {
+        let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+        let log = events.clone();
+        let mut hub = DeviceHub::new(
+            vec![Box::new(VirtualSerial::loopback(port("COM7")))],
+            move |e| log.lock().expect("log").push(e.clone()),
+        );
+        let scope = DeviceScope::Serial {
+            port: "COM*".into(),
+        };
+        let mut open = hub.open(&port("COM7"), &scope).expect("open");
+        let request = ControlRequest {
+            direction_in: true,
+            request_type: 0x80,
+            request: 6,
+            value: 0x0100,
+            index: 0,
+            data: Vec::new(),
+            max_in: 18,
+        };
+        assert!(matches!(
+            open.control(&request),
+            Err(DeviceError::NotSupported(_))
+        ));
+        drop(open);
+        let kinds: Vec<EventKind> = events.lock().expect("e").iter().map(|e| e.kind).collect();
+        assert_eq!(kinds, vec![EventKind::Open, EventKind::Close]);
     }
 
     #[test]

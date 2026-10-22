@@ -295,20 +295,20 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Decide: objc2 (named in spec ยง6.2 as an allowed low-level FFI crate). Its licence is checked with cargo-deny when M4 adds it
 - [ ] Own ObjC class/delegate declaration macro (R3)
 - [ ] NSApplication run loop and EventLoopProxy
-- [ ] NSWindow: bounds, title, fullscreen, frameless, always-on-top, transparency (create, show, hide, title, size, fullscreen and close are written against the generated bindings and type-check for macOS; they have not run on a Mac; frameless, always-on-top and transparency are not built)
-- [ ] NSVisualEffectView vibrancy and appearance observation
-- [ ] WKWebView with WKUserContentController script message handler (WKWebView is created and HTML is loaded; the message handler is not built)
-- [ ] WKUserScript at document start
-- [ ] WKURLSchemeHandler for `app://`
-- [ ] WKNavigationDelegate (navigation policy, crash callback)
-- [ ] `takeSnapshot`
-- [ ] NSOpenPanel / NSSavePanel
-- [ ] NSPasteboard (text, HTML, image, files)
+- [ ] NSWindow: bounds, title, fullscreen, frameless, always-on-top, transparency (all written against the generated bindings and type-check for macOS with clippy; none has run on a Mac yet. Tick after the macOS CI run)
+- [ ] NSVisualEffectView vibrancy and appearance observation (`set_backdrop` and `theme::observe_appearance` are written and type-check; unrun. Mica, Acrylic and Tabbed map to approximate system materials, not the Windows effects)
+- [ ] WKWebView with WKUserContentController script message handler (written in `webview.rs`; unrun)
+- [ ] WKUserScript at document start (written; unrun)
+- [ ] WKURLSchemeHandler for `app://` (written; unrun)
+- [ ] WKNavigationDelegate (navigation policy, crash callback) (navigation policy is written; the crash callback, `webViewWebContentProcessDidTerminate`, is not)
+- [ ] `takeSnapshot` (written, PNG through `NSBitmapImageRep`; unrun)
+- [ ] NSOpenPanel / NSSavePanel (written, plus an NSAlert message box; type-checked only, the modal dialogs have no runtime test. The message box is application-modal and ignores the owner window; filters use the deprecated `allowedFileTypes`)
+- [ ] NSPasteboard (text, HTML, image, files) (text is written; HTML, image and files are not built)
 - [ ] UNUserNotificationCenter
-- [ ] NSStatusItem tray and native menus
+- [ ] NSStatusItem tray and native menus (the tray with a text menu is written; unrun. Native application menus are not built)
 - [ ] Deep links via Apple Events
-- [ ] Single instance via NSRunningApplication with arg forwarding
-- [ ] Keystore (Keychain)
+- [ ] Single instance via NSRunningApplication with arg forwarding (written, forwards through a distributed notification, no sockets; needs a bundle id, so a bare binary gets `Unsupported`; two launches in the same instant can both become primary; unrun)
+- [ ] Keystore (Keychain) (Security framework generic-password items, `WhenUnlockedThisDeviceOnly`; written, unrun)
 - [ ] NSAccessibility tree access
 - [ ] Global hotkeys (Partial)
 - [ ] Support tags: macOS 12+ matrix, profile limits on 12โ€“13
@@ -329,16 +329,16 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ### Linux backend (tpt-shell-platform-linux)
 - [x] dlopen loader via `libloading` with clear missing-library errors (`tpt-shell-platform-linux::loader`, tested with missing libraries)
 - [ ] GTK3 + WebKit2GTK 4.1 adapter
-- [ ] GTK4 + WebKitGTK 6.0 adapter
-- [ ] Runtime adapter selection and `doctor` check
-- [ ] GTK main loop and EventLoopProxy
-- [ ] Window features: bounds, title, fullscreen, frameless, always-on-top, transparency
-- [ ] WebKitUserContentManager messages and scripts
-- [ ] `webkit_web_context_register_uri_scheme` for `app://`
-- [ ] Navigation policy and crash signals
-- [ ] `webkit_web_view_get_snapshot`
-- [ ] GtkFileChooser dialogs
-- [ ] Clipboard (GtkClipboard / GdkClipboard)
+- [ ] GTK4 + WebKitGTK 6.0 adapter (`gtk4/` is written and type-checks for x86_64 and aarch64 Linux; no GTK call has run. It runs only in the non-blocking CI job `linux-adapters`; tick when those legs are green. The first symbols to check if a leg fails: `webkit_web_view_get_context` and the `gdk_clipboard_store_async` arguments)
+- [x] Runtime adapter selection and `doctor` check (GTK 4 preferred when both load; `TPT_GTK=3|4` forces one with no fallback and a typo is an error; with neither installed the error names both toolkits and the apt packages; `doctor` prints the report on Linux. The selection logic is tested on the host; the doctor output has not been seen on Linux)
+- [ ] GTK main loop and EventLoopProxy (GTK4 is a `GMainLoop` with a `g_idle_add` proxy; type-checked, tested in CI only)
+- [ ] Window features: bounds, title, fullscreen, frameless, always-on-top, transparency (GTK4 has no bounds or always-on-top API, so they return `Unsupported` by design; transparency needs a compositor)
+- [ ] WebKitUserContentManager messages and scripts (GTK4 written, CI-only test)
+- [ ] `webkit_web_context_register_uri_scheme` for `app://` (GTK4 written, CI-only test)
+- [ ] Navigation policy and crash signals (GTK4 written: `web-process-terminated` reloads up to five times; CI-only test)
+- [ ] `webkit_web_view_get_snapshot` (GTK4 encodes a `GdkTexture` to PNG; CI-only test)
+- [ ] GtkFileChooser dialogs (GTK4 uses `GtkFileDialog`, 4.10+; on 4.6 only file dialogs return `Unsupported`; only the validation is tested)
+- [ ] Clipboard (GtkClipboard / GdkClipboard) (GdkClipboard is written; the X11 round trip is tested in CI only; Wayland read-back is not asserted)
 - [ ] Tray (StatusNotifier over D-Bus; GtkStatusIcon fallback)
 - [ ] Freedesktop notifications over D-Bus
 - [ ] Single instance over UNIX socket
@@ -346,13 +346,13 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Keystore (Secret Service)
 - [ ] AT-SPI accessibility dump
 - [ ] Global hotkeys X11-only (Partial tag)
-- [ ] Wayland and X11 verification
+- [ ] Wayland and X11 verification (feature differences are written up in `docs/src/platform-notes.md`; nothing is verified yet)
 - [ ] D-Bus client written without a non-compliant dependency, or licence-checked crate
 
 ### Parity
 - [ ] Conformance green on Ubuntu CI (Xvfb, Wayland headless where possible)
-- [ ] Both GTK3/4 adapters covered in CI matrix (R4)
-- [ ] aarch64 Linux build verified
+- [ ] Both GTK3/4 adapters covered in CI matrix (R4) (the `linux-adapters` job has four legs, gtk3 and gtk4 each under Xvfb and headless Weston, with `continue-on-error`; tick when green and remove that line)
+- [ ] aarch64 Linux build verified (the crate type-checks for `aarch64-unknown-linux-gnu`; no build or run)
 - [ ] Compatibility report covers all three OSes
 - [x] Decide: real Linux hardware needs (O6), per the O6 decision above
 - [ ] Done: Linux passes the conformance suite with parity (both adapters)
@@ -415,18 +415,18 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ### tpt-shell-devices core
 - [x] `Transport` trait (`tpt-shell-devices::transport`: write, read, and an error type with `Busy` for backpressure; control transfers are not in the trait yet)
 - [x] Device ID and scope types (vendor/product, port globs, host:port): `tpt-shell-devices::id`
-- [ ] API: `devices.list(filter)`, `open(id, options)`, read/write streams with backpressure, control transfers (`DeviceHub::list` and `open` check the scope and each device opens once; the `options` argument and control transfers are not built; backpressure is `DeviceError::Busy` on the serial loopback, not a stream)
-- [ ] Discovery and opt-in hotplug events
+- [ ] API: `devices.list(filter)`, `open(id, options)`, read/write streams with backpressure, control transfers (`DeviceHub::list` and `open` check the scope and each device opens once; `open_with(id, scope, &OpenOptions)` and `discover(scope)` are built, and `OpenDevice::control` is audited (`EventKind::Control`); control transfers work on Linux usbfs only; backpressure is `DeviceError::Busy`, not a stream, so the line stays open)
+- [ ] Discovery and opt-in hotplug events (polling `Watch::poll_native` is built for serial, hidraw, usbfs and IOKit HID on macOS and Linux, and does nothing when disabled; Windows lists nothing and there is no OS event stream: udev netlink, IOKit notifications and `WM_DEVICECHANGE` are not built)
 
 ### Transports
 - [x] Serial: Win32 COM
-- [ ] Serial: termios (macOS, Linux)
-- [ ] HID: Windows HID
-- [ ] HID: IOKit
-- [ ] HID: hidraw (Linux, udev notes)
-- [ ] USB raw: WinUSB
-- [ ] USB raw: IOKit
-- [ ] USB raw: usbfs
+- [ ] Serial: termios (macOS, Linux) (`platform/unix_serial.rs`, non-blocking, `flock`, refuses a node that is not a terminal; type-checked for both targets, never run. Its runtime test needs `TPT_TEST_SERIAL_PORT`, so CI only runs the device-free checks. Tick after a run with a real or pty-backed port)
+- [ ] HID: Windows HID (not built; returns `NotSupported`)
+- [ ] HID: IOKit (hand-written FFI for `IOHIDManager`, type-checked only, never run on a Mac; the riskiest unrun code)
+- [ ] HID: hidraw (Linux, udev notes) (written with discovery from `/sys/class/hidraw`; the udev rules note is in `docs/src/guides/devices.md`; the runtime test skips without a device or permission, so unrun)
+- [ ] USB raw: WinUSB (not built; returns `NotSupported`)
+- [ ] USB raw: IOKit (not built; returns `NotSupported`)
+- [ ] USB raw: usbfs (bulk and control written, type-checked; skips without a device; refuses bulk when another driver owns the interface; not built on MIPS, PowerPC or SPARC)
 - [x] TCP/UDP raw sockets (network printers), behind feature `net-devices`, off by default
 
 ### Helpers

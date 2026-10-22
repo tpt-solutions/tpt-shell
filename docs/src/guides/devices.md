@@ -38,9 +38,14 @@ the app opens a device under a scope:
 - `list(&scope)` returns the identifiers the scope covers.
 - `open(&id, &scope)` opens a device. It refuses an id outside the scope, a device that is not
   present, and a device that is already open. Each device opens once.
-- An open device writes with `write`, reads with `read`, and closes when it is dropped.
+- `open_with(&id, &scope, &options)` takes `OpenOptions` (serial line settings, the USB interface,
+  a transfer timeout). A device the hub was built with is used as it is. Otherwise the real device
+  is opened through the platform, scope first. `open` keeps its old behaviour: built-in devices only.
+- `discover(&scope)` adds the real devices the platform lists to the hub's own.
+- An open device writes with `write`, reads with `read`, runs `control` (USB control transfers,
+  Linux raw USB only; other devices refuse) and closes when it is dropped.
 
-Every open, write and close is passed to the audit callback. A write records the number of bytes
+Every open, write, control transfer and close is passed to the audit callback. A write records the number of bytes
 taken. Reads are not audited. Payloads are not logged.
 
 ## Printing and labels
@@ -86,8 +91,29 @@ own parser.
 
 ## Hot-plug
 
-`hotplug` computes the difference between two device lists. No platform listing feeds it yet, so the
-caller has to supply the list. Discovery events are not built.
+`hotplug::Watch` is off by default and sees nothing. An opted-in watcher (`Watch::opted_in()`)
+compares device lists, and `poll_native(&scope)` builds the list from the platform: `/dev` serial
+nodes on macOS and Linux, hidraw and usbfs on Linux, IOKit HID on macOS. This is polling, not an
+operating-system event stream, and Windows has no listing yet.
+
+## Linux permissions (udev)
+
+hidraw and usbfs nodes are owned by root, so an ordinary user is refused ("a udev rule must grant
+access"). Grant access to the devices an app needs, by vendor and product, never to every device.
+Put a file such as `/etc/udev/rules.d/70-tpt-devices.rules` on the machine:
+
+```
+# HID device 1a2b:0001 (hidraw)
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a2b", ATTRS{idProduct}=="0001", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+# Raw USB device 0403:6001 (usbfs)
+SUBSYSTEM=="usb", ATTR{idVendor}=="0403", ATTR{idProduct}=="6001", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+```
+
+Then run `udevadm control --reload-rules && udevadm trigger` and replug the device. Serial ports
+(`/dev/ttyUSB*`, `/dev/ttyACM*`) belong to the `dialout` group on most distributions (`uucp` on
+some), so add the user to it. Raw USB cannot claim an interface that a kernel driver owns, so
+bulk transfers are refused there, although control transfers still work. On macOS, reading a
+keyboard-class HID device needs the Input Monitoring permission.
 
 ## Operator checklist
 
@@ -100,9 +126,10 @@ caller has to supply the list. Discovery events are not built.
 
 | Device path | Windows | macOS | Linux |
 |---|---|---|---|
-| Serial (`serial:COMn`, 8 data bits, no parity, 1 stop bit) | Built and tested | Unsupported (termios backend not written) | Unsupported |
-| Serial port discovery | Not built; the caller names the port | Not built | Not built |
-| HID, USB raw | Not built (todo M7) | Not built | Not built |
+| Serial (`serial:COMn`, 8 data bits, no parity, 1 stop bit) | Built and tested | Built (termios, all line settings); type-checked, not run on a Mac | Built (termios, all line settings); run on CI only if a port exists |
+| Serial port discovery | Not built; the caller names the port | `/dev/cu.*` listing; type-checked | `/dev/ttyUSB*`, `ttyACM*`, `ttyS*`; run on CI |
+| HID | Not built | IOKit `IOHIDManager`; type-checked only, never run | hidraw; run on CI only if a device exists |
+| USB raw (bulk, control) | Not built (WinUSB) | Not built (IOKit USB) | usbfs; run on CI only if a device exists |
 | Raw print through the spooler | Built (winspool RAW) | Partial (CUPS `lp`, not run from here) | Partial (CUPS `lp`, not run from here) |
 | Network TCP and UDP (feature `net-devices`) | Built | Built, not run on macOS | Built, not run on Linux |
 | Virtual devices | Built and tested | Built; round-trip tests not run on macOS | Built; round-trip tests not run on Linux |

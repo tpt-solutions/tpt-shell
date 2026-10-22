@@ -8,27 +8,35 @@
 //! Text is ASCII. A code page is not chosen for the device, so non-ASCII text is refused
 //! rather than printed as the wrong glyphs.
 
+/// Support: Full. Parsers for hidraw uevent, sysfs ids, usbfs descriptors and ioctl numbers.
+pub mod descriptors;
 /// Support: Partial. The profile is the common plain-text one. Displays that need their own
 /// command set (brightness, cursor, custom characters) are not supported, and a display that
 /// does not move to the second line on line feed shows the bottom line in the wrong place.
 pub mod display;
 /// Support: Full.
 pub mod escpos;
-/// Support: Partial. The diff is complete, but no platform listing feeds it yet (the Win32, IOKit,
-/// hidraw and usbfs enumerations are not built), so a caller supplies the list.
+/// Support: Partial. Polling, not OS events: `Watch::poll_native` lists devices through the platform
+/// (macOS and Linux serial, hidraw, usbfs, IOKit HID; none on Windows) and reports the difference.
 pub mod hotplug;
-/// Support: Full.
+/// Support: Partial. Hub, scope check and audit are Full; `open_with` reaches real devices only
+/// where `native` has a backend.
 pub mod hub;
 /// Support: Full.
 pub mod id;
 /// Support: Full.
 pub mod jobs;
+/// Support: Partial. Real devices through the OS: see the table in the module docs.
+pub mod native;
 /// Support: Partial. A timeout during a write that has already sent some bytes is an error, not
 /// busy, because the bytes cannot be taken back. Name resolution uses the system resolver, which
 /// can block for as long as the system takes to answer.
 pub mod net;
-/// Support: Partial. Windows serial and spool, and the CUPS spool on Unix. There is no other OS
-/// backend, and the Unix spool is not run on macOS or Linux here.
+/// Support: Full. Serial and open options, and the termios plan, as pure data.
+pub mod options;
+/// Support: Partial. Windows serial and spool; CUPS spool, termios serial, hidraw and usbfs (Linux)
+/// and IOKit HID (macOS) on Unix, all compile-checked only from this workspace. No WinUSB, Windows
+/// HID or IOKit USB.
 pub mod platform;
 /// Support: Partial. The line shape is generic; a scale that sends a different shape needs its own
 /// parser.
@@ -36,9 +44,8 @@ pub mod scale;
 /// Support: Partial. HID POS decodes only boot-protocol keyboard reports, so a scanner that needs
 /// its own report descriptor is not handled.
 pub mod scanner;
-/// Support: Partial. Windows only, for COM1 to COM999 at a given baud rate, 8 data bits, no parity,
-/// one stop bit. Port discovery is not built, so the caller names the port. macOS and Linux return
-/// NotSupported: the termios backend is not written.
+/// Support: Partial. Windows (COM, baud only) and macOS/Linux (termios, all line settings,
+/// compile-checked, run on CI with a port). Discovery on macOS and Linux only.
 pub mod serial;
 /// Support: Partial. Windows: the winspool RAW datatype, tested. macOS and Linux go through CUPS lp
 /// with -o raw; not run on those systems from this workspace. Other platforms return NotSupported.

@@ -695,6 +695,18 @@ fn doctor() -> ExitCode {
             }
         }
     }
+    // Linux: which GTK and WebKit adapter would run. No adapter is a failure, because the shell
+    // cannot open a window. Opens the libraries only; it does not start GTK or need a display.
+    #[cfg(target_os = "linux")]
+    {
+        let probe = tpt_shell_platform_linux::probe::probe();
+        if !probe.ok() {
+            ok = false;
+        }
+        for line in probe.report() {
+            println!("{line}");
+        }
+    }
     // Optional packaging tools and platform minimums: warnings only, never a failure.
     for line in packaging::doctor_lines() {
         println!("{line}");

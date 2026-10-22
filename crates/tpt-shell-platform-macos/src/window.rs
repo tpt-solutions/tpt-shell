@@ -4,19 +4,31 @@
 //! An AppKit window that hosts one WKWebView, with the page bridge, navigation policy and
 //! `app://` scheme handler attached (spec §6.2, §9).
 
+use std::cell::{Cell, RefCell};
+use std::ptr::NonNull;
+use std::rc::Rc;
+
+use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::{define_class, msg_send, MainThreadMarker, MainThreadOnly};
+use objc2::{define_class, msg_send, sel, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSBackingStoreType, NSColor, NSFloatingWindowLevel, NSNormalWindowLevel, NSWindow,
-    NSWindowStyleMask,
+    NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
+    NSAutoresizingMaskOptions, NSBackingStoreType, NSBitmapImageFileType, NSBitmapImageRep,
+    NSColor, NSFloatingWindowLevel, NSImage, NSNormalWindowLevel, NSVisualEffectBlendingMode,
+    NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowStyleMask,
 };
-use objc2_foundation::{NSPoint, NSRect, NSSize, NSString, NSURLRequest, NSURL};
+use objc2_foundation::{
+    NSDate, NSDefaultRunLoopMode, NSDictionary, NSError, NSObjectProtocol, NSPoint, NSRect,
+    NSRunLoop, NSSize, NSString, NSURLRequest, NSURL,
+};
 use objc2_web_kit::{
-    WKUserContentController, WKUserScript, WKUserScriptInjectionTime, WKWebView,
-    WKWebViewConfiguration,
+    WKSnapshotConfiguration, WKUserContentController, WKUserScript, WKUserScriptInjectionTime,
+    WKWebView, WKWebViewConfiguration,
 };
-use tpt_shell_core::backend::{AssetSource, CloseAction, MessageHandler};
+use tpt_shell_core::backend::{
+    AssetSource, Backdrop, CloseAction, MessageHandler, PreferredScheme,
+};
 
 use crate::policy::is_app_url;
 use crate::shim::SHIM_JS;
@@ -71,6 +83,9 @@ pub struct MacWindow {
     _navigation: Retained<NavigationDelegate>,
     scheme: Retained<SchemeHandler>,
     close: Retained<WindowDelegate>,
+    // The vibrancy view while a backdrop is on. It then is the content view and holds `web`.
+    effect: RefCell<Option<Retained<NSVisualEffectView>>>,
+    transparent: Cell<bool>,
 }
 
 impl MacWindow {
@@ -147,6 +162,8 @@ impl MacWindow {
             _navigation: navigation,
             scheme,
             close,
+            effect: RefCell::new(None),
+            transparent: Cell::new(false),
         }
     }
 
@@ -267,6 +284,14 @@ impl MacWindow {
     ///
     /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn set_transparent(&self, on: bool) {
+        self.transparent.set(on);
+        // A vibrancy view needs the see-through look whatever the flag says.
+        let on = on || self.effect.borrow().is_some();
+        self.set_transparent_look(on);
+    }
+
+    /// The window and page background part of transparency.
+    fn set_transparent_look(&self, on: bool) {
         // SAFETY: main thread; the colours are created and used at once.
         unsafe {
             if on {
@@ -283,8 +308,146 @@ impl MacWindow {
         }
     }
 
+    /// Puts a vibrancy view behind the page, or takes it away. macOS has no Mica or Acrylic:
+    /// they map to the closest `NSVisualEffectMaterial` (Mica: window background, Acrylic:
+    /// HUD window, Tabbed: header view). The window and page are made see-through so the
+    /// material shows where the page does not paint.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
+    pub fn set_backdrop(&self, mtm: MainThreadMarker, backdrop: Backdrop) {
+        let material = match backdrop {
+            Backdrop::None => None,
+            Backdrop::Mica => Some(NSVisualEffectMaterial::WindowBackground),
+            Backdrop::Acrylic => Some(NSVisualEffectMaterial::HUDWindow),
+            Backdrop::Tabbed => Some(NSVisualEffectMaterial::HeaderView),
+        };
+        let mut slot = self.effect.borrow_mut();
+        let Some(material) = material else {
+            // Put the web view back as the content view, if a vibrancy view had it.
+            if slot.take().is_some() {
+                self.web.removeFromSuperview();
+                self.window.setContentView(Some(&self.web));
+            }
+            self.set_transparent_look(self.transparent.get());
+            return;
+        };
+        let effect = match slot.as_ref() {
+            Some(existing) => existing.clone(),
+            None => {
+                let size = NSSize::new(self.web.frame().size.width, self.web.frame().size.height);
+                let frame = NSRect::new(NSPoint::new(0.0, 0.0), size);
+                let view = NSVisualEffectView::initWithFrame(mtm.alloc(), frame);
+                view.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+                view.setState(NSVisualEffectState::Active);
+                let sizable = NSAutoresizingMaskOptions::ViewWidthSizable
+                    | NSAutoresizingMaskOptions::ViewHeightSizable;
+                view.setAutoresizingMask(sizable);
+                // The web view leaves the content view slot before it joins the vibrancy view.
+                self.web.removeFromSuperview();
+                self.window.setContentView(Some(&view));
+                self.web.setFrame(view.bounds());
+                self.web.setAutoresizingMask(sizable);
+                view.addSubview(&self.web);
+                *slot = Some(view.clone());
+                view
+            }
+        };
+        effect.setMaterial(material);
+        self.set_transparent_look(true);
+    }
+
+    /// Sets the appearance of this window, which is what the page's `prefers-color-scheme`
+    /// follows. `System` clears the override.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
+    pub fn set_preferred_scheme(&self, scheme: PreferredScheme) {
+        // SAFETY: both names are constants provided by AppKit.
+        let appearance: Option<Retained<NSAppearance>> = match scheme {
+            PreferredScheme::System => None,
+            PreferredScheme::Light => unsafe {
+                NSAppearance::appearanceNamed(NSAppearanceNameAqua)
+            },
+            PreferredScheme::Dark => unsafe {
+                NSAppearance::appearanceNamed(NSAppearanceNameDarkAqua)
+            },
+        };
+        self.window.setAppearance(appearance.as_deref());
+    }
+
+    /// Turns Web Inspector on or off for the page. `isInspectable` exists from macOS 13.3, so
+    /// this returns false on older systems, where the request cannot be honoured.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
+    pub fn set_inspectable(&self, on: bool) -> bool {
+        if !self.web.respondsToSelector(sel!(setInspectable:)) {
+            return false;
+        }
+        // SAFETY: the selector exists, checked above; main thread.
+        unsafe { self.web.setInspectable(on) };
+        true
+    }
+
+    /// Captures the page as PNG bytes. WebKit answers on the main run loop, so this pumps that
+    /// loop until the answer arrives or ten seconds pass.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
+    pub fn snapshot(&self, mtm: MainThreadMarker) -> Result<Vec<u8>, String> {
+        let slot: Rc<RefCell<Option<SnapshotResult>>> = Rc::new(RefCell::new(None));
+        let done = slot.clone();
+        let block = RcBlock::new(move |image: *mut NSImage, error: *mut NSError| {
+            let result = match NonNull::new(image) {
+                // SAFETY: WebKit passes a live image that stays valid for this callback.
+                Some(image) => png_bytes(unsafe { image.as_ref() }),
+                None => {
+                    // SAFETY: as above, for the error.
+                    let why = unsafe { error.as_ref() }
+                        .map(|e| e.localizedDescription().to_string())
+                        .unwrap_or_else(|| "no image".to_string());
+                    Err(format!("snapshot failed: {why}"))
+                }
+            };
+            *done.borrow_mut() = Some(result);
+        });
+        // SAFETY: main thread. The default configuration captures the visible page. WebKit
+        // copies the block and calls it on this thread's run loop.
+        unsafe {
+            let config = WKSnapshotConfiguration::new(mtm);
+            self.web
+                .takeSnapshotWithConfiguration_completionHandler(Some(&config), &block);
+        }
+        let run_loop = NSRunLoop::currentRunLoop();
+        for _ in 0..200 {
+            if slot.borrow().is_some() {
+                break;
+            }
+            // SAFETY: the mode is a Foundation constant; the date is made for this call.
+            unsafe {
+                run_loop.runMode_beforeDate(
+                    NSDefaultRunLoopMode,
+                    &NSDate::dateWithTimeIntervalSinceNow(0.05),
+                );
+            }
+        }
+        let result = slot.borrow_mut().take();
+        result.unwrap_or_else(|| Err("snapshot timed out".to_string()))
+    }
+
     /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
     pub fn close(&self) {
         self.window.close();
     }
+}
+
+/// What a snapshot callback leaves behind: PNG bytes or the reason it failed.
+type SnapshotResult = Result<Vec<u8>, String>;
+
+/// Encodes an image as PNG through its TIFF form.
+fn png_bytes(image: &NSImage) -> Result<Vec<u8>, String> {
+    let tiff = image.TIFFRepresentation().ok_or("no TIFF form")?;
+    let rep = NSBitmapImageRep::imageRepWithData(&tiff).ok_or("unreadable image")?;
+    let props = NSDictionary::new();
+    // SAFETY: an empty properties dictionary is valid for PNG output.
+    let png = unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &props) }
+        .ok_or("PNG encoding failed")?;
+    Ok(png.to_vec())
 }

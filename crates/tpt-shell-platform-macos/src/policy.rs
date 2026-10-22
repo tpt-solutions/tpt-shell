@@ -108,6 +108,28 @@ pub fn response_headers(content_type: &str) -> [(&'static str, String); 2] {
     ]
 }
 
+/// File extensions named by (display name, pattern) dialog filters. `*.txt` gives `txt`, and
+/// several patterns can be joined with `;`. A pattern that matches everything (`*`, `*.*`)
+/// turns the filter off and gives an empty list, because the panels take extensions only.
+///
+/// Support: Full.
+pub fn file_extensions(filters: &[(String, String)]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (_, pattern) in filters {
+        for part in pattern.split(';') {
+            let part = part.trim();
+            let ext = part.strip_prefix("*.").unwrap_or(part);
+            if ext.is_empty() || ext == "*" {
+                return Vec::new();
+            }
+            if !out.iter().any(|e| e == ext) {
+                out.push(ext.to_string());
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +195,21 @@ mod tests {
         assert_eq!(headers[1].0, "Content-Security-Policy");
         assert!(headers[1].1.contains("script-src 'self'"));
         assert!(!headers[1].1.contains("unsafe-inline"));
+    }
+
+    fn filter(pattern: &str) -> Vec<(String, String)> {
+        vec![("Files".to_string(), pattern.to_string())]
+    }
+
+    #[test]
+    fn dialog_patterns_become_extensions() {
+        assert_eq!(file_extensions(&filter("*.txt")), vec!["txt"]);
+        assert_eq!(file_extensions(&filter("*.png;*.jpg")), vec!["png", "jpg"]);
+    }
+
+    #[test]
+    fn a_match_all_dialog_pattern_removes_the_restriction() {
+        assert!(file_extensions(&filter("*.*")).is_empty());
+        assert!(file_extensions(&[]).is_empty());
     }
 }

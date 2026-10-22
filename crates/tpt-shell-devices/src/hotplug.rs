@@ -8,8 +8,9 @@
 //! is watched until the app opts in with [`Watch::opted_in`]; the default watcher reports
 //! nothing and never sees a list, so it does not notice devices at all.
 //!
-//! Support: Partial. The diff is complete, but no platform listing feeds it yet (the Win32, IOKit,
-//! hidraw and usbfs enumerations are not built), so today a caller supplies the list.
+//! Support: Partial. Events come from polling, not from OS notifications: [`Watch::poll_native`]
+//! lists devices through [`crate::native::discover`] (macOS and Linux serial, hidraw, usbfs and
+//! IOKit HID; Windows has none) and reports the difference. A caller can still supply the list.
 
 use crate::id::DeviceId;
 
@@ -24,8 +25,7 @@ pub enum Change {
 
 /// Remembers the devices seen at the last poll and reports the difference.
 ///
-/// Support: Partial. The diff is complete, but no platform listing feeds it yet (the Win32, IOKit,
-/// hidraw and usbfs enumerations are not built), so a caller supplies the list.
+/// Support: Partial. Polling only; see the module documentation.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Watch {
     enabled: bool,
@@ -58,8 +58,7 @@ impl Watch {
     /// Compares `present` with the last poll. A disabled watcher returns nothing and keeps no
     /// state. The first poll of an enabled watcher reports every device as added.
     ///
-    /// Support: Partial. The diff is complete, but no platform listing feeds it yet (the Win32,
-    /// IOKit, hidraw and usbfs enumerations are not built), so a caller supplies the list.
+    /// Support: Full.
     pub fn update(&mut self, present: &[DeviceId]) -> Vec<Change> {
         if !self.enabled {
             return Vec::new();
@@ -78,6 +77,18 @@ impl Watch {
         self.known = present.to_vec();
         changes
     }
+
+    /// Lists the devices `scope` covers through the platform and compares them with the last
+    /// poll. A disabled watcher does not list anything, so it never touches the system.
+    ///
+    /// Support: Partial. Polling, and no listing on Windows (the result is then always empty).
+    pub fn poll_native(&mut self, scope: &crate::id::DeviceScope) -> Vec<Change> {
+        if !self.enabled {
+            return Vec::new();
+        }
+        let present = crate::native::discover(scope);
+        self.update(&present)
+    }
 }
 
 #[cfg(test)]
@@ -94,6 +105,24 @@ mod tests {
         assert!(!watch.is_enabled());
         assert!(watch.update(&[id("serial:COM1")]).is_empty());
         assert_eq!(watch, Watch::disabled());
+    }
+
+    #[test]
+    fn a_disabled_watcher_does_not_list_the_system() {
+        let mut watch = Watch::disabled();
+        let scope = crate::id::DeviceScope::Serial { port: "*".into() };
+        assert!(watch.poll_native(&scope).is_empty());
+    }
+
+    #[test]
+    fn an_opted_in_watcher_polls_the_platform_without_failing() {
+        let mut watch = Watch::opted_in();
+        let scope = crate::id::DeviceScope::Hid {
+            vendor: Some(0xffff),
+            product: Some(0xfffe),
+        };
+        assert!(watch.poll_native(&scope).is_empty());
+        assert!(watch.poll_native(&scope).is_empty());
     }
 
     #[test]

@@ -3,7 +3,7 @@
 
 [package]
 name = "tpt-shell-devices"
-description = "Device-bridge helpers: ESC/POS and ZPL builders (pure byte generation, no I/O)."
+description = "Device bridge: transports (serial, HID, USB), hub, virtual devices, ESC/POS and ZPL builders."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,3 +17,8 @@ rust-version.workspace = true
 net-devices = []
 
 [dependencies]
+
+# libc (MIT OR Apache-2.0, already in the lock file) gives the termios, ioctl and open
+# declarations for the Linux and macOS transports. It is not built on Windows.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

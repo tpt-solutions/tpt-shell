@@ -171,6 +171,45 @@ jobs:
           path: conformance/out/
           if-no-files-found: warn
 
+  # R4: the Linux window adapters, one leg per toolkit and per display server. A leg installs only
+  # that toolkit's runtime packages (the crate loads them with dlopen, so no -dev packages), sets
+  # TPT_GTK so the shell selects it, and runs with TPT_LINUX_STRICT so a leg that cannot start
+  # its toolkit fails instead of skipping. The legs ran nowhere before this job existed, so the
+  # job is non-blocking (continue-on-error): remove that line once the legs are green. The WebKit
+  # sandbox and GPU compositing are switched off, because a CI runner has no GPU and may forbid
+  # the user namespaces the WebKit sandbox needs. That setting is for this job only.
+  linux-adapters:
+    name: linux-adapters (${{ matrix.adapter }}, ${{ matrix.display }})
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { adapter: gtk3, tpt_gtk: "3", display: xvfb, packages: "libgtk-3-0 libwebkit2gtk-4.1-0 xvfb xauth" }
+          - { adapter: gtk4, tpt_gtk: "4", display: xvfb, packages: "libgtk-4-1 libwebkitgtk-6.0-4 xvfb xauth" }
+          - { adapter: gtk3, tpt_gtk: "3", display: wayland, packages: "libgtk-3-0 libwebkit2gtk-4.1-0 weston" }
+          - { adapter: gtk4, tpt_gtk: "4", display: wayland, packages: "libgtk-4-1 libwebkitgtk-6.0-4 weston" }
+    env:
+      TPT_GTK: ${{ matrix.tpt_gtk }}
+      TPT_LINUX_STRICT: "1"
+      WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
+      WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+      WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+      GSK_RENDERER: cairo
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      NO_AT_BRIDGE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install the runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ${{ matrix.packages }} libgl1-mesa-dri fonts-dejavu-core
+      - name: Which adapter doctor reports
+        run: bash tools/headless-linux.sh ${{ matrix.display }} cargo run -q -p tpt-shell-cli -- doctor || true
+      - name: Adapter tests (${{ matrix.adapter }}, ${{ matrix.display }})
+        run: bash tools/headless-linux.sh ${{ matrix.display }} cargo test -p tpt-shell-platform-linux -- --nocapture --test-threads=1
+
   # Merges the three result files into the compatibility report (spec §14, "generates the public
   # compatibility report"). The report is also written to the job summary.
   compat-report:

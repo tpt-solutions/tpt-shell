@@ -30,3 +30,6 @@ tpt-shell-supervisor = { path = "../tpt-shell-supervisor", version = "0.0.0" }
 
 [target.'cfg(windows)'.dependencies]
 tpt-shell-platform-windows = { path = "../tpt-shell-platform-windows", version = "0.0.0" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tpt-shell-platform-linux = { path = "../tpt-shell-platform-linux", version = "0.0.0" }
