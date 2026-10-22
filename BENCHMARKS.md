@@ -85,9 +85,23 @@ Measured with the release `examples/hello`, a WebView2 loader from the Microsoft
 
 Method: `Start-Process` on the release example, polling the process for a non-zero main-window handle, every 5 ms. Memory is read with `Get-Process` after 12 seconds, with the WebView2 children found through their parent process IDs.
 
+## Cold start, split (conformance probe, release, 2026-10-23)
+
+The probe is `cold_start_probe` in `conformance/tests/conformance/windows.rs`, run with `--ignored`. It times on the host, from the start of the window's creation to the page's `DOMContentLoaded`, over seven runs.
+
+| Step | Median | Range |
+|---|---|---|
+| Window created, controller included | 1,086 ms | 480 to 1,642 ms |
+| Page parsed (`DOMContentLoaded`), from the start | 2,951 ms | 743 to 3,118 ms |
+
+- The budget is first paint within 500 ms. Neither step is first paint, and the page is parsed well after the window exists, so the budget is not met on either measure.
+- About a third of the time is the window and controller. The rest is WebView2 loading the document after the handover (`load_html`), which the probe does not split further.
+- **Probe limits.** Animation frames were not used: a window that is not visible does not run them, so the probe could not detect a painted frame. The probe loads the page with `load_html`. A first attempt that navigated to the app origin, with the same inline script, never ran the script in 20 seconds. That is not explained. It may be a real defect in the navigate path, and it is worth checking before the probe is trusted for navigation.
+
 ## Not measured yet
 
-- First paint of the page, separately from the window appearing, and a split of the WebView2 set-up time.
+- First paint of the page, as a painted frame. The probe above stops at `DOMContentLoaded`, and a visible-window check is needed to time paint.
+- The cause of the navigate path's script not running (see the probe's limits above).
 - The spec's reading of the shell memory budget, which needs a decision (see above).
 - macOS and Linux builds.
 
