@@ -80,6 +80,11 @@ pub struct Gtk3Backend {
     next: usize,
     pub(crate) windows: HashMap<usize, Box<WindowState>>,
     scheme_registered: bool,
+    /// `TPT_WEBKIT_CONTEXT=own`: use a web context made and released by this backend, not
+    /// WebKit's process-wide default (an experiment for an exit-time WebKit abort). The context
+    /// is ephemeral, so nothing is stored on disk.
+    own_context: bool,
+    context: Obj,
     /// Windows that were closed. Their state is leaked on purpose: WebKit may still call a signal
     /// handler or the scheme handler with the state pointer after the widget is destroyed, so
     /// the memory must stay valid. Handlers and assets are dropped; `destroyed` is set.
@@ -137,6 +142,8 @@ impl Gtk3Backend {
             next: 1,
             windows: HashMap::new(),
             scheme_registered: false,
+            own_context: std::env::var("TPT_WEBKIT_CONTEXT").is_ok_and(|v| v == "own"),
+            context: std::ptr::null_mut(),
             retired: Vec::new(),
         })
     }
@@ -642,7 +649,14 @@ impl WindowBackend for Gtk3Backend {
                 spec.size.height as c_int,
             );
             (f.gtk_window_set_title)(window, title.as_ptr());
-            let view = (f.webkit_web_view_new)();
+            let view = if self.own_context {
+                if self.context.is_null() {
+                    self.context = (f.webkit_web_context_new_ephemeral)();
+                }
+                (f.webkit_web_view_new_with_context)(self.context)
+            } else {
+                (f.webkit_web_view_new)()
+            };
             if view.is_null() {
                 (f.gtk_widget_destroy)(window);
                 return Err(Error::Backend("WebKit could not create a web view".into()));
@@ -915,6 +929,13 @@ impl Drop for Gtk3Backend {
             Box::leak(w);
         }
         drain_default_context(self.gtk);
+        if !self.context.is_null() {
+            // SAFETY: the context is ours (made by `create`), and every view that used it was
+            // destroyed above and drained.
+            unsafe { (self.gtk.fns.g_object_unref)(self.context) };
+            self.context = std::ptr::null_mut();
+            drain_default_context(self.gtk);
+        }
     }
 }
 

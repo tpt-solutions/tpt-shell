@@ -223,6 +223,8 @@ bound_functions! {
     gdk . gdk_atom_intern = "gdk_atom_intern": fn(*const c_char, c_int) -> Obj;
     // WebKit2GTK 4.1
     webkit . webkit_web_view_new = "webkit_web_view_new": fn() -> Obj;
+    webkit . webkit_web_view_new_with_context = "webkit_web_view_new_with_context": fn(Obj) -> Obj;
+    webkit . webkit_web_context_new_ephemeral = "webkit_web_context_new_ephemeral": fn() -> Obj;
     webkit . webkit_web_view_load_html = "webkit_web_view_load_html": fn(Obj, *const c_char, *const c_char) -> ();
     webkit . webkit_web_view_load_uri = "webkit_web_view_load_uri": fn(Obj, *const c_char) -> ();
     webkit . webkit_web_view_reload = "webkit_web_view_reload": fn(Obj) -> ();

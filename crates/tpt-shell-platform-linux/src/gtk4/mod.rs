@@ -95,6 +95,12 @@ pub struct Gtk4Backend {
     next: usize,
     pub(crate) windows: HashMap<usize, Box<WindowState>>,
     scheme_registered: bool,
+    /// `TPT_WEBKIT_CONTEXT=own`: use a web context and network session made and released by
+    /// this backend, not WebKit's process-wide defaults (an experiment for an exit-time
+    /// WebKit abort). The session is ephemeral, so nothing is stored on disk.
+    own_context: bool,
+    context: Obj,
+    session: Obj,
     /// Windows that were closed. Their state is leaked on purpose: WebKit may still call a signal
     /// handler or the scheme handler with the state pointer after the widget is destroyed, so
     /// the memory must stay valid. Handlers and assets are dropped; `destroyed` is set.
@@ -255,6 +261,9 @@ impl Gtk4Backend {
             next: 1,
             windows: HashMap::new(),
             scheme_registered: false,
+            own_context: std::env::var("TPT_WEBKIT_CONTEXT").is_ok_and(|v| v == "own"),
+            context: std::ptr::null_mut(),
+            session: std::ptr::null_mut(),
             retired: Vec::new(),
             transparency_css: false,
             main_loop,
@@ -809,7 +818,23 @@ impl WindowBackend for Gtk4Backend {
                 spec.size.height as c_int,
             );
             (f.gtk_window_set_title)(window, title.as_ptr());
-            let view = (f.webkit_web_view_new)();
+            let view = if self.own_context {
+                if self.context.is_null() {
+                    self.context = (f.webkit_web_context_new)();
+                    self.session = (f.webkit_network_session_new_ephemeral)();
+                }
+                // The view's two construct-only properties, then the NULL that ends the list.
+                (self.gtk.g_object_new)(
+                    (f.webkit_web_view_get_type)(),
+                    c"web-context".as_ptr(),
+                    self.context,
+                    c"network-session".as_ptr(),
+                    self.session,
+                    std::ptr::null::<c_char>(),
+                )
+            } else {
+                (f.webkit_web_view_new)()
+            };
             if view.is_null() {
                 (f.gtk_window_destroy)(window);
                 return Err(Error::Backend("WebKit could not create a web view".into()));
@@ -1069,6 +1094,15 @@ impl Drop for Gtk4Backend {
         }
         for w in std::mem::take(&mut self.retired) {
             Box::leak(w);
+        }
+        drain_default_context(self.gtk);
+        for owned in [&mut self.session, &mut self.context] {
+            if !owned.is_null() {
+                // SAFETY: the object is ours (made by `create`), and every view that used it
+                // was destroyed above and drained.
+                unsafe { (self.gtk.fns.g_object_unref)(*owned) };
+                *owned = std::ptr::null_mut();
+            }
         }
         drain_default_context(self.gtk);
         // SAFETY: the loop was created by `new` and is released once.

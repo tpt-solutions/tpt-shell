@@ -174,6 +174,9 @@ bound_functions! { Fns, "Every function the adapter always needs, looked up once
     gtk . gdk_texture_save_to_png_bytes = "gdk_texture_save_to_png_bytes": fn(Obj) -> Obj;
     // WebKitGTK 6.0
     webkit . webkit_web_view_new = "webkit_web_view_new": fn() -> Obj;
+    webkit . webkit_web_view_get_type = "webkit_web_view_get_type": fn() -> usize;
+    webkit . webkit_web_context_new = "webkit_web_context_new": fn() -> Obj;
+    webkit . webkit_network_session_new_ephemeral = "webkit_network_session_new_ephemeral": fn() -> Obj;
     webkit . webkit_web_view_load_html = "webkit_web_view_load_html": fn(Obj, *const c_char, *const c_char) -> ();
     webkit . webkit_web_view_load_uri = "webkit_web_view_load_uri": fn(Obj, *const c_char) -> ();
     webkit . webkit_web_view_reload = "webkit_web_view_reload": fn(Obj) -> ();
@@ -254,6 +257,9 @@ bound_functions! { DialogFns, "The `GtkFileDialog` functions (GTK 4.10 and later
 pub struct Gtk4 {
     pub libs: Libs,
     pub fns: Fns,
+    /// `g_object_new`, which is variadic, so it is bound by hand: the table macro only makes
+    /// fixed-argument prototypes.
+    pub g_object_new: unsafe extern "C" fn(usize, *const c_char, ...) -> Obj,
     dialogs: Result<DialogFns, LoadError>,
 }
 
@@ -281,7 +287,18 @@ fn open_all() -> Result<Gtk4, LoadError> {
     };
     let fns = Fns::bind(&libs)?;
     let dialogs = DialogFns::bind(&libs);
-    Ok(Gtk4 { libs, fns, dialogs })
+    // SAFETY: `g_object_new` is declared in GObject as `gpointer g_object_new(GType type,
+    // const gchar *first_property_name, ...)`, which is this prototype.
+    let g_object_new = unsafe {
+        libs.gobject
+            .symbol::<unsafe extern "C" fn(usize, *const c_char, ...) -> Obj>("g_object_new")?
+    };
+    Ok(Gtk4 {
+        libs,
+        fns,
+        g_object_new,
+        dialogs,
+    })
 }
 
 /// The GTK 4 and WebKitGTK 6.0 adapter, or the reason it could not be loaded. The first call

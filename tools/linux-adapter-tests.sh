@@ -40,6 +40,8 @@ echo "test binary: $bin"
 # names of all failures are repeated at the end.
 failed=0
 failed_names=""
+first_crash=""
+gdb_symbols_done=0
 out="$(mktemp)"
 while IFS= read -r name; do
   "$bin" --exact "$name" --nocapture >"$out" 2>&1
@@ -66,15 +68,29 @@ while IFS= read -r name; do
   # The first GLib, GTK or WebKit complaint, for the annotation and for a quick read.
   first="$(grep -m1 -E 'ERROR|CRITICAL|WARNING|panicked|assert|Error' "$out" | cut -c1-300)"
   echo "::error title=$name $label (exit code $rc)::${first:-no message}"
-  if [ "$rc" -ge 128 ]; then
-    echo "killed by signal $((rc - 128)); native backtrace follows"
+  if [ "$rc" -ge 128 ] || grep -q "test result: ok. 1 passed" "$out"; then
+    [ -n "$first_crash" ] || first_crash="$name"
+    echo "native backtrace follows"
     if command -v gdb >/dev/null 2>&1; then
-      G_MESSAGES_DEBUG=all gdb -batch -ex "set pagination off" -ex run -ex "bt full" \
-        -ex "thread apply all bt" --args "$bin" --exact "$name" --nocapture >"$out.gdb" 2>&1
+      if [ "$gdb_symbols_done" -eq 0 ]; then
+        # Only the first crash pays for debug symbols: gdb fetches them from debuginfod, which is
+        # slow, so the whole gdb run is capped. Later crashes get the cheap backtrace.
+        gdb_symbols_done=1
+        echo "(first crash: resolving symbols through debuginfod, capped at 8 minutes)"
+        DEBUGINFOD_URLS="https://debuginfod.ubuntu.com" G_MESSAGES_DEBUG=all \
+          timeout 480 gdb -batch -ex "set pagination off" -ex "set debuginfod enabled on" \
+          -ex run -ex "bt full" -ex "thread apply all bt" \
+          --args "$bin" --exact "$name" --nocapture >"$out.gdb" 2>&1
+        frame_count=14
+      else
+        G_MESSAGES_DEBUG=all gdb -batch -ex "set pagination off" -ex run -ex "bt full" \
+          -ex "thread apply all bt" --args "$bin" --exact "$name" --nocapture >"$out.gdb" 2>&1
+        frame_count=25
+      fi
       tail -n 200 "$out.gdb"
       # The stack frames of the crashing thread and the GLib messages, as one annotation, so the
       # cause can be read without opening the log.
-      frames="$(grep -E '^#[0-9]+ ' "$out.gdb" | head -n 25 | cut -c1-200 | sed 's/%/%25/g' | paste -sd '|')"
+      frames="$(grep -E '^#[0-9]+ ' "$out.gdb" | head -n "$frame_count" | cut -c1-200 | sed 's/%/%25/g' | paste -sd '|')"
       glib="$(grep -E 'GLib|Gtk|Gdk|WebKit|\*\*' "$out.gdb" | head -n 6 | cut -c1-200 | sed 's/%/%25/g' | paste -sd '|')"
       echo "::error title=$name backtrace::frames: ${frames:-none} || messages: ${glib:-none}"
     else
@@ -83,6 +99,37 @@ while IFS= read -r name; do
   fi
 done < <("$bin" --list 2>/dev/null | sed -n 's/: test$//p')
 rm -f "$out" "$out.gdb"
+
+# A cheap experiment that needs no symbols: run the first crashing test again with different
+# WebKit environment settings and with an explicit WebKit context owned by the adapter
+# (TPT_WEBKIT_CONTEXT=own), and say which, if any, removes the abort.
+if [ -n "$first_crash" ]; then
+  echo "== experiment on $first_crash =="
+  results=""
+  run_variant() {
+    label="$1"
+    shift
+    env "$@" timeout 120 "$bin" --exact "$first_crash" --nocapture >"$out.exp" 2>&1
+    vrc=$?
+    if [ "$vrc" -eq 0 ]; then
+      verdict="no abort (exit 0)"
+    else
+      verdict="exit $vrc"
+    fi
+    results="$results$(printf '%-40s %s' "$label" "$verdict")
+"
+  }
+  run_variant "baseline (job environment)" TPT_X=1
+  run_variant "compositing off only" -u WEBKIT_DISABLE_DMABUF_RENDERER
+  run_variant "dmabuf off only" -u WEBKIT_DISABLE_COMPOSITING_MODE
+  run_variant "neither switch" -u WEBKIT_DISABLE_COMPOSITING_MODE -u WEBKIT_DISABLE_DMABUF_RENDERER
+  run_variant "own WebKit context (adapter-owned)" TPT_WEBKIT_CONTEXT=own
+  echo "variant                                  result"
+  printf '%s' "$results"
+  summary="$(printf '%s' "$results" | sed 's/  */ /g' | paste -sd '|')"
+  echo "::notice title=exit-abort experiment on $first_crash::$summary"
+  rm -f "$out.exp"
+fi
 
 echo "tests that failed: $failed"
 [ -z "$failed_names" ] || echo "failed:$failed_names"
