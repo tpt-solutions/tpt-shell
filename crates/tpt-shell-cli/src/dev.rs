@@ -20,6 +20,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 /// Modification times of every file under a directory, keyed by path relative to it.
+///
+/// Support: Full.
 pub type Snapshot = BTreeMap<PathBuf, SystemTime>;
 
 /// Where the last recorded session is kept, relative to the served directory.
@@ -34,6 +36,8 @@ const SESSION_PATH: &str = "/__tpt/session";
 
 /// Counts the change batches seen by the watcher. Pages compare it with the value they loaded
 /// with, so a change reloads them without restarting the process.
+///
+/// Support: Full.
 #[derive(Debug, Default)]
 pub struct Reloads {
     version: AtomicU64,
@@ -41,6 +45,8 @@ pub struct Reloads {
 
 impl Reloads {
     /// The current version. It goes up by one for each batch of changes.
+    ///
+    /// Support: Full.
     pub fn version(&self) -> u64 {
         self.version.load(Ordering::SeqCst)
     }
@@ -101,6 +107,8 @@ const RELOAD_SCRIPT: &str = r#"(function () {
 "#;
 
 /// Inserts the reload script into an HTML page, before `</body>` when there is one.
+///
+/// Support: Full.
 pub fn inject_reload_script(html: &str) -> String {
     let tag = format!("<script src=\"{SCRIPT_PATH}\"></script>");
     let lower = html.to_ascii_lowercase();
@@ -112,6 +120,8 @@ pub fn inject_reload_script(html: &str) -> String {
 
 /// The last recorded session, if one exists and reads cleanly in lenient mode. A file the
 /// reader rejects is not replayed.
+///
+/// Support: Full.
 pub fn last_session(root: &Path) -> Option<String> {
     let text = std::fs::read_to_string(root.join(SESSION_FILE)).ok()?;
     tpt_shell_replay::read(&text, tpt_shell_replay::Mode::Lenient).ok()?;
@@ -119,6 +129,8 @@ pub fn last_session(root: &Path) -> Option<String> {
 }
 
 /// Reads every file under `root`. Unreadable entries are skipped.
+///
+/// Support: Full.
 pub fn snapshot(root: &Path) -> Snapshot {
     let mut out = Snapshot::new();
     let mut stack = vec![root.to_path_buf()];
@@ -140,6 +152,8 @@ pub fn snapshot(root: &Path) -> Snapshot {
 }
 
 /// The changes from `before` to `after`, as lines such as `added index.html`.
+///
+/// Support: Full.
 pub fn changes(before: &Snapshot, after: &Snapshot) -> Vec<String> {
     let mut out = Vec::new();
     for (path, time) in after {
@@ -159,6 +173,8 @@ pub fn changes(before: &Snapshot, after: &Snapshot) -> Vec<String> {
 
 /// Watches `root`, prints each change and bumps `reloads` once per batch, until the process
 /// ends.
+///
+/// Support: Full.
 pub fn watch(root: PathBuf, every: Duration, reloads: Arc<Reloads>) {
     std::thread::spawn(move || {
         let mut last = snapshot(&root);
@@ -180,6 +196,8 @@ pub fn watch(root: PathBuf, every: Duration, reloads: Arc<Reloads>) {
 /// Serves `root` on `addr`, one request at a time, until an error. `reloads` is the counter the
 /// watcher bumps. `ready` gets the bound address, so a caller that asked for port 0 learns the
 /// port.
+///
+/// Support: Full.
 pub fn serve(
     root: &Path,
     addr: SocketAddr,
@@ -277,6 +295,8 @@ fn handle(root: &Path, reloads: &Reloads, mut stream: TcpStream) -> std::io::Res
 
 /// The file a request path names under `root`, or `None` when the path would leave `root` or
 /// names a hidden file or folder (such as `.tpt-dev`, which holds recordings).
+///
+/// Support: Full.
 pub fn safe_file(root: &Path, request_path: &str) -> Option<PathBuf> {
     let trimmed = request_path.trim_start_matches('/');
     let relative = if trimmed.is_empty() {

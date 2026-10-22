@@ -15,6 +15,8 @@ use std::process::ExitCode;
 use tpt_shell_errors::lookup;
 
 /// The features `add` writes sections for.
+///
+/// Support: Full.
 pub const FEATURES: [&str; 4] = ["kiosk", "devices", "audit", "agent"];
 
 /// The manifest section for a feature. `None` for a name `add` does not know.
@@ -46,6 +48,8 @@ fn has_section(text: &str, feature: &str) -> bool {
 }
 
 /// Adds the section for `feature` to the manifest at `path`, after checking the result.
+///
+/// Support: Full.
 pub fn add(feature: &str, path: &Path) -> Result<ExitCode, String> {
     let Some(section) = section(feature) else {
         return Err(format!(

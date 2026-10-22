@@ -12,6 +12,8 @@
 use tpt_shell_compliance::Component;
 
 /// The allow-list in `deny.toml`, from its `[licenses] allow = [...]` array.
+///
+/// Support: Full.
 pub fn allow_list(deny_toml: &str) -> Result<Vec<String>, String> {
     let table: toml::Table = deny_toml
         .parse()
@@ -61,6 +63,8 @@ fn tokenize(expression: &str) -> Option<Vec<String>> {
 }
 
 /// Whether `expression` is acceptable when only the licences in `allowed` are.
+///
+/// Support: Full.
 pub fn expression_allowed(expression: &str, allowed: &[String]) -> bool {
     let Some(tokens) = tokenize(expression) else {
         return false;
@@ -117,6 +121,8 @@ fn atom(tokens: &[String], pos: &mut usize, allowed: &[String]) -> Option<bool> 
 }
 
 /// One line per third-party crate whose licence is missing or not allowed.
+///
+/// Support: Full.
 pub fn violations(components: &[Component], allowed: &[String]) -> Vec<String> {
     components
         .iter()

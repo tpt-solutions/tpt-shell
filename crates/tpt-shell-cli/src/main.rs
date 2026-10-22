@@ -13,7 +13,14 @@ use tpt_shell_audit::AuditError;
 
 mod add;
 mod dev;
+mod kiosk;
 mod licences;
+mod packaging;
+mod replay_cmd;
+// Windows uses its own sign-in entry, so the macOS and Linux writers are unused there.
+#[cfg_attr(windows, allow(dead_code))]
+mod service;
+mod visual_cmd;
 use tpt_shell_errors::lookup;
 
 const USAGE: &str = "usage:
@@ -27,12 +34,23 @@ const USAGE: &str = "usage:
   tpt-shell new vanilla <directory>
   tpt-shell new typescript <directory>
   tpt-shell doctor
-  tpt-shell compliance <output-directory>
-  tpt-shell audit verify <audit.jsonl> [--key <public-key-file>]
+  tpt-shell compliance <output-directory> [--key <signing-key-file>]
+  tpt-shell audit verify <audit.jsonl> [--key <public-key-file>] [--anchors <anchor-file>]
+  tpt-shell audit verify <directory> --rotated <stem> [--key <public-key-file>] [--anchors <anchor-file>]
   tpt-shell audit export <audit.jsonl> --format csv|jsonl
   tpt-shell audit view <audit.jsonl>
-  tpt-shell install-service <name> <program>     start the program at sign-in (Windows)
-  tpt-shell uninstall-service <name>             remove that sign-in entry (Windows)";
+  tpt-shell replay <file.tptreplay> [--strict | --lenient]
+  tpt-shell report <out.json> [--replay <file>] [--log <file>]... [--audit <audit.jsonl>]
+                              [--version <name>=<value>]... [--redact <text>]...
+  tpt-shell visual compare <baseline-dir> <dir> [dir...] [--out <report.html>]
+                              [--tolerance <0..1>] [--max-changed <0..1>]
+  tpt-shell runtime pin <tpt-shell.toml> (--cab <file> | --url <https-url>) --out <dir>
+  tpt-shell runtime list <dir>...
+  tpt-shell vendor [directory]
+  tpt-shell docs --offline [output.zip]
+  tpt-shell kiosk sign <config.json> --key <key-file>
+  tpt-shell install-service <name> <program>     start the program at sign-in
+  tpt-shell uninstall-service <name>             remove that sign-in entry";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -98,14 +116,19 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["build", dir] => build(Path::new(dir)),
         ["add", feature] => add::add(feature, Path::new("tpt-shell.toml")),
         ["add", feature, manifest] => add::add(feature, Path::new(manifest)),
-        ["compliance", dir] => compliance(Path::new(dir)),
-        ["audit", "verify", path] => audit_verify(Path::new(path), None),
-        ["audit", "verify", path, "--key", key] => {
-            audit_verify(Path::new(path), Some(Path::new(key)))
-        }
+        ["compliance", dir] => compliance(Path::new(dir), None),
+        ["compliance", dir, "--key", key] => compliance(Path::new(dir), Some(Path::new(key))),
+        ["audit", "verify", rest @ ..] => audit_verify_args(rest),
         ["audit", "export", path, "--format", "csv"] => audit_export_csv(Path::new(path)),
         ["audit", "export", path, "--format", "jsonl"] => audit_export_jsonl(Path::new(path)),
         ["audit", "view", path] => audit_view(Path::new(path)),
+        ["replay", rest @ ..] => replay_cmd::replay(rest),
+        ["report", rest @ ..] => replay_cmd::report(rest),
+        ["visual", "compare", rest @ ..] => visual_cmd::compare(rest),
+        ["runtime", rest @ ..] => packaging::runtime(rest),
+        ["vendor", rest @ ..] => packaging::vendor(rest),
+        ["docs", rest @ ..] => packaging::docs(rest),
+        ["kiosk", "sign", config, "--key", key] => kiosk::sign(Path::new(config), Path::new(key)),
         ["install-service", name, program] => install_service(name, Path::new(program)),
         ["uninstall-service", name] => uninstall_service(name),
         _ => Err(USAGE.to_string()),
@@ -176,40 +199,128 @@ fn startup_entry(name: &str, program: Option<&Path>) -> Result<ExitCode, String>
     Ok(ExitCode::SUCCESS)
 }
 
+/// macOS and Linux: a LaunchAgent or a systemd user unit under the user's home folder. The
+/// entry is written, not started; the output says how to start it.
 #[cfg(not(windows))]
-fn startup_entry(_name: &str, _program: Option<&Path>) -> Result<ExitCode, String> {
-    Err("sign-in entries are only supported on Windows for now".into())
+fn startup_entry(name: &str, program: Option<&Path>) -> Result<ExitCode, String> {
+    let platform = service::platform()
+        .ok_or("sign-in entries are supported on Windows, macOS and Linux only")?;
+    let home = service::home_dir()?;
+    match program {
+        Some(program) => {
+            let spec = tpt_shell_supervisor::install::ServiceSpec::new(name, program, Vec::new())
+                .map_err(|e| e.to_string())?;
+            let path = service::install(platform, &home, &spec)?;
+            println!("{name} will start at sign-in: {}", path.display());
+            println!("{}", service::start_hint(platform, &path));
+        }
+        None => match service::uninstall(platform, &home, name)? {
+            Some(path) => println!("removed {}", path.display()),
+            None => println!("{name} has no sign-in entry; nothing to remove"),
+        },
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
-/// A broken chain is a problem in the checked input (exit 1). Anything else is an I/O failure
-/// (exit 2), reported through the `Err` path.
+/// A broken chain, an anchor or segment mismatch, or a bad signature is a problem in the checked
+/// input (exit 1). Anything else is an I/O failure (exit 2), reported through the `Err` path.
 fn audit_failure(error: AuditError) -> Result<ExitCode, String> {
-    if let AuditError::Chain { .. } = error {
+    use tpt_shell_audit::anchor::CODE_ANCHOR_MISMATCH;
+    use tpt_shell_audit::keys::CODE_SIGNATURE_INVALID;
+    use tpt_shell_audit::segments::CODE_SEGMENT;
+    let is_problem = match &error {
+        AuditError::Chain { .. } => true,
+        AuditError::Refused { code, .. } => {
+            matches!(
+                *code,
+                CODE_ANCHOR_MISMATCH | CODE_SIGNATURE_INVALID | CODE_SEGMENT
+            )
+        }
+        AuditError::Io(_) => false,
+    };
+    if is_problem {
         eprintln!("{error}");
         return Ok(ExitCode::from(1));
     }
     Err(error.to_string())
 }
 
-/// Checks the hash chain, and the checkpoint signatures when a public key is given.
-fn audit_verify(path: &Path, key: Option<&Path>) -> Result<ExitCode, String> {
-    let summary = match key {
-        None => tpt_shell_audit::verify_file(path),
+/// The options of `audit verify`, after the file or folder.
+#[derive(Debug, Default, PartialEq)]
+struct VerifySources<'a> {
+    key: Option<&'a Path>,
+    anchors: Option<&'a Path>,
+    rotated: Option<&'a str>,
+}
+
+/// Parses `audit verify <path> [--key f] [--anchors f] [--rotated stem]`.
+fn audit_verify_args(args: &[&str]) -> Result<ExitCode, String> {
+    let mut path: Option<&str> = None;
+    let mut sources = VerifySources::default();
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match *arg {
+            "--key" | "--anchors" | "--rotated" => {
+                let Some(&value) = rest.next() else {
+                    return Err(format!("{arg} needs a value\n{USAGE}"));
+                };
+                match *arg {
+                    "--key" => sources.key = Some(Path::new(value)),
+                    "--anchors" => sources.anchors = Some(Path::new(value)),
+                    _ => sources.rotated = Some(value),
+                }
+            }
+            value if path.is_none() && !value.starts_with("--") => path = Some(value),
+            _ => return Err(USAGE.to_string()),
+        }
+    }
+    let path = path.ok_or_else(|| USAGE.to_string())?;
+    audit_verify(Path::new(path), &sources)
+}
+
+/// Checks the hash chain, the checkpoint signatures when a public key is given, and the anchors
+/// when an anchor file is given. With `--rotated`, the path is the folder of the segments.
+fn audit_verify(path: &Path, sources: &VerifySources) -> Result<ExitCode, String> {
+    use tpt_shell_audit as a;
+
+    let key = match sources.key {
+        None => None,
         Some(key) => {
             let text = fs::read_to_string(key)
                 .map_err(|e| format!("cannot read {}: {e}", key.display()))?;
-            let key = tpt_shell_audit::verifying_key_from_hex(&text).ok_or_else(|| {
+            Some(a::verifying_key_from_hex(&text).ok_or_else(|| {
                 format!("{} is not a 64-digit hex Ed25519 public key", key.display())
-            })?;
-            tpt_shell_audit::verify_file_with_key(path, &key)
+            })?)
         }
     };
-    match summary {
+    let anchors = match sources.anchors {
+        None => None,
+        Some(file) => match a::anchor::read_file_anchors(file) {
+            Ok(points) => Some(points),
+            Err(AuditError::Io(reason)) => {
+                return Err(format!("cannot read {}: {reason}", file.display()))
+            }
+            Err(error) => return audit_failure(error),
+        },
+    };
+    let key_ref = key.as_ref();
+    let result = match (sources.rotated, anchors.as_deref()) {
+        (Some(stem), points) => a::verify_rotated(path, stem, key_ref, points.unwrap_or(&[])),
+        (None, Some(points)) => a::verify_file_anchored(path, key_ref, points),
+        (None, None) => match key_ref {
+            None => a::verify_file(path),
+            Some(key) => a::verify_file_with_key(path, key),
+        },
+    };
+    match result {
         Ok(summary) => {
             println!(
                 "ok: {} records, {} checkpoints, last hash {}",
                 summary.records, summary.checkpoints, summary.last_hash
             );
+            if let Some(points) = &anchors {
+                println!("anchors: {} checked", points.len());
+            }
             if key.is_none() && summary.checkpoints > 0 {
                 println!("note: checkpoint signatures were not checked (pass --key)");
             }
@@ -454,6 +565,94 @@ mod tests {
         assert!(run(&["audit"]).is_err());
         assert!(run(&["audit", "export", "x.jsonl", "--format", "xlsx"]).is_err());
         assert!(run(&["audit", "verify", "x.jsonl", "--key"]).is_err());
+        assert!(run(&["audit", "verify", "x.jsonl", "--anchors"]).is_err());
+        assert!(run(&["audit", "verify", "x.jsonl", "--rotated"]).is_err());
+        assert!(run(&["audit", "verify", "x.jsonl", "--bogus"]).is_err());
+        assert!(run(&["audit", "verify", "--key", "k"]).is_err(), "no path");
+    }
+
+    #[test]
+    fn an_empty_anchor_file_verifies_a_good_log() {
+        let path = sample_audit_log("anchored");
+        let anchors = scratch("anchors-empty");
+        fs::write(&anchors, "").unwrap();
+        let code = run(&[
+            "audit",
+            "verify",
+            path.to_str().unwrap(),
+            "--anchors",
+            anchors.to_str().unwrap(),
+        ])
+        .unwrap();
+        assert_eq!(code, ExitCode::SUCCESS);
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(&anchors);
+    }
+
+    #[test]
+    fn an_anchor_that_the_log_does_not_hold_is_a_problem() {
+        let path = sample_audit_log("anchor-missing");
+        let anchors = scratch("anchors-bad");
+        let zeros = "0".repeat(64);
+        fs::write(&anchors, format!("0 1700000000000 {zeros}\n")).unwrap();
+        let code = run(&[
+            "audit",
+            "verify",
+            path.to_str().unwrap(),
+            "--anchors",
+            anchors.to_str().unwrap(),
+        ])
+        .unwrap();
+        assert_eq!(code, ExitCode::from(1));
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(&anchors);
+    }
+
+    #[test]
+    fn a_folder_with_no_segments_is_a_problem() {
+        let dir = scratch("no-segments");
+        fs::create_dir_all(&dir).unwrap();
+        let code = run(&[
+            "audit",
+            "verify",
+            dir.to_str().unwrap(),
+            "--rotated",
+            "audit",
+        ])
+        .unwrap();
+        assert_eq!(code, ExitCode::from(1));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compliance_refuses_without_a_readable_deny_toml() {
+        // Tests run in the crate folder, which has no deny.toml of its own.
+        let dir = scratch("compliance-policy");
+        let error = compliance(&dir, None).unwrap_err();
+        assert!(error.contains("TS0120"), "{error}");
+        assert!(
+            !dir.exists(),
+            "nothing is written when the policy is unreadable"
+        );
+    }
+
+    #[test]
+    fn compliance_takes_its_key_only_as_a_flag() {
+        assert!(run(&["compliance", "out", "--key"]).is_err());
+        assert!(run(&["compliance", "out", "--sign"]).is_err());
+        assert!(run(&["compliance"]).is_err());
+    }
+
+    #[test]
+    fn kiosk_sign_and_the_other_new_commands_refuse_bad_usage() {
+        assert!(run(&["kiosk", "sign", "kiosk.json"]).is_err());
+        assert!(run(&["kiosk", "sign", "kiosk.json", "--key"]).is_err());
+        assert!(run(&["replay"]).is_err());
+        assert!(run(&["report"]).is_err());
+        assert!(run(&["visual", "compare", "one"]).is_err());
+        assert!(run(&["runtime"]).is_err());
+        assert!(run(&["vendor", "a", "b"]).is_err());
+        assert!(run(&["docs"]).is_err());
     }
 }
 
@@ -495,6 +694,10 @@ fn doctor() -> ExitCode {
                 println!("  {problem}");
             }
         }
+    }
+    // Optional packaging tools and platform minimums: warnings only, never a failure.
+    for line in packaging::doctor_lines() {
+        println!("{line}");
     }
     if ok {
         ExitCode::SUCCESS
@@ -624,10 +827,27 @@ mod doctor_tests {
     }
 }
 
-/// Writes the SBOMs and the attestation for the application named `tpt-shell`, reading the
-/// lock file in the current directory. Exits 1 when the licence gate fails, after writing.
-fn compliance(out: &Path) -> Result<ExitCode, String> {
+/// Writes the SBOMs, the attestation, `licenses.html` and `THIRD_PARTY_NOTICES` for the application
+/// named `tpt-shell`. The inputs are the lock file and `deny.toml` in the current directory, and
+/// cargo metadata. With `key` (a file of 64 hex digits, the audit key format), every output also
+/// gets a detached `.sig`. Exits 1 when the licence gate refuses, after writing.
+fn compliance(out: &Path, key: Option<&Path>) -> Result<ExitCode, String> {
+    use tpt_shell_audit::keys::KeySupplier;
     use tpt_shell_compliance as c;
+
+    // The allow list comes from deny.toml, so the gate and cargo-deny agree. Without it there is
+    // nothing to judge the licences by, so it is checked first.
+    let deny = fs::read_to_string("deny.toml")
+        .map_err(|e| format!("{}: cannot read deny.toml: {e}", c::CODE_POLICY))?;
+    let allow = c::allow_list_from_deny_toml(&deny)?;
+    let signer = match key {
+        None => None,
+        Some(key) => Some(
+            tpt_shell_audit::keys::FileKeySupplier::new(key)
+                .signer()
+                .map_err(|e| e.to_string())?,
+        ),
+    };
 
     let output = std::process::Command::new("cargo")
         .args(["metadata", "--format-version", "1", "--locked"])
@@ -639,8 +859,10 @@ fn compliance(out: &Path) -> Result<ExitCode, String> {
     let metadata = String::from_utf8_lossy(&output.stdout).to_string();
     let app = c::app_from_metadata(&metadata, "tpt-shell")?;
     let components = c::components_from_metadata(&metadata)?;
-    let lock =
-        fs::read(Path::new("Cargo.lock")).map_err(|e| format!("cannot read Cargo.lock: {e}"))?;
+    let lock_text =
+        fs::read_to_string("Cargo.lock").map_err(|e| format!("cannot read Cargo.lock: {e}"))?;
+    let locked = c::lock::sourced_packages(&lock_text)?;
+    let violations = c::gate(&components, &locked, &allow);
 
     let namespace = format!(
         "https://tpt-solutions.example/spdx/{}-{}",
@@ -663,7 +885,9 @@ fn compliance(out: &Path) -> Result<ExitCode, String> {
         serde_json::to_string_pretty(&c::spdx(&components, &app, &namespace, Some(&created)))
             .map_err(|e| e.to_string())?
             + "\n";
-    let violations = c::license_violations(&components);
+    let notices = c::notices::notices_from_metadata(&metadata)?;
+    let licenses = c::notices::licenses_html(&app, &notices);
+    let notice_text = c::notices::third_party_notices(&app, &notices);
     let git_commit = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
         .output()
@@ -671,13 +895,15 @@ fn compliance(out: &Path) -> Result<ExitCode, String> {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
     let rustc = tool_version("rustc", &["--version"]).unwrap_or_else(|| "unknown".into());
-    let attestation = c::attestation(
+    let attestation = c::attestation_with_allow(
         &app,
         &rustc,
-        &c::digest(&lock),
+        &c::digest(lock_text.as_bytes()),
         &[
             ("sbom.cdx.json", c::digest(cdx.as_bytes())),
             ("sbom.spdx.json", c::digest(spdx.as_bytes())),
+            ("licenses.html", c::digest(licenses.as_bytes())),
+            ("THIRD_PARTY_NOTICES", c::digest(notice_text.as_bytes())),
         ],
         &violations,
         git_commit.as_deref(),
@@ -688,24 +914,38 @@ fn compliance(out: &Path) -> Result<ExitCode, String> {
             locked: true,
             cargo_flags: vec!["--locked".into()],
         },
+        &allow,
     );
     let attestation_text =
         serde_json::to_string_pretty(&attestation).map_err(|e| e.to_string())? + "\n";
 
+    let files = [
+        ("sbom.cdx.json", cdx),
+        ("sbom.spdx.json", spdx),
+        ("licenses.html", licenses),
+        ("THIRD_PARTY_NOTICES", notice_text),
+        ("attestation.json", attestation_text),
+    ];
     fs::create_dir_all(out).map_err(|e| format!("cannot create {}: {e}", out.display()))?;
-    write(&out.join("sbom.cdx.json"), &cdx)?;
-    write(&out.join("sbom.spdx.json"), &spdx)?;
-    write(&out.join("attestation.json"), &attestation_text)?;
+    for (name, text) in &files {
+        write(&out.join(name), text)?;
+    }
     println!("wrote {} components to {}", components.len(), out.display());
+
+    if let (Some(signer), Some(key)) = (&signer, key) {
+        for (name, text) in &files {
+            let signature = c::sign_artifact(signer.as_ref(), text.as_bytes())?;
+            write(&out.join(format!("{name}.sig")), &(signature + "\n"))?;
+        }
+        println!("signed {} files with {}", files.len(), key.display());
+    }
 
     if violations.is_empty() {
         println!("licence gate: pass");
         Ok(ExitCode::SUCCESS)
     } else {
         println!("licence gate: fail");
-        for v in &violations {
-            println!("  {v}");
-        }
+        eprintln!("{}", c::gate_failure(&violations));
         Ok(ExitCode::from(1))
     }
 }
