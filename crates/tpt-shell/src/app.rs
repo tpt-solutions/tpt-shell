@@ -372,7 +372,8 @@ impl App {
         self
     }
 
-    /// The WebView2 loader DLL (`WebView2Loader.dll`) to load. Required on Windows.
+    /// The WebView2 loader DLL (`WebView2Loader.dll`) to load. Optional on Windows: without it,
+    /// the app looks for `WebView2Loader.dll` beside the program.
     pub fn loader(mut self, path: impl Into<PathBuf>) -> Self {
         self.loader = Some(path.into());
         self
@@ -710,9 +711,16 @@ impl App {
         use tpt_shell_platform_windows::consent::NativeConsent;
         use tpt_shell_platform_windows::webview2::APP_ORIGIN;
 
-        let loader = self.loader.take().ok_or_else(|| {
-            Error::Backend("App needs a WebView2 loader path (App::loader)".into())
-        })?;
+        let loader = self
+            .loader
+            .take()
+            .or_else(loader_beside_program)
+            .ok_or_else(|| {
+                Error::Backend(
+                    "App needs a WebView2 loader path: call App::loader, or put WebView2Loader.dll beside the program"
+                        .into(),
+                )
+            })?;
         let (data_dir, ephemeral) =
             resolve_data_dir(self.data_dir.as_ref(), self.profile.as_ref(), &self.name)?;
 
@@ -1110,6 +1118,14 @@ fn audit_entry(
         outcome,
         duration_us: u64::try_from(duration.as_micros()).unwrap_or(u64::MAX),
     }
+}
+
+/// `WebView2Loader.dll` in the folder of the running program, when it is there.
+#[cfg(any(windows, test))]
+fn loader_beside_program() -> Option<PathBuf> {
+    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let path = dir.join("WebView2Loader.dll");
+    path.is_file().then_some(path)
 }
 
 /// The reference point for `mono_ns`: the first time an audit record is built.
@@ -1521,6 +1537,12 @@ mod tests {
     fn running_an_app_is_unsupported_off_windows() {
         let err = App::new().run().unwrap_err();
         assert!(matches!(err, Error::Unsupported { .. }));
+    }
+
+    #[test]
+    fn the_loader_is_looked_for_beside_the_program() {
+        // The test binary has no WebView2Loader.dll beside it, so nothing is found.
+        assert_eq!(loader_beside_program(), None);
     }
 
     #[cfg(windows)]

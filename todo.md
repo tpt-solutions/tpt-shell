@@ -661,7 +661,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [x] `tpt-shell new --template <name>` for the Rust templates (`pos`, `kiosk`, `audit-app`, `agent-demo`, `appfront-dom`), not only `vanilla` and `typescript` (`pos` built here; the others copy the same way but are not built)
 - [x] `tpt-shell init` adds tpt-shell to an existing crate
 - [x] `tpt-shell run`: build and launch in one command
-- [ ] WebView2Loader.dll: locate or embed it so `App::loader(path)` is optional and the quickstart has no manual download step
+- [ ] WebView2Loader.dll: locate or embed it so `App::loader(path)` is optional and the quickstart has no manual download step (done: `App::loader` is optional now, and the app finds `WebView2Loader.dll` beside the program. Not done: embedding it, which needs a decision on redistributing Microsoft's file, and a clean-machine run)
 - [ ] `tpt-shell dev`: reload the page in the window on change (note: the premise was out of date. Served pages already reload in a browser tab on change. The shell window loads `app://` assets, not the dev server, so it does not reload; that needs the window to load the dev server URL in dev mode)
 - [x] `tpt-shell dev`: a mock `window.tpt` so a page works in a plain browser tab (`js/runtime/tpt-shell-mock.js`, served and injected by `dev`; checked in Node and against the live server)
 - [ ] `tpt-shell doctor`: check the loader DLL, the project manifest and the Linux GTK/WebKit libraries; print a fix hint per failure from `tpt-shell-errors`; optional `--fix` (done: loader DLL location (warning), project manifest with its registry hint, Linux libraries. Not done: `--fix`; the WebView2 runtime and licence failures print a hint inline, not from the registry)
