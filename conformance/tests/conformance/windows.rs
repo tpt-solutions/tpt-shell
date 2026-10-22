@@ -334,13 +334,22 @@ fn large_blobs_fetch(loader: &Path, dir: &Path) -> Result<(Outcome, String), Str
     let blob = Rc::new(bytes);
     let id = window(&mut b, FETCH_PAGES, None)?;
     let served = blob.clone();
+    // How long the host takes to build each response, in milliseconds. This is only the copy in
+    // the closure; what WebView2 does with the response afterwards is not in it.
+    let host_ms: Rc<RefCell<Vec<f64>>> = Rc::new(RefCell::new(Vec::new()));
+    let host_seen = host_ms.clone();
     b.set_asset_source(
         id,
         Box::new(move |path| {
             if path == BLOB_PATH {
+                let started = Instant::now();
+                let body = served.as_ref().clone();
+                host_seen
+                    .borrow_mut()
+                    .push(started.elapsed().as_secs_f64() * 1000.0);
                 return Some(Asset {
                     content_type: "application/octet-stream".into(),
-                    body: served.as_ref().clone(),
+                    body,
                 });
             }
             FETCH_PAGES
@@ -371,8 +380,15 @@ fn large_blobs_fetch(loader: &Path, dir: &Path) -> Result<(Outcome, String), Str
         ));
     };
     let mb_per_s = (BLOB_BYTES as f64 / 1_000_000.0) / (total_ms / 1000.0);
+    let host = host_ms.borrow();
+    let mut host_sorted = host.clone();
+    host_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let host_median = host_sorted
+        .get(host_sorted.len() / 2)
+        .copied()
+        .unwrap_or(0.0);
     let detail = format!(
-        "fetched through the app's blob URL: {BLOB_COUNT} reads of {} MiB, median {mb_per_s:.1} MB/s; median response {headers_ms:.1} ms of {total_ms:.1} ms, so the body took the rest",
+        "fetched through the app's blob URL: {BLOB_COUNT} reads of {} MiB, median {mb_per_s:.1} MB/s; median response {headers_ms:.1} ms of {total_ms:.1} ms, so the body took the rest; the host's closure took a median {host_median:.2} ms of that response",
         BLOB_BYTES / (1024 * 1024)
     );
     Ok((Outcome::Pass, detail))
