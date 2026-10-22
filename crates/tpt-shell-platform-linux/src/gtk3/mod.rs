@@ -29,6 +29,7 @@ pub mod sys;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use tpt_shell_core::backend::{
@@ -37,6 +38,8 @@ use tpt_shell_core::backend::{
 };
 use tpt_shell_core::platform::{ClipboardBackend, ColorScheme, ThemeBackend};
 use tpt_shell_core::{Error, LogicalRect, LogicalSize, Result};
+
+use crate::webkit_context::{ContextConfig, ContextMode, Storage};
 
 use sys::{Gtk3, Obj, Rgba, GTK_WINDOW_TOPLEVEL};
 
@@ -80,10 +83,8 @@ pub struct Gtk3Backend {
     next: usize,
     pub(crate) windows: HashMap<usize, Box<WindowState>>,
     scheme_registered: bool,
-    /// `TPT_WEBKIT_CONTEXT=own`: use a web context made and released by this backend, not
-    /// WebKit's process-wide default (an experiment for an exit-time WebKit abort). The context
-    /// is ephemeral, so nothing is stored on disk.
-    own_context: bool,
+    /// Which context the backend uses and where its data lives. See [`crate::webkit_context`].
+    config: ContextConfig,
     context: Obj,
     /// Windows that were closed. Their state is leaked on purpose: WebKit may still call a signal
     /// handler or the scheme handler with the state pointer after the widget is destroyed, so
@@ -137,12 +138,13 @@ impl Gtk3Backend {
         if ok == 0 {
             return Err(Error::Backend("GTK could not open the display".into()));
         }
+        let config = ContextConfig::from_env().map_err(Error::Backend)?;
         Ok(Gtk3Backend {
             gtk,
             next: 1,
             windows: HashMap::new(),
             scheme_registered: false,
-            own_context: std::env::var("TPT_WEBKIT_CONTEXT").is_ok_and(|v| v == "own"),
+            config,
             context: std::ptr::null_mut(),
             retired: Vec::new(),
         })
@@ -156,6 +158,65 @@ impl Gtk3Backend {
         // SAFETY: called on the thread that started GTK.
         unsafe { (self.gtk.fns.gtk_main)() };
         drain_default_context(self.gtk);
+    }
+
+    /// Keeps the owned context's cookies, local storage and caches in `dir`, so they outlive the
+    /// process. Call it before the first window. Refused with `TPT_WEBKIT_CONTEXT=default`.
+    ///
+    /// Support: Partial. Persistent only with the owned context. Not run on macOS/Linux here;
+    /// compile-checked, and verified only by the `linux-adapters` CI job.
+    pub fn with_data_dir(&mut self, dir: &Path) -> Result<()> {
+        if !self.context.is_null() {
+            return Err(Error::Backend(
+                "the web context already exists; set the data directory before the first window"
+                    .into(),
+            ));
+        }
+        self.config.with_data_dir(dir).map_err(Error::Backend)
+    }
+
+    /// Makes the owned web context: ephemeral, or persistent in the configured data directory.
+    fn make_context(&self) -> Result<Obj> {
+        let f = &self.gtk.fns;
+        let (data, cache) = match &self.config.storage {
+            Storage::Ephemeral => {
+                // SAFETY: GTK is initialised; the context is ours and released in Drop.
+                let context = unsafe { (f.webkit_web_context_new_ephemeral)() };
+                return Ok(context);
+            }
+            Storage::Persistent { data, cache } => (
+                cstring(&data.to_string_lossy())?,
+                cstring(&cache.to_string_lossy())?,
+            ),
+        };
+        // SAFETY: the manager takes two construct-only properties and the NULL that ends the
+        // list. The new reference is released below, once the context has taken its own.
+        let manager = unsafe {
+            (self.gtk.g_object_new)(
+                (f.webkit_website_data_manager_get_type)(),
+                c"base-data-directory".as_ptr(),
+                data.as_ptr(),
+                c"base-cache-directory".as_ptr(),
+                cache.as_ptr(),
+                std::ptr::null::<c_char>(),
+            )
+        };
+        if manager.is_null() {
+            return Err(Error::Backend(
+                "WebKit could not create its website data manager".into(),
+            ));
+        }
+        // SAFETY: `manager` is live until the unref below; the context keeps its own reference.
+        unsafe {
+            let context = (f.webkit_web_context_new_with_website_data_manager)(manager);
+            (f.g_object_unref)(manager);
+            if context.is_null() {
+                return Err(Error::Backend(
+                    "WebKit could not create a web context".into(),
+                ));
+            }
+            Ok(context)
+        }
     }
 
     /// Connects a signal. `callback` must have the signature GTK documents for the signal, and
@@ -636,6 +697,10 @@ impl WindowBackend for Gtk3Backend {
         self.prune();
         let f = &self.gtk.fns;
         let title = cstring(&spec.title)?;
+        // The context is made before the window, so a failure here leaves nothing to undo.
+        if self.config.mode == ContextMode::Own && self.context.is_null() {
+            self.context = self.make_context()?;
+        }
         // SAFETY: GTK is initialised (Gtk3Backend::new). GTK owns each widget once it is
         // added to its parent; the state below is boxed and lives as long as the widgets.
         let (window, view) = unsafe {
@@ -649,10 +714,7 @@ impl WindowBackend for Gtk3Backend {
                 spec.size.height as c_int,
             );
             (f.gtk_window_set_title)(window, title.as_ptr());
-            let view = if self.own_context {
-                if self.context.is_null() {
-                    self.context = (f.webkit_web_context_new_ephemeral)();
-                }
+            let view = if self.config.mode == ContextMode::Own {
                 (f.webkit_web_view_new_with_context)(self.context)
             } else {
                 (f.webkit_web_view_new)()

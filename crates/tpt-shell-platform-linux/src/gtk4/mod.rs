@@ -41,6 +41,7 @@ pub mod sys;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr};
+use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -53,6 +54,7 @@ use tpt_shell_core::{Error, LogicalRect, LogicalSize, Result};
 
 use crate::gtk3::route;
 use crate::gtk3::{cstring, from_c};
+use crate::webkit_context::{ContextConfig, ContextMode, Storage};
 use sys::{Gtk4, Obj, Rgba};
 
 pub use crate::gtk3::WindowId;
@@ -95,10 +97,8 @@ pub struct Gtk4Backend {
     next: usize,
     pub(crate) windows: HashMap<usize, Box<WindowState>>,
     scheme_registered: bool,
-    /// `TPT_WEBKIT_CONTEXT=own`: use a web context and network session made and released by
-    /// this backend, not WebKit's process-wide defaults (an experiment for an exit-time
-    /// WebKit abort). The session is ephemeral, so nothing is stored on disk.
-    own_context: bool,
+    /// Which context the backend uses and where its data lives. See [`crate::webkit_context`].
+    config: ContextConfig,
     context: Obj,
     session: Obj,
     /// Windows that were closed. Their state is leaked on purpose: WebKit may still call a signal
@@ -256,12 +256,13 @@ impl Gtk4Backend {
         if main_loop.is_null() {
             return Err(Error::Backend("GLib could not create a main loop".into()));
         }
+        let config = ContextConfig::from_env().map_err(Error::Backend)?;
         Ok(Gtk4Backend {
             gtk,
             next: 1,
             windows: HashMap::new(),
             scheme_registered: false,
-            own_context: std::env::var("TPT_WEBKIT_CONTEXT").is_ok_and(|v| v == "own"),
+            config,
             context: std::ptr::null_mut(),
             session: std::ptr::null_mut(),
             retired: Vec::new(),
@@ -287,6 +288,51 @@ impl Gtk4Backend {
     /// compile-checked.
     pub fn run_until(&mut self, done: impl FnMut() -> bool, timeout: Duration) -> bool {
         pump(self.gtk, done, Some(timeout))
+    }
+
+    /// Keeps the owned session's cookies, local storage and caches in `dir`, so they outlive the
+    /// process. Call it before the first window. Refused with `TPT_WEBKIT_CONTEXT=default`.
+    ///
+    /// Support: Partial. Persistent only with the owned context. Not run on macOS/Linux here;
+    /// compile-checked, and verified only by the `linux-adapters` CI job.
+    pub fn with_data_dir(&mut self, dir: &Path) -> Result<()> {
+        if !self.context.is_null() {
+            return Err(Error::Backend(
+                "the web context already exists; set the data directory before the first window"
+                    .into(),
+            ));
+        }
+        self.config.with_data_dir(dir).map_err(Error::Backend)
+    }
+
+    /// Makes the owned web context and network session. The session carries the storage: it is
+    /// ephemeral, or persistent in the configured data directory.
+    fn make_context(&self) -> Result<(Obj, Obj)> {
+        let f = &self.gtk.fns;
+        let (data, cache) = match &self.config.storage {
+            Storage::Ephemeral => {
+                // SAFETY: GTK is initialised; both objects are ours and released in Drop.
+                let context = unsafe { (f.webkit_web_context_new)() };
+                let session = unsafe { (f.webkit_network_session_new_ephemeral)() };
+                return Ok((context, session));
+            }
+            Storage::Persistent { data, cache } => (
+                cstring(&data.to_string_lossy())?,
+                cstring(&cache.to_string_lossy())?,
+            ),
+        };
+        // SAFETY: both paths are valid C strings for the duration of the call; the session is a
+        // new reference, owned by the backend and released in Drop.
+        unsafe {
+            let context = (f.webkit_web_context_new)();
+            let session = (f.webkit_network_session_new)(data.as_ptr(), cache.as_ptr());
+            if context.is_null() || session.is_null() {
+                return Err(Error::Backend(
+                    "WebKit could not create its web context".into(),
+                ));
+            }
+            Ok((context, session))
+        }
     }
 
     /// Connects a signal. `callback` must have the signature GTK documents for the signal, and
@@ -805,6 +851,11 @@ impl WindowBackend for Gtk4Backend {
         self.prune();
         let f = &self.gtk.fns;
         let title = cstring(&spec.title)?;
+        // The context and session are made before the window, so a failure here leaves nothing
+        // to undo.
+        if self.config.mode == ContextMode::Own && self.context.is_null() {
+            (self.context, self.session) = self.make_context()?;
+        }
         // SAFETY: GTK is initialised (Gtk4Backend::new). The window owns its child once it is
         // set; the state below is boxed and lives as long as the widgets.
         let (window, view) = unsafe {
@@ -818,11 +869,7 @@ impl WindowBackend for Gtk4Backend {
                 spec.size.height as c_int,
             );
             (f.gtk_window_set_title)(window, title.as_ptr());
-            let view = if self.own_context {
-                if self.context.is_null() {
-                    self.context = (f.webkit_web_context_new)();
-                    self.session = (f.webkit_network_session_new_ephemeral)();
-                }
+            let view = if self.config.mode == ContextMode::Own {
                 // The view's two construct-only properties, then the NULL that ends the list.
                 (self.gtk.g_object_new)(
                     (f.webkit_web_view_get_type)(),

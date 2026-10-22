@@ -177,6 +177,7 @@ bound_functions! { Fns, "Every function the adapter always needs, looked up once
     webkit . webkit_web_view_get_type = "webkit_web_view_get_type": fn() -> usize;
     webkit . webkit_web_context_new = "webkit_web_context_new": fn() -> Obj;
     webkit . webkit_network_session_new_ephemeral = "webkit_network_session_new_ephemeral": fn() -> Obj;
+    webkit . webkit_network_session_new = "webkit_network_session_new": fn(*const c_char, *const c_char) -> Obj;
     webkit . webkit_web_view_load_html = "webkit_web_view_load_html": fn(Obj, *const c_char, *const c_char) -> ();
     webkit . webkit_web_view_load_uri = "webkit_web_view_load_uri": fn(Obj, *const c_char) -> ();
     webkit . webkit_web_view_reload = "webkit_web_view_reload": fn(Obj) -> ();

@@ -4,7 +4,7 @@ A webview app shell for Rust that is licence-clean, secure by default, and built
 
 Owner: TPT Solutions
 
-> **Status: pre-alpha.** Milestone M0 (repo, policy, CI skeleton) is in progress. There is no usable API yet. See [todo.md](todo.md) for the project checklist and [spec.txt](spec.txt) for the full design.
+> **Status: pre-alpha.** The Windows backend (WebView2) is the most complete: it opens windows, serves pages, and runs the typed, capability-checked command channel. The macOS and Linux backends are partial and have not yet passed the full conformance suite. The API is still changing. See [platform-notes.md](docs/src/platform-notes.md) for what each platform does, [todo.md](todo.md) for the project checklist and [spec.txt](spec.txt) for the full design.
 
 ## What it is
 
@@ -23,6 +23,31 @@ It does not use wry, tao, winit, Tauri or any other windowing or webview crate. 
 - **No telemetry.** The shell does not collect or send usage data.
 - **No network by default.** The shell opens no sockets unless a feature is enabled.
 - **Small unsafe surface.** All FFI lives in isolated platform modules.
+
+## Quickstart
+
+On Windows, the hello example opens one window that shows one embedded page. It needs the path to `WebView2Loader.dll`:
+
+```sh
+cargo run -p tpt-shell --example hello -- <path to WebView2Loader.dll>
+```
+
+The example is the smallest app. Its core is this:
+
+```rust
+use tpt_shell::{App, Window};
+
+const PAGE: &str = "<!doctype html><title>hello</title><h1>hello from tpt-shell</h1>";
+
+fn main() -> tpt_shell::Result<()> {
+    App::new()
+        .name("hello")
+        .loader("WebView2Loader.dll")
+        .asset("index.html", "text/html", PAGE)
+        .window(Window::new("main").title("hello"))
+        .run()
+}
+```
 
 ## Build
 

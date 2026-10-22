@@ -35,6 +35,8 @@ pub mod loader;
 pub mod probe;
 /// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod single_instance;
+/// Support: Full for the rules (parsing, paths, permissions). Tested on every platform.
+pub mod webkit_context;
 
 /// Helpers for the tests that start a real toolkit.
 #[cfg(test)]

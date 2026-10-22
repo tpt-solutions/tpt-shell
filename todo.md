@@ -645,6 +645,46 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec �
 
 ---
 
+## Phase M11b — Adoption tooling and stub clean-up (added after the 2026-10-22 project review)
+
+The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows up as `Unsupported` returns and the unticked items above. These items close the gap between "it exists" and "someone can pick it up and use it".
+
+### Finish in-flight work
+- [x] Linux: declare `mod webkit_context` in `crates/tpt-shell-platform-linux/src/lib.rs` (the file is untracked and not compiled, so its tests do not run)
+- [x] Linux: replace the `TPT_WEBKIT_CONTEXT == "own"` checks in `gtk3/mod.rs` and `gtk4/mod.rs` with `ContextConfig::from_env`, and settle the default (the module says owned is the default; commit 388ba9b made it opt-in)
+- [x] Linux: persistent storage for the owned context (GTK3 `WebsiteDataManager`, GTK4 `webkit_network_session_new(data, cache)`, symbols in `sys.rs`) and `with_data_dir` on both backends; verified only by the `linux-adapters` CI job
+- [x] README: replace the stale "M0 in progress, no usable API yet" status with the real state, a quickstart and an example snippet
+- [x] Docs that promise more than exists: `quickstart.md` "Not yet", `cookbook.md` replays, `security.md` Secret Service / fuzz targets / compliance outputs
+- [ ] `CODE_OF_CONDUCT.md`: fill in the contact placeholder
+
+### Onboarding
+- [ ] `tpt-shell new` writes a runnable project (`Cargo.toml`, `src/main.rs`, manifest, assets) so `cargo run` opens a window
+- [ ] `tpt-shell new --template <name>` for the Rust templates (`pos`, `kiosk`, `audit-app`, `agent-demo`, `appfront-dom`), not only `vanilla` and `typescript`
+- [ ] `tpt-shell init` adds tpt-shell to an existing crate
+- [ ] `tpt-shell run`: build and launch in one command
+- [ ] WebView2Loader.dll: locate or embed it so `App::loader(path)` is optional and the quickstart has no manual download step
+- [ ] `tpt-shell dev`: reload the page in the window on change (today it only reports changes)
+- [ ] `tpt-shell dev`: a mock `window.tpt` so a page works in a plain browser tab
+- [ ] `tpt-shell doctor`: check the loader DLL, the project manifest and the Linux GTK/WebKit libraries; print a fix hint per failure from `tpt-shell-errors`; optional `--fix`
+- [ ] `tpt-shell contract gen`: write the contract and the TypeScript client from an app entry point
+- [ ] Time the three-command quickstart on a clean machine and record the result
+
+### Distribution
+- [ ] Release workflow (`.github/workflows/release.yml`) using the existing cargo-dist config
+- [ ] Publish-ready crate metadata (`publish = false` and version `0.0.0` today)
+- [ ] npm package for `js/runtime` and the generated TypeScript client
+- [ ] Deploy the mdBook docs to GitHub Pages
+- [ ] Publish the VS Code extension
+
+### Ideas to evaluate
+- [ ] `tpt-shell permissions suggest`: propose the smallest capability grants for an app from its commands and pages
+- [ ] Capability dry-run in `dev`: log would-be denials instead of failing, with a copy-paste manifest fix
+- [ ] `tpt-shell audit explain`: plain-language summary of an audit log for non-technical reviewers
+- [ ] `tpt-shell kiosk init`: signed kiosk config plus service install in one command
+- [ ] `tpt-shell report` output re-openable with `replay`
+
+---
+
 ## Phase M12 — Hardening and v1.0.0
 
 ### Fuzzing and security

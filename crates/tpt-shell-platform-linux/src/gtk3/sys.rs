@@ -225,6 +225,8 @@ bound_functions! {
     webkit . webkit_web_view_new = "webkit_web_view_new": fn() -> Obj;
     webkit . webkit_web_view_new_with_context = "webkit_web_view_new_with_context": fn(Obj) -> Obj;
     webkit . webkit_web_context_new_ephemeral = "webkit_web_context_new_ephemeral": fn() -> Obj;
+    webkit . webkit_web_context_new_with_website_data_manager = "webkit_web_context_new_with_website_data_manager": fn(Obj) -> Obj;
+    webkit . webkit_website_data_manager_get_type = "webkit_website_data_manager_get_type": fn() -> usize;
     webkit . webkit_web_view_load_html = "webkit_web_view_load_html": fn(Obj, *const c_char, *const c_char) -> ();
     webkit . webkit_web_view_load_uri = "webkit_web_view_load_uri": fn(Obj, *const c_char) -> ();
     webkit . webkit_web_view_reload = "webkit_web_view_reload": fn(Obj) -> ();
@@ -280,6 +282,9 @@ bound_functions! {
 pub struct Gtk3 {
     pub libs: Libs,
     pub fns: Fns,
+    /// `g_object_new`, which is variadic, so it is bound by hand: the table macro only makes
+    /// fixed-argument prototypes.
+    pub g_object_new: unsafe extern "C" fn(usize, *const c_char, ...) -> Obj,
 }
 
 static GTK3: OnceLock<Result<Gtk3, LoadError>> = OnceLock::new();
@@ -296,7 +301,17 @@ fn open_all() -> Result<Gtk3, LoadError> {
         cairo: SharedLibrary::open(CAIRO_LIB)?,
     };
     let fns = Fns::bind(&libs)?;
-    Ok(Gtk3 { libs, fns })
+    // SAFETY: `g_object_new` is declared in GObject as `gpointer g_object_new(GType type,
+    // const gchar *first_property_name, ...)`, which is this prototype.
+    let g_object_new = unsafe {
+        libs.gobject
+            .symbol::<unsafe extern "C" fn(usize, *const c_char, ...) -> Obj>("g_object_new")?
+    };
+    Ok(Gtk3 {
+        libs,
+        fns,
+        g_object_new,
+    })
 }
 
 /// The GTK 3 and WebKit 4.1 adapter, or the reason it could not be loaded. The first call
