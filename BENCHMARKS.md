@@ -29,9 +29,22 @@ Method:
 |---|---|---|
 | Router only (parse, dispatch, encode), 20,000 calls: p50 / p95 / p99 | 1.4 / 1.5 / 2.3 µs | the whole round trip, p95 ≤ 5 ms |
 
-This is the router's share of an IPC call, and nothing else. It does not include the page channel (WebView2 `postMessage` in both directions), which is most of the round trip. The IPC budget stays unmet until the channel is measured: the Windows conformance suite does that, and it needs `WebView2Loader.dll`.
+This is the router's share of an IPC call, and nothing else. It does not include the page channel (WebView2 `postMessage` in both directions), which is most of the round trip. The page channel is measured below.
 
 Method: `cargo test -p tpt-shell-ipc --release --test router_latency -- --ignored --nocapture`. A no-op echo command, default limits, one request per call. The test is in `crates/tpt-shell-ipc/tests/router_latency.rs`.
+
+## Page channel on Windows (WebView2, release)
+
+Measured 2026-10-23 with the Windows conformance suite, on Windows 11 with the Evergreen WebView2 runtime 155.0.4283.45 and `WebView2Loader.dll` from the Microsoft.Web.WebView2 package (signed by Microsoft Corporation). Both budgets are **not met**.
+
+| Measure | Result | Budget |
+|---|---|---|
+| IPC round trip, page to host and back, 200 round trips: p95 gap between pings | 16.7 ms | p95 ≤ 5 ms |
+| Blob, 4 MiB page to host, including page start-up | 1.4 MB/s | ≥ 50 MB/s |
+
+Both results are the same in debug and release builds. The blob figure includes the page's start-up, but start-up is not the whole gap. Both checks pass in the suite, because the suite checks correctness, not the budget. The budget gap is recorded here and in `todo.md`.
+
+Method: `TPT_WEBVIEW2_LOADER=<path to WebView2Loader.dll> cargo test --release --manifest-path conformance/Cargo.toml -- --nocapture`. The results go to `conformance/out/windows.json` (git-ignored).
 
 ## Supervisor idle memory (Windows)
 
@@ -46,8 +59,6 @@ Method: start `tpt-shell-supervisor -- supervisor-child beat` (release builds), 
 
 - Cold start to first paint (spec §13 budget 500 ms). Partial numbers are in `todo.md`
   under M1 (controller creation 0.8–2.0 s, total 2.1–2.3 s, so the budget is not met).
-- IPC round trip through the page channel (budget p95 ≤ 5 ms). Only the router's share is measured, above.
-- Blob channel throughput (budget ≥ 50 MB/s).
 - Idle shell memory (budget ≤ 25 MB) and supervisor idle memory (budget ≤ 5 MB).
 - macOS and Linux builds.
 
