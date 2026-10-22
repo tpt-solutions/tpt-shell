@@ -3,7 +3,8 @@
 # Copyright (c) 2026 TPT Solutions
 #
 # Runs the measurements that exist today and writes them to target/bench/results.json (spec §13).
-# The CI benchmarks job runs this on Windows and uploads the file. Methodology: BENCHMARKS.md.
+# The CI benchmarks job runs this on Windows, macOS and Linux, and uploads each OS's file.
+# Methodology: BENCHMARKS.md.
 #
 # Measured now:
 #   - hello-world binary size (release build of examples/hello), budget 4 MB (spec §13)

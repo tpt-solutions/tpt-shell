@@ -310,18 +310,27 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: bash tools/template-build.sh
 
-  # Benchmarks (spec §13, BENCHMARKS.md). Runs what can be measured today: the hello-world binary
-  # size. The rest of the budgets are listed as pending in the results file.
+  # Benchmarks (spec §13, BENCHMARKS.md) on each OS. Runs what can be measured on every OS: the
+  # hello-world binary size (tools/run-benchmarks.sh) and the router's cost per IPC call. The page
+  # channel, cold start and memory budgets need a WebView2 runtime, so they are measured only on
+  # Windows, by the conformance suite and by hand; the results file lists them as pending.
   benchmarks:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: bash tools/run-benchmarks.sh
+      - name: Binary size (hello example)
+        run: bash tools/run-benchmarks.sh
+      - name: Router cost per IPC call
+        run: cargo test -p tpt-shell-ipc --release --test router_latency -- --ignored --nocapture
       - uses: actions/upload-artifact@v4
         with:
-          name: benchmarks
+          name: benchmarks-${{ matrix.os }}
           path: target/bench/
           if-no-files-found: error
 

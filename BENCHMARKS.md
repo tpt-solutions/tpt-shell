@@ -33,6 +33,8 @@ This is the router's share of an IPC call, and nothing else. It does not include
 
 Method: `cargo test -p tpt-shell-ipc --release --test router_latency -- --ignored --nocapture`. A no-op echo command, default limits, one request per call. The test is in `crates/tpt-shell-ipc/tests/router_latency.rs`.
 
+The CI `benchmarks` job runs this and the binary size on Windows, macOS and Linux. The Windows figures above were taken by hand. The macOS and Linux figures are not in this file yet: they come from the CI run, and should be copied here once a run has finished.
+
 ## Page channel on Windows (WebView2, release)
 
 Measured 2026-10-23 with the Windows conformance suite, on Windows 11 with the Evergreen WebView2 runtime 155.0.4283.45 and `WebView2Loader.dll` from the Microsoft.Web.WebView2 package (signed by Microsoft Corporation). Release build.
@@ -80,7 +82,7 @@ Measured with the release `examples/hello`, a WebView2 loader from the Microsoft
 | WebView2 processes, working set, same run | 299.8 MB | not in the shell's budget (see below) |
 
 - **Cold start.** The window appears only after the WebView2 controller exists, because `create` waits for it. So the 1.6 to 1.8 s is mostly WebView2 set-up, which matches the 0.8 to 2.0 s controller creation noted under M1. First paint of the page itself is not timed separately, so this is an upper bound on the window and not a first-paint figure. The budget is not met.
-- **Memory.** The spec does not say which memory measure its budget means, or whether the WebView2 runtime counts toward it. My recommendation, which you can change: the budget applies to the shell's own process, measured as private memory, and the runtime is reported separately. On that reading the shell is well inside the budget. Under working set it is also inside, at 23.2 MB.
+- **Memory.** The spec does not say which memory measure its budget means, or whether the WebView2 runtime counts toward it. Decided, on the recommendation: the budget applies to the shell's own process, measured as private memory, and the runtime is reported separately. On that reading the shell is inside the budget (5.4 MB against 25 MB). Under working set it is also inside, at 23.2 MB, but that is not the measure the budget is judged on.
 - **Size.** The earlier figure of 706,048 bytes (2026-10-22) is out of date. The release build is now 1,049,600 bytes. Still within the 4 MB budget.
 
 Method: `Start-Process` on the release example, polling the process for a non-zero main-window handle, every 5 ms. Memory is read with `Get-Process` after 12 seconds, with the WebView2 children found through their parent process IDs.
@@ -96,7 +98,7 @@ The probe is `cold_start_probe` in `conformance/tests/conformance/windows.rs`, r
 
 - The budget is first paint within 500 ms. Neither step is first paint, and the page is parsed well after the window exists, so the budget is not met on either measure.
 - **Where the time goes** (three runs, release): creating the backend takes about 10 ms, which is the shell's own start-up. The window and WebView2 controller take about 1.1 s. The first page load takes about 1.8 s more, and it includes starting WebView2's renderer. Both of the larger steps are the runtime's process start-up, which every fresh launch pays.
-- **Recommendation, for a decision.** The shell's own overhead is about 10 ms, inside the spec's "shell overhead ≤ 50 ms". The 500 ms first-paint budget cannot be met while WebView2's process start-up takes 2 to 3 s, whatever the shell does. My recommendation: measure the shell's overhead against the 50 ms budget, and report the runtime's start-up separately, as with the memory budget. That is a change to how the spec's budget is read, so it is yours to decide.
+- **Decided, on the recommendation.** The shell's overhead is judged against the spec's "shell overhead ≤ 50 ms". It is about 10 ms, so it is met. WebView2's process start-up is reported separately: first paint on screen is 1.25 to 3.0 s, against the 500 ms first-paint figure, and that figure is not a shell budget as read here. The spec has not been changed; this reading is recorded only in these notes.
 - About a third of the time is the window and controller. The rest is WebView2 loading the document after the handover, which the probe does not split further.
 - **Probe limits.** The probe stops at `DOMContentLoaded`, not at a painted frame. Its paint time is the screen measure in the section above. (The probe's window was hidden by the bug fixed above, so animation frames were never a fair test of it.) The probe navigates to the app origin, as the app does, and loads an external script. An earlier version used an inline script, which never ran. That is the app's content security policy at work: it blocks inline scripts on the app origin, as the `csp` check confirms. It was not a defect in navigation. Timings are the same on the navigate path as before: a median of about 3 s to `DOMContentLoaded` in the earlier runs.
 
@@ -130,8 +132,6 @@ The page paints about 20 ms after its window appears, so the time is in window a
 
 ## Not measured yet
 
-- The spec's reading of the shell memory budget, which needs a decision (see above).
-- Whether the cold-start budget can be met at all: the window waits for the WebView2 controller, and that is most of the time.
 - macOS and Linux builds.
 
 The benchmark run is scripted in `tools/run-benchmarks.sh`. Use it so every result follows the same method.
