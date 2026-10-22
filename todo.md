@@ -659,12 +659,12 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 ### Onboarding
 - [x] `tpt-shell new` writes a runnable project (`Cargo.toml`, `src/main.rs`, manifest, assets) so `cargo run` opens a window (`new rust`: builds here, and a run stops with a clear message until `WebView2Loader.dll` is beside the program; a window has not been seen open)
 - [x] `tpt-shell new --template <name>` for the Rust templates (`pos`, `kiosk`, `audit-app`, `agent-demo`, `appfront-dom`), not only `vanilla` and `typescript` (`pos` built here; the others copy the same way but are not built)
-- [ ] `tpt-shell init` adds tpt-shell to an existing crate
+- [x] `tpt-shell init` adds tpt-shell to an existing crate
 - [x] `tpt-shell run`: build and launch in one command
 - [ ] WebView2Loader.dll: locate or embed it so `App::loader(path)` is optional and the quickstart has no manual download step
 - [ ] `tpt-shell dev`: reload the page in the window on change (today it only reports changes)
 - [ ] `tpt-shell dev`: a mock `window.tpt` so a page works in a plain browser tab
-- [ ] `tpt-shell doctor`: check the loader DLL, the project manifest and the Linux GTK/WebKit libraries; print a fix hint per failure from `tpt-shell-errors`; optional `--fix`
+- [ ] `tpt-shell doctor`: check the loader DLL, the project manifest and the Linux GTK/WebKit libraries; print a fix hint per failure from `tpt-shell-errors`; optional `--fix` (done: loader DLL location (warning), project manifest with its registry hint, Linux libraries. Not done: `--fix`; the WebView2 runtime and licence failures print a hint inline, not from the registry)
 - [ ] `tpt-shell contract gen`: write the contract and the TypeScript client from an app entry point
 - [ ] Time the three-command quickstart on a clean machine and record the result
 

@@ -36,6 +36,7 @@ const USAGE: &str = "usage:
   tpt-shell new rust <directory> [--tpt-shell <path to crates/tpt-shell>]
   tpt-shell new --template <pos|kiosk|audit-app|agent-demo|appfront-dom> <directory> [--tpt-shell <path>]
   tpt-shell run [directory]                   build and launch the Rust project (cargo run)
+  tpt-shell init [directory] [--tpt-shell <path to crates/tpt-shell>]   add tpt-shell to an existing crate
   tpt-shell doctor
   tpt-shell compliance <output-directory> [--key <signing-key-file>]
   tpt-shell audit verify <audit.jsonl> [--key <public-key-file>] [--anchors <anchor-file>]
@@ -124,6 +125,11 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["new", "--template", name, dir, "--tpt-shell", checkout] => {
             new_from_template(name, Path::new(dir), Some(Path::new(checkout)))
                 .map(|()| ExitCode::SUCCESS)
+        }
+        ["init"] => init(Path::new("."), None).map(|()| ExitCode::SUCCESS),
+        ["init", dir] => init(Path::new(dir), None).map(|()| ExitCode::SUCCESS),
+        ["init", dir, "--tpt-shell", checkout] => {
+            init(Path::new(dir), Some(Path::new(checkout))).map(|()| ExitCode::SUCCESS)
         }
         ["run"] => run_project(Path::new(".")),
         ["run", dir] => run_project(Path::new(dir)),
@@ -723,6 +729,19 @@ fn doctor() -> ExitCode {
             println!("{line}");
         }
     }
+    // The project in the current folder, when it has a manifest: a bad manifest is a failure.
+    if let Some((lines, failed)) = project_check(Path::new(".")) {
+        if failed {
+            ok = false;
+        }
+        for line in lines {
+            println!("{line}");
+        }
+        #[cfg(windows)]
+        for line in loader_lines(Path::new(".")) {
+            println!("{line}");
+        }
+    }
     // Optional packaging tools and platform minimums: warnings only, never a failure.
     for line in packaging::doctor_lines() {
         println!("{line}");
@@ -731,6 +750,53 @@ fn doctor() -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
+    }
+}
+
+/// Checks the project's `tpt-shell.toml` in `dir`, if it has one. Returns the lines to print, and
+/// whether the manifest is a problem. Each problem carries its fix hint from the error registry.
+fn project_check(dir: &Path) -> Option<(Vec<String>, bool)> {
+    let path = dir.join("tpt-shell.toml");
+    if !path.is_file() {
+        return None;
+    }
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) => {
+            return Some((
+                vec![format!(
+                    "project manifest: cannot read {}: {e}",
+                    path.display()
+                )],
+                true,
+            ))
+        }
+    };
+    match tpt_shell_manifest::parse(&text) {
+        Ok(_) => Some((vec!["project manifest: ok".to_string()], false)),
+        Err(e) => {
+            let mut lines = vec![format!("project manifest: {e}")];
+            if let Some(entry) = lookup(e.code) {
+                lines.push(format!("  {}", entry.fix));
+            }
+            Some((lines, true))
+        }
+    }
+}
+
+/// Where the WebView2 loader is, for a project. Missing is a warning: the window cannot open
+/// without it, but `doctor` does not fail for it, since the loader is often copied in at run time.
+#[cfg(windows)]
+fn loader_lines(dir: &Path) -> Vec<String> {
+    let found = ["", "target/debug", "target/release"]
+        .iter()
+        .map(|sub| dir.join(sub).join("WebView2Loader.dll"))
+        .find(|path| path.is_file());
+    match found {
+        Some(path) => vec![format!("WebView2 loader: {}", path.display())],
+        None => vec![
+            "WebView2 loader: not beside a built program. Copy WebView2Loader.dll from the WebView2 SDK (build/native/x64/) into target/debug/".to_string(),
+        ],
     }
 }
 
@@ -1158,6 +1224,95 @@ fn crate_dir(checkout: Option<&Path>) -> Result<PathBuf, String> {
     fs::canonicalize(&checkout).map_err(|e| format!("cannot resolve {}: {e}", checkout.display()))
 }
 
+/// Adds tpt-shell to the existing Rust project in `dir`: a path dependency in Cargo.toml, and a
+/// `tpt-shell.toml` if there is none. The project's own files are left alone, so the app's
+/// `main.rs` is for the user to change. Running it twice adds nothing the second time.
+fn init(dir: &Path, checkout: Option<&Path>) -> Result<(), String> {
+    let cargo_path = dir.join("Cargo.toml");
+    let text = fs::read_to_string(&cargo_path).map_err(|_| {
+        format!(
+            "{} has no Cargo.toml; `tpt-shell init` adds tpt-shell to an existing Rust project",
+            dir.display()
+        )
+    })?;
+    let name = package_name(&text).ok_or_else(|| {
+        format!(
+            "{} has no [package] name; is it a Rust project?",
+            cargo_path.display()
+        )
+    })?;
+    if has_dependency(&text, "tpt-shell") {
+        println!("{} already depends on tpt-shell", cargo_path.display());
+    } else {
+        let checkout = crate_dir(checkout)?;
+        // Forward slashes need no escaping inside a TOML string.
+        let checkout = without_verbatim_prefix(&checkout.display().to_string()).replace('\\', "/");
+        let updated =
+            insert_dependency(&text, &format!("tpt-shell = {{ path = \"{checkout}\" }}\n"));
+        write(&cargo_path, &updated)?;
+        println!("added tpt-shell to {}", cargo_path.display());
+    }
+    let manifest = dir.join("tpt-shell.toml");
+    if manifest.exists() {
+        println!("kept {}", manifest.display());
+    } else {
+        write(&manifest, &RUST_MANIFEST.replace("{{name}}", &name))?;
+        println!("created {}", manifest.display());
+    }
+    println!("next: open a window from main.rs, as in the rust starter (tpt-shell new rust)");
+    Ok(())
+}
+
+/// The `name` in the `[package]` table of a Cargo.toml.
+fn package_name(cargo: &str) -> Option<String> {
+    let mut in_package = false;
+    for line in cargo.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_package = line == "[package]";
+        } else if in_package {
+            if let Some(value) = line.strip_prefix("name") {
+                let value = value.trim_start().strip_prefix('=')?.trim();
+                return value
+                    .strip_prefix('"')?
+                    .strip_suffix('"')
+                    .map(str::to_string);
+            }
+        }
+    }
+    None
+}
+
+/// Whether the Cargo.toml has a `name = ...` dependency line for `dep`.
+fn has_dependency(cargo: &str, dep: &str) -> bool {
+    cargo.lines().any(|line| {
+        line.trim()
+            .strip_prefix(dep)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    })
+}
+
+/// Adds `line` as the first entry of the `[dependencies]` table, or a new table at the end.
+fn insert_dependency(cargo: &str, line: &str) -> String {
+    let mut out = String::with_capacity(cargo.len() + line.len() + 32);
+    let mut inserted = false;
+    for chunk in cargo.split_inclusive('\n') {
+        out.push_str(chunk);
+        if !inserted && chunk.trim() == "[dependencies]" {
+            out.push_str(line);
+            inserted = true;
+        }
+    }
+    if !inserted {
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str("\n[dependencies]\n");
+        out.push_str(line);
+    }
+    out
+}
+
 /// Builds and runs the project in `dir` with `cargo run`.
 fn run_project(dir: &Path) -> Result<ExitCode, String> {
     if !dir.join("Cargo.toml").is_file() {
@@ -1296,6 +1451,83 @@ mod rust_template_tests {
         fs::create_dir_all(&root).unwrap();
         assert!(run_project(&root).is_err());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn init_adds_the_dependency_once_and_keeps_the_crate_files() {
+        let dir = std::env::temp_dir().join(format!("tpt-cli-init-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        let original =
+            "[package]\nname = \"legacy\"\nversion = \"0.1.0\"\n\n[dependencies]\nserde = \"1\"\n";
+        fs::write(dir.join("Cargo.toml"), original).unwrap();
+        fs::write(dir.join("src").join("main.rs"), "fn main() {}\n").unwrap();
+        init(&dir, None).unwrap();
+        let cargo = fs::read_to_string(dir.join("Cargo.toml")).unwrap();
+        assert!(
+            cargo.contains("[dependencies]\ntpt-shell = { path = \""),
+            "{cargo}"
+        );
+        assert!(
+            cargo.contains("serde = \"1\""),
+            "the other dependencies stay: {cargo}"
+        );
+        let manifest = fs::read_to_string(dir.join("tpt-shell.toml")).unwrap();
+        assert!(manifest.contains("name = \"legacy\""), "{manifest}");
+        assert_eq!(
+            fs::read_to_string(dir.join("src").join("main.rs")).unwrap(),
+            "fn main() {}\n"
+        );
+        init(&dir, None).unwrap();
+        let again = fs::read_to_string(dir.join("Cargo.toml")).unwrap();
+        assert_eq!(again.matches("tpt-shell = ").count(), 1, "{again}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn init_refuses_a_folder_without_a_cargo_project() {
+        let dir = std::env::temp_dir().join(format!("tpt-cli-init-none-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert!(init(&dir, None).is_err());
+        assert!(!dir.join("tpt-shell.toml").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_dependency_is_found_by_its_exact_name() {
+        assert!(has_dependency(
+            "[dependencies]\ntpt-shell = \"0\"\n",
+            "tpt-shell"
+        ));
+        assert!(!has_dependency(
+            "[dependencies]\ntpt-shell-agent = \"0\"\n",
+            "tpt-shell"
+        ));
+        assert_eq!(package_name("[dependencies]\nname = \"no\"\n"), None);
+        assert_eq!(
+            package_name("[package]\nname = \"yes\"\n"),
+            Some("yes".to_string())
+        );
+    }
+
+    #[test]
+    fn a_broken_project_manifest_is_a_failure_with_a_fix_hint() {
+        let dir = std::env::temp_dir().join(format!("tpt-cli-doctor-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        assert!(project_check(&dir).is_none(), "no manifest, no check");
+        fs::write(dir.join("tpt-shell.toml"), "[app\n").unwrap();
+        let (lines, failed) = project_check(&dir).unwrap();
+        assert!(failed);
+        assert!(lines[0].starts_with("project manifest:"), "{lines:?}");
+        fs::write(
+            dir.join("tpt-shell.toml"),
+            RUST_MANIFEST.replace("{{name}}", "ok"),
+        )
+        .unwrap();
+        let (lines, failed) = project_check(&dir).unwrap();
+        assert!(!failed);
+        assert_eq!(lines, vec!["project manifest: ok".to_string()]);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
