@@ -677,7 +677,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 
 ### Ideas to evaluate
 - [x] `tpt-shell permissions suggest`: propose the smallest capability grants for an app from its commands and pages (commands only, from the contract file. Pages are not analysed, and the output says so)
-- [ ] Capability dry-run in `dev`: log would-be denials instead of failing, with a copy-paste manifest fix
+- [ ] Capability dry-run in `dev`: log would-be denials instead of failing, with a copy-paste manifest fix (not built as a dry-run: letting a denied call through, even in dev, weakens the capability check. The copy-paste fix is covered by `tpt-shell permissions suggest --audit <log>`, which reads the `CAP_NO_GRANT` refusals from a real run. Decide whether a dev-only bypass is wanted before building it)
 - [x] `tpt-shell audit explain`: plain-language summary of an audit log for non-technical reviewers (verifies the log first; the summary is unit-tested on synthetic records, not on a log written by an app)
 - [x] `tpt-shell kiosk init`: signed kiosk config plus service install in one command (`kiosk init <dir> --key <file>` writes and signs the starter config; the sign-in install runs only with `--install <program>`. It needs a key you already have, and it never overwrites a config. The install path is the existing `install-service`, not run here)
 - [x] `tpt-shell report` output re-openable with `replay` (`replay` opens a bundle's replay. A bundle has the replay text but not the asset bytes, only their names and sizes, so an app with assets cannot replay all of it. A bundle made without `--replay` says so)

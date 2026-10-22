@@ -36,6 +36,7 @@ const USAGE: &str = "usage:
   tpt-shell contract gen <contract.json> <out-directory>   write the TypeScript client (commands.ts)
   tpt-shell kiosk init <directory> --key <key-file> [--install <program>]   starter signed kiosk config
   tpt-shell permissions suggest <contract.json>   the capability grants the commands need
+  tpt-shell permissions suggest --audit <audit-log>   the grants that refused calls were missing
   tpt-shell audit explain <audit-log>             plain-language summary of a verified audit log
   tpt-shell new vanilla <directory>
   tpt-shell new typescript <directory>
@@ -152,7 +153,8 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["audit", "export", path, "--format", "jsonl"] => audit_export_jsonl(Path::new(path)),
         ["audit", "view", path] => audit_view(Path::new(path)),
         ["audit", "explain", path] => audit_explain_file(Path::new(path)),
-        ["permissions", "suggest", json] => permissions::suggest(Path::new(json)),
+        ["permissions", "suggest", json] => permissions_suggest(Path::new(json)),
+        ["permissions", "suggest", "--audit", log] => permissions_audit(Path::new(log)),
         ["replay", rest @ ..] => replay_cmd::replay(rest),
         ["report", rest @ ..] => replay_cmd::report(rest),
         ["visual", "compare", rest @ ..] => visual_cmd::compare(rest),
@@ -449,6 +451,32 @@ fn audit_view(path: &Path) -> Result<ExitCode, String> {
             field("outcome")
         );
     }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Prints the grants the app's commands need, from its contract file.
+fn permissions_suggest(json: &Path) -> Result<ExitCode, String> {
+    let text =
+        fs::read_to_string(json).map_err(|e| format!("cannot read {}: {e}", json.display()))?;
+    let contract = tpt_shell_ipc::contract_load::from_json(&text)?;
+    permissions::print(
+        &permissions::from_contract(&contract),
+        "the commands need these capabilities",
+    );
+    println!("\nThis lists the commands only. Check the pages for anything they do on their own.");
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Prints the grants that refused calls were missing, from a verified audit log.
+fn permissions_audit(path: &Path) -> Result<ExitCode, String> {
+    if let Err(error) = tpt_shell_audit::verify_file(path) {
+        return audit_failure(error);
+    }
+    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    permissions::print(
+        &permissions::from_audit(&text)?,
+        "refused calls in the audit log were missing these capabilities",
+    );
     Ok(ExitCode::SUCCESS)
 }
 
