@@ -54,4 +54,12 @@ pub use ui::UiHandle;
 #[doc(hidden)]
 pub mod __private {
     pub use tpt_shell_ipc as ipc;
+
+    /// The asset that the app's asset source serves for `path` under the app origin, when the path
+    /// is a stored blob (`__tpt/blob/<id>`). The same lookup the app uses, so the conformance
+    /// harness can time the blob path that real blobs take. Not for apps.
+    pub fn blob_asset_for_path(path: &str) -> Option<tpt_shell_core::backend::Asset> {
+        path.strip_prefix("__tpt/blob/")
+            .and_then(crate::blob::blob_asset)
+    }
 }

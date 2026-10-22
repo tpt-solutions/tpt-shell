@@ -17,7 +17,7 @@ function median(values) {
 
 function next() {
   var started = performance.now();
-  fetch("__tpt/blob/big").then(function (response) {
+  fetch(BLOB_PATH).then(function (response) {
     var responded = performance.now();
     response.arrayBuffer().then(function (bytes) {
       var done = performance.now();

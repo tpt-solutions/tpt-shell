@@ -480,6 +480,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
+name = "tpt-shell"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "tpt-shell-audit",
+ "tpt-shell-capabilities",
+ "tpt-shell-compliance",
+ "tpt-shell-core",
+ "tpt-shell-devices",
+ "tpt-shell-devtools",
+ "tpt-shell-ipc",
+ "tpt-shell-kiosk",
+ "tpt-shell-macros",
+ "tpt-shell-manifest",
+ "tpt-shell-platform-windows",
+ "tpt-shell-profiles",
+]
+
+[[package]]
 name = "tpt-shell-agent"
 version = "0.0.0"
 dependencies = [
@@ -505,10 +524,20 @@ name = "tpt-shell-capabilities"
 version = "0.0.0"
 
 [[package]]
+name = "tpt-shell-compliance"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "toml",
+ "tpt-shell-audit",
+]
+
+[[package]]
 name = "tpt-shell-conformance"
 version = "0.0.0"
 dependencies = [
  "serde_json",
+ "tpt-shell",
  "tpt-shell-core",
  "tpt-shell-platform-windows",
 ]
@@ -518,12 +547,36 @@ name = "tpt-shell-core"
 version = "0.0.0"
 
 [[package]]
+name = "tpt-shell-devices"
+version = "0.0.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "tpt-shell-devtools"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "tpt-shell-ipc"
 version = "0.0.0"
 dependencies = [
  "serde",
  "serde_json",
  "tpt-shell-capabilities",
+]
+
+[[package]]
+name = "tpt-shell-kiosk"
+version = "0.0.0"
+dependencies = [
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
+ "windows-sys",
 ]
 
 [[package]]

@@ -248,14 +248,6 @@ fn ipc_round_trip(loader: &Path, dir: &Path) -> Result<(Outcome, String), String
     Ok((Outcome::Pass, detail))
 }
 
-/// The blob URL the fetch part reads, on the app origin.
-const BLOB_PATH: &str = "__tpt/blob/big";
-const FETCH_JS: &str = include_str!("../../pages/fetch.js");
-const FETCH_PAGES: Pages = &[
-    ("index.html", "text/html", START),
-    ("page.js", "text/javascript", FETCH_JS),
-];
-
 /// The blob check. Two parts, both must pass: the blob sent as a message, and the same size of
 /// blob read through the app's blob URL, as a page does with a blob it was handed.
 fn large_blobs(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
@@ -326,45 +318,60 @@ fn large_blobs_message(loader: &Path, dir: &Path) -> Result<(Outcome, String), S
     Ok((Outcome::Pass, detail))
 }
 
-/// The same size of blob, read eight times in a row through the app's blob URL.
+const FETCH_JS: &str = include_str!("../../pages/fetch.js");
+
+/// The same size of blob, read eight times in a row through its blob URL. The blob is stored with
+/// the facade's `put_blob`, and the page reads the URL it returns, so the path timed is the one a
+/// real app's blobs take.
 fn large_blobs_fetch(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
     let mut b = backend(loader, dir)?;
     let mut bytes = vec![b'a'; BLOB_BYTES];
     bytes[BLOB_BYTES - 1] = b'z';
-    let blob = Rc::new(bytes);
-    let id = window(&mut b, FETCH_PAGES, None)?;
-    let served = blob.clone();
-    // How long the host takes to build each response, in milliseconds. This is only the copy in
-    // the closure; what WebView2 does with the response afterwards is not in it.
+    let url =
+        tpt_shell::blob::put_blob("application/octet-stream", bytes).map_err(|e| e.to_string())?;
+    let result = fetch_stored_blob(&mut b, &url);
+    tpt_shell::blob::remove_blob(&url);
+    result
+}
+
+fn fetch_stored_blob(b: &mut WindowsBackend, url: &str) -> Result<(Outcome, String), String> {
+    let blob_path = url
+        .strip_prefix(&format!("{APP_ORIGIN}/"))
+        .ok_or_else(|| format!("blob URL {url} is not on the app origin"))?
+        .to_string();
+    let page_js = format!("var BLOB_PATH = {blob_path:?};\n{FETCH_JS}");
+    let id = window(b, &[], None)?;
+    // How long the host takes to look up each blob, in milliseconds: the facade's own lookup.
     let host_ms: Rc<RefCell<Vec<f64>>> = Rc::new(RefCell::new(Vec::new()));
     let host_seen = host_ms.clone();
     b.set_asset_source(
         id,
         Box::new(move |path| {
-            if path == BLOB_PATH {
+            if path.starts_with("__tpt/blob/") {
                 let started = Instant::now();
-                let body = served.as_ref().clone();
+                let asset = tpt_shell::__private::blob_asset_for_path(path);
                 host_seen
                     .borrow_mut()
                     .push(started.elapsed().as_secs_f64() * 1000.0);
-                return Some(Asset {
-                    content_type: "application/octet-stream".into(),
-                    body,
-                });
+                return asset;
             }
-            FETCH_PAGES
-                .iter()
-                .find(|(name, _, _)| *name == path)
-                .map(|(_, content_type, body)| Asset {
-                    content_type: (*content_type).into(),
-                    body: body.as_bytes().to_vec(),
-                })
+            match path {
+                "index.html" => Some(Asset {
+                    content_type: "text/html".into(),
+                    body: START.as_bytes().to_vec(),
+                }),
+                "page.js" => Some(Asset {
+                    content_type: "text/javascript".into(),
+                    body: page_js.as_bytes().to_vec(),
+                }),
+                _ => None,
+            }
         }),
     )
     .map_err(err)?;
     b.navigate(id, &format!("{APP_ORIGIN}/index.html"))
         .map_err(err)?;
-    let title = wait_title(&b, id, WAIT, |t| t.starts_with("fetch:"));
+    let title = wait_title(b, id, WAIT, |t| t.starts_with("fetch:"));
     let expected_prefix = format!("fetch:{BLOB_BYTES}:z:{BLOB_COUNT}:");
     // The page reports the median of each whole read, then the median of its response alone.
     let times: Option<(f64, f64)> = title
@@ -388,7 +395,7 @@ fn large_blobs_fetch(loader: &Path, dir: &Path) -> Result<(Outcome, String), Str
         .copied()
         .unwrap_or(0.0);
     let detail = format!(
-        "fetched through the app's blob URL: {BLOB_COUNT} reads of {} MiB, median {mb_per_s:.1} MB/s; median response {headers_ms:.1} ms of {total_ms:.1} ms, so the body took the rest; the host's closure took a median {host_median:.2} ms of that response",
+        "fetched a stored blob through its URL: {BLOB_COUNT} reads of {} MiB, median {mb_per_s:.1} MB/s; median response {headers_ms:.1} ms of {total_ms:.1} ms, so the body took the rest; the facade's lookup took a median {host_median:.2} ms of that response",
         BLOB_BYTES / (1024 * 1024)
     );
     Ok((Outcome::Pass, detail))
