@@ -34,6 +34,7 @@ const USAGE: &str = "usage:
   tpt-shell contract diff <old-contract.json> <new-contract.json>
   tpt-shell contract check <new-contract.json> --baseline <old-contract.json>
   tpt-shell contract gen <contract.json> <out-directory>   write the TypeScript client (commands.ts)
+  tpt-shell kiosk init <directory> --key <key-file> [--install <program>]   starter signed kiosk config
   tpt-shell permissions suggest <contract.json>   the capability grants the commands need
   tpt-shell audit explain <audit-log>             plain-language summary of a verified audit log
   tpt-shell new vanilla <directory>
@@ -159,6 +160,10 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["vendor", rest @ ..] => packaging::vendor(rest),
         ["docs", rest @ ..] => packaging::docs(rest),
         ["kiosk", "sign", config, "--key", key] => kiosk::sign(Path::new(config), Path::new(key)),
+        ["kiosk", "init", dir, "--key", key] => kiosk_init(Path::new(dir), Path::new(key), None),
+        ["kiosk", "init", dir, "--key", key, "--install", program] => {
+            kiosk_init(Path::new(dir), Path::new(key), Some(Path::new(program)))
+        }
         ["install-service", name, program] => install_service(name, Path::new(program)),
         ["uninstall-service", name] => uninstall_service(name),
         _ => Err(USAGE.to_string()),
@@ -222,6 +227,26 @@ fn install_service(name: &str, program: &Path) -> Result<ExitCode, String> {
     let absolute = fs::canonicalize(program)
         .map_err(|e| format!("cannot resolve {}: {e}", program.display()))?;
     startup_entry(name, Some(&absolute))
+}
+
+/// Writes and signs a starter kiosk config in `dir`. With `program`, also makes the program start
+/// at sign-in, named after the folder. That is a change to the machine, so it only happens when
+/// asked for.
+fn kiosk_init(dir: &Path, key: &Path, program: Option<&Path>) -> Result<ExitCode, String> {
+    let config = kiosk::init(dir, key)?;
+    println!("wrote {}", config.display());
+    match program {
+        None => println!("not set to start at sign-in; add --install <program> to do that"),
+        Some(program) => {
+            let name = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("kiosk")
+                .to_string();
+            install_service(&name, program)?;
+        }
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// Removes the sign-in entry `name`. Removing one that is not there is not an error.

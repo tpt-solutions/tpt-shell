@@ -71,6 +71,40 @@ pub fn sign(config_path: &Path, key_path: &Path) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// The starter config that `kiosk init` writes. It is checked against the policy parser before
+/// it is written, so it only uses keys that parser knows.
+const STARTER_CONFIG: &str =
+    "{\n  \"mode\": \"single-app\",\n  \"home\": \"index.html\",\n  \"idle_seconds\": 300\n}\n";
+
+/// Writes `kiosk.json` in `dir` with the starter settings, and signs it with the key file. The
+/// key must already exist: `kiosk init` never makes one. An existing config is not overwritten.
+/// Returns the config's path.
+pub fn init(dir: &Path, key_path: &Path) -> Result<PathBuf, String> {
+    let key_text = fs::read_to_string(key_path)
+        .map_err(|e| format!("cannot read {}: {e}", key_path.display()))?;
+    if secret_from_hex(&key_text).is_none() {
+        return Err(format!(
+            "{} is not a 64-digit hex key (a 32-byte seed)",
+            key_path.display()
+        ));
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(STARTER_CONFIG).map_err(|e| format!("starter config: {e}"))?;
+    tpt_shell_kiosk::policy::parse(&value).map_err(|e| format!("starter config: {e}"))?;
+    let config_path = dir.join("kiosk.json");
+    if config_path.exists() {
+        return Err(format!(
+            "{} exists; kiosk init does not overwrite a config",
+            config_path.display()
+        ));
+    }
+    fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    fs::write(&config_path, STARTER_CONFIG)
+        .map_err(|e| format!("cannot write {}: {e}", config_path.display()))?;
+    sign(&config_path, key_path)?;
+    Ok(config_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +188,43 @@ mod tests {
         assert!(secret_from_hex(KEY).is_some());
         assert!(secret_from_hex(&KEY[..63]).is_none());
         assert!(secret_from_hex(&format!("+{}", &KEY[..63])).is_none());
+    }
+}
+
+#[cfg(test)]
+mod init_tests {
+    use super::*;
+
+    const KEY: &str = "0202020202020202020202020202020202020202020202020202020202020202";
+
+    #[test]
+    fn init_writes_a_config_that_the_kiosk_loads_with_its_signature() {
+        let dir = std::env::temp_dir().join(format!("tpt-cli-kiosk-init-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let key_path = dir.with_extension("key");
+        fs::write(&key_path, format!("{KEY}\n")).unwrap();
+        let config_path = init(&dir, &key_path).unwrap();
+        let secret = secret_from_hex(KEY).unwrap();
+        let public = config::public_key_hex(&secret);
+        let loaded = config::load(&config_path, &signature_path(&config_path), &public)
+            .expect("the kiosk loads it");
+        assert_eq!(loaded["home"], "index.html");
+        assert!(
+            init(&dir, &key_path).is_err(),
+            "a second run must not overwrite"
+        );
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::remove_file(&key_path);
+    }
+
+    #[test]
+    fn a_bad_key_writes_nothing() {
+        let dir = std::env::temp_dir().join(format!("tpt-cli-kiosk-nokey-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let key_path = dir.with_extension("key");
+        fs::write(&key_path, "short").unwrap();
+        assert!(init(&dir, &key_path).is_err());
+        assert!(!dir.exists(), "nothing is created for a bad key");
+        let _ = fs::remove_file(&key_path);
     }
 }
