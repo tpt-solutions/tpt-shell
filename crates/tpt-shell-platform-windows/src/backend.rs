@@ -28,12 +28,11 @@ use tpt_shell_core::platform::{
 use tpt_shell_core::theme::{injection_script, settings_script, Theme};
 use tpt_shell_core::{Error, LogicalSize, PhysicalSize, Result, ScaleFactor};
 use tpt_shell_core::{LogicalRect, Platform};
-use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{DwmExtendFrameIntoClientArea, DwmSetWindowAttribute};
 
 use windows_sys::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MonitorFromPoint, MonitorFromRect, MonitorFromWindow, MONITORINFO,
-    MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL, MONITOR_DEFAULTTOPRIMARY,
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows_sys::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -89,13 +88,18 @@ type EvalSlot = Rc<RefCell<Option<(HRESULT, Option<String>)>>>;
 pub struct WindowId(pub isize);
 
 /// Where a window is, for remembering it between runs. See [`WindowsBackend::placement`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Support: Partial. The monitor is remembered by device name; a restore uses it only when that
+/// monitor is still there (see [`crate::placement`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Placement {
     pub x: i32,
     pub y: i32,
     pub width: i32,
     pub height: i32,
     pub maximized: bool,
+    /// The device name of the monitor the window was on, such as `\\.\DISPLAY1`.
+    pub monitor: Option<String>,
 }
 
 /// Saved placement and style while a window is fullscreen.
@@ -596,6 +600,7 @@ impl WindowsBackend {
             width: r.right - r.left,
             height: r.bottom - r.top,
             maximized: wp.showCmd == SW_SHOWMAXIMIZED as u32,
+            monitor: crate::placement::device_of_window(id.0),
         })
     }
 
@@ -609,15 +614,19 @@ impl WindowsBackend {
         } else {
             SW_SHOWNORMAL as u32
         };
-        let saved = RECT {
-            left: placement.x,
-            top: placement.y,
-            right: placement.x + placement.width,
-            bottom: placement.y + placement.height,
-        };
         // A monitor that was unplugged since the placement was saved must not leave the window
-        // off screen. It moves to the primary monitor instead.
-        let [left, top, right, bottom] = fit_to_monitors(saved);
+        // off screen. It moves to the nearest monitor, or to the remembered one when it is back.
+        let monitors = crate::placement::monitors();
+        let [left, top, right, bottom] = crate::placement::place(
+            [
+                placement.x,
+                placement.y,
+                placement.x + placement.width,
+                placement.y + placement.height,
+            ],
+            placement.monitor.as_deref(),
+            &monitors,
+        );
         wp.rcNormalPosition = RECT {
             left,
             top,
@@ -1167,39 +1176,6 @@ impl WebviewBackend for WindowsBackend {
     }
 }
 
-/// Fits a saved rectangle to the monitors that exist now. See [`fit_placement`].
-fn fit_to_monitors(saved: RECT) -> [i32; 4] {
-    let rect = [saved.left, saved.top, saved.right, saved.bottom];
-    // SAFETY: `saved` is a valid RECT for the call. DEFAULTTONULL returns null when no monitor
-    // meets the rectangle.
-    let on_screen = !unsafe { MonitorFromRect(&saved, MONITOR_DEFAULTTONULL) }.is_null();
-    // SAFETY: a point needs no pointers; DEFAULTTOPRIMARY never returns null.
-    let monitor = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
-    let mut info = MONITORINFO {
-        cbSize: size_of::<MONITORINFO>() as u32,
-        rcMonitor: RECT {
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0,
-        },
-        rcWork: RECT {
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0,
-        },
-        dwFlags: 0,
-    };
-    // SAFETY: `info` has cbSize set as the call requires.
-    if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
-        // Without a work area, keep the saved rectangle as it is.
-        return rect;
-    }
-    let w = info.rcWork;
-    fit_placement(rect, on_screen, [w.left, w.top, w.right, w.bottom])
-}
-
 /// Whether this is a release build. Release builds keep the developer tools off (spec §9).
 fn release_build() -> bool {
     !cfg!(debug_assertions)
@@ -1233,22 +1209,6 @@ document.body.appendChild(d);\
 }});\
 }})();"
     )
-}
-
-/// Turns a saved window rectangle (left, top, right, bottom) into one that is on screen. A
-/// rectangle that overlaps the monitor `saved` is on is kept. Otherwise the window is shrunk to
-/// fit `primary` (the primary monitor's work area) and centred on it.
-pub fn fit_placement(saved: [i32; 4], on_screen: bool, primary: [i32; 4]) -> [i32; 4] {
-    if on_screen {
-        return saved;
-    }
-    let area_w = primary[2] - primary[0];
-    let area_h = primary[3] - primary[1];
-    let w = (saved[2] - saved[0]).clamp(0, area_w.max(0));
-    let h = (saved[3] - saved[1]).clamp(0, area_h.max(0));
-    let left = primary[0] + (area_w - w) / 2;
-    let top = primary[1] + (area_h - h) / 2;
-    [left, top, left + w, top + h]
 }
 
 /// `DWMWA_USE_IMMERSIVE_DARK_MODE`: the dark title bar (Windows 10 1809 and later).
@@ -3039,34 +2999,6 @@ mod surface_tests {
     fn the_proxy_is_send_sync_and_clone() {
         fn assert_proxy<T: EventLoopProxy + Send + Sync + Clone + 'static>() {}
         assert_proxy::<WinProxy>();
-    }
-
-    #[test]
-    fn a_window_on_screen_keeps_its_saved_place() {
-        let primary = [0, 0, 1920, 1040];
-        assert_eq!(
-            fit_placement([100, 100, 900, 700], true, primary),
-            [100, 100, 900, 700]
-        );
-    }
-
-    #[test]
-    fn a_window_off_screen_moves_to_the_primary_monitor_and_keeps_its_size() {
-        let primary = [0, 0, 1920, 1040];
-        // 800 x 600 saved on a monitor that is no longer there: centred on the primary one.
-        assert_eq!(
-            fit_placement([3000, 100, 3800, 700], false, primary),
-            [560, 220, 1360, 820]
-        );
-    }
-
-    #[test]
-    fn a_window_larger_than_the_primary_monitor_shrinks_to_fit_it() {
-        let primary = [0, 0, 1920, 1040];
-        assert_eq!(
-            fit_placement([-5000, -5000, 5000, 5000], false, primary),
-            [0, 0, 1920, 1040]
-        );
     }
 
     #[test]

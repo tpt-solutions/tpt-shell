@@ -354,6 +354,7 @@ fn load_window_state(
                     .ok()
                     .filter(|h| *h > 0)?,
                 maximized: v["maximized"].as_bool().unwrap_or(false),
+                monitor: v["monitor"].as_str().map(str::to_owned),
             };
             Some((name, placement))
         })
@@ -934,7 +935,7 @@ impl App {
             let id = backend.create(&spec)?;
             panes.add(id, &window.name);
             if let Some(placement) = saved.get(&window.name) {
-                if let Err(e) = backend.set_placement(id, *placement) {
+                if let Err(e) = backend.set_placement(id, placement.clone()) {
                     eprintln!("tpt-shell: cannot restore window {}: {e}", window.name);
                 }
             }
@@ -1319,7 +1320,7 @@ impl Running {
                 name.clone(),
                 serde_json::json!({
                     "x": p.x, "y": p.y, "width": p.width, "height": p.height,
-                    "maximized": p.maximized,
+                    "maximized": p.maximized, "monitor": p.monitor,
                 }),
             );
         }

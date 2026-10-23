@@ -35,6 +35,8 @@ pub mod loader;
 #[cfg(windows)]
 pub mod local_time;
 #[cfg(windows)]
+pub mod placement;
+#[cfg(windows)]
 pub mod profile;
 #[cfg(windows)]
 pub mod random;
