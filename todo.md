@@ -599,17 +599,17 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ## Phase M11 โ€” Docs site, templates, VS Code extension, migration shims, examples, rustvac port
 
 ### Templates
-- [ ] Templates: vanilla, typescript, appfront-dom, kiosk, pos, agent-demo, audit-app
+- [x] Templates: vanilla, typescript, appfront-dom, kiosk, pos, agent-demo, audit-app (all generate and build here; not run, needs a desktop)
 - [ ] Any extra front-end templates per decision (O3)
 - [ ] CI: generate, build, smoke-test every template
 
 ### Examples
-- [ ] kiosk
-- [ ] pos
-- [ ] audit-viewer
-- [ ] agent-demo
-- [ ] devices-sim
-- [ ] rustvac port
+- [x] kiosk (builds; not run)
+- [x] pos (builds; not run)
+- [x] audit-viewer (builds; not run)
+- [x] agent-demo (builds; not run)
+- [x] devices-sim (builds; not run)
+- [ ] rustvac port (not in this repo)
 
 ### Docs site (mdBook)
 - [ ] Five-minute quickstart (`docs/src/quickstart.md` covers the hello window, scaffolding, the manifest check and the dev preview, each run here on Windows; a scaffolded project still does not open a window by itself, and the timed run on a clean machine is not done)
@@ -620,9 +620,9 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Platform notes and troubleshooting
 - [ ] API reference with rendered support tags
 - [x] Migration guides: Tauri, Electron
-- [ ] Examples gallery
+- [x] Examples gallery
 - [ ] Published compatibility report
-- [ ] Docs code samples compiled in CI
+- [x] Docs code samples compiled in CI (python3 -I tools/doc-samples.py, run in the docs-build job)
 - [x] Offline docs bundle verified
 - [ ] Publish docs site (per O5)
 
@@ -633,7 +633,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] VS Code extension: audit viewer
 - [x] VS Code extension: inline error codes
 - [ ] Reusable GitHub Actions: build matrix, test, visual compare, compliance gate, release
-- [ ] Migration shims: finalise `tpt.compat.tauri`
+- [x] Migration shims: finalise `tpt.compat.tauri` (tested subset; see docs/src/migration/tauri.md)
 - [ ] `tpt-shell add` for kiosk, devices, audit, agent
 
 ### rustvac (ยง20)
