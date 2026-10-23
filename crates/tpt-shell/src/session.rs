@@ -110,8 +110,7 @@ pub fn current_route(panes: &Panes, id: WindowId) -> Option<String> {
 /// `source` when it is a page of the app, under the app origin. Anything else is not a route the
 /// window should return to.
 fn app_route(source: &str) -> Option<&str> {
-    let under_origin =
-        source == APP_ORIGIN || source.starts_with(&format!("{APP_ORIGIN}/"));
+    let under_origin = source == APP_ORIGIN || source.starts_with(&format!("{APP_ORIGIN}/"));
     under_origin.then_some(source)
 }
 
@@ -209,7 +208,10 @@ mod tests {
         let page = format!("{APP_ORIGIN}/form?step=2");
         assert_eq!(app_route(&page), Some(page.as_str()));
         assert_eq!(app_route(APP_ORIGIN), Some(APP_ORIGIN));
-        assert_eq!(app_route("https://tpt-app.localhost.example.com/form"), None);
+        assert_eq!(
+            app_route("https://tpt-app.localhost.example.com/form"),
+            None
+        );
         assert_eq!(app_route("https://example.com/"), None);
         assert_eq!(app_route(""), None);
     }

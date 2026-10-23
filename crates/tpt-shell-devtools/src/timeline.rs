@@ -270,7 +270,10 @@ fn label(event: &Event) -> String {
 }
 
 fn text(data: &Value, key: &str) -> String {
-    data.get(key).and_then(Value::as_str).unwrap_or("").to_owned()
+    data.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned()
 }
 
 #[cfg(test)]
@@ -288,12 +291,42 @@ mod tests {
 
     fn run() -> Vec<Event> {
         vec![
-            ev(0, 10, "ipc_request", json!({ "id": 1, "cmd": "load", "args": {} })),
-            ev(1, 20, "ipc_response", json!({ "id": 1, "ok": true, "data": { "n": 1 }, "duration_ns": 10 })),
-            ev(2, 30, "ipc_request", json!({ "id": 2, "cmd": "save", "args": {} })),
-            ev(3, 40, "input", json!({ "kind": "click", "path": [], "x": 1, "y": 2 })),
-            ev(4, 50, "ipc_response", json!({ "id": 2, "ok": false, "code": "IPC_DENIED", "message": "no", "duration_ns": 20 })),
-            ev(5, 60, "ipc_request", json!({ "id": 3, "cmd": "load", "args": {} })),
+            ev(
+                0,
+                10,
+                "ipc_request",
+                json!({ "id": 1, "cmd": "load", "args": {} }),
+            ),
+            ev(
+                1,
+                20,
+                "ipc_response",
+                json!({ "id": 1, "ok": true, "data": { "n": 1 }, "duration_ns": 10 }),
+            ),
+            ev(
+                2,
+                30,
+                "ipc_request",
+                json!({ "id": 2, "cmd": "save", "args": {} }),
+            ),
+            ev(
+                3,
+                40,
+                "input",
+                json!({ "kind": "click", "path": [], "x": 1, "y": 2 }),
+            ),
+            ev(
+                4,
+                50,
+                "ipc_response",
+                json!({ "id": 2, "ok": false, "code": "IPC_DENIED", "message": "no", "duration_ns": 20 }),
+            ),
+            ev(
+                5,
+                60,
+                "ipc_request",
+                json!({ "id": 3, "cmd": "load", "args": {} }),
+            ),
         ]
     }
 
@@ -367,7 +400,12 @@ mod tests {
         let events = vec![
             ev(0, 1, "ipc_request", json!({ "id": 1, "cmd": "load" })),
             ev(1, 2, "ipc_request", json!({ "id": 2, "cmd": "load" })),
-            ev(2, 3, "ipc_response", json!({ "id": 1, "ok": true, "data": "old" })),
+            ev(
+                2,
+                3,
+                "ipc_response",
+                json!({ "id": 1, "ok": true, "data": "old" }),
+            ),
         ];
         let mut m = Model::new(events);
         m.seek(3).unwrap();

@@ -24,6 +24,7 @@ tpt-shell-manifest = { path = "../tpt-shell-manifest", version = "0.0.0" }
 tpt-shell-kiosk = { path = "../tpt-shell-kiosk", version = "0.0.0" }
 tpt-shell-devices = { path = "../tpt-shell-devices", version = "0.0.0" }
 tpt-shell-devtools = { path = "../tpt-shell-devtools", version = "0.0.0", default-features = false }
+tpt-shell-replay = { path = "../tpt-shell-replay", version = "0.0.0" }
 tpt-shell-profiles = { path = "../tpt-shell-profiles", version = "0.0.0" }
 tpt-shell-compliance = { path = "../tpt-shell-compliance", version = "0.0.0" }
 tpt-shell-agent = { path = "../tpt-shell-agent", version = "0.0.0", optional = true }

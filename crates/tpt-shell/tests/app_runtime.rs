@@ -489,11 +489,11 @@ fn app_state_is_saved_while_running_and_restored_at_the_next_start() {
 #[test]
 fn a_page_prints_through_a_granted_device_and_the_use_is_audited() {
     use std::sync::{Arc, Mutex};
+    use tpt_shell::device_scope::scope_from_grant;
     use tpt_shell::devices::escpos::{Align, Receipt};
     use tpt_shell::devices::hub::{DeviceHub, EventKind};
     use tpt_shell::devices::id::DeviceId;
     use tpt_shell::devices::virtual_devices::VirtualPrinter;
-    use tpt_shell::device_scope::scope_from_grant;
 
     let Some((loader, _serial)) = runtime_test_loader() else {
         return;
@@ -531,8 +531,9 @@ fn a_page_prints_through_a_granted_device_and_the_use_is_audited() {
                 None => Target::None,
             },
             move |_args| -> Result<Value, CommandError> {
-                let scope = scope_from_grant(&granted, &printer_id)
-                    .ok_or_else(|| CommandError::new("DEVICE_SCOPE", "the grant does not cover it"))?;
+                let scope = scope_from_grant(&granted, &printer_id).ok_or_else(|| {
+                    CommandError::new("DEVICE_SCOPE", "the grant does not cover it")
+                })?;
                 let mut receipt = Receipt::new();
                 receipt
                     .align(Align::Center)

@@ -510,6 +510,20 @@
           renderAll();
         }
       };
+
+      // A seek is answered by the host with a snapshot in a web message. Anything else the host
+      // sends back (a denied call, say) is not a snapshot and is ignored.
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.addEventListener("message", function (event) {
+          var reply = event.data;
+          if (typeof reply === "string") {
+            try { reply = JSON.parse(reply); } catch (err) { return; }
+          }
+          if (reply && reply.ok === true && reply.result) {
+            window.tptDevtools.update(reply.result);
+          }
+        });
+      }
     })();
   </script>
 </body>

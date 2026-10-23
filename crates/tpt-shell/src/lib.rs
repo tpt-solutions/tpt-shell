@@ -12,29 +12,33 @@ mod agent;
 #[cfg(feature = "agent")]
 #[cfg_attr(not(windows), allow(dead_code))]
 mod agent_snapshot;
+/// Support: Partial. Windows only for windows and pages. macOS and Linux have no app wiring.
+pub mod app;
+/// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
+#[cfg(windows)]
+pub mod blob;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod dev_reload;
 #[cfg(windows)]
 mod devtools;
 #[cfg(any(feature = "admin-endpoint", feature = "health-endpoint"))]
 #[cfg_attr(not(windows), allow(dead_code))]
 mod endpoints;
 #[cfg_attr(not(windows), allow(dead_code))]
-mod dev_reload;
-#[cfg_attr(not(windows), allow(dead_code))]
 mod licenses;
 #[cfg(windows)]
 mod session;
 #[cfg(windows)]
 mod ui;
-/// Support: Partial. Windows only for windows and pages. macOS and Linux have no app wiring.
-pub mod app;
-/// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
-#[cfg(windows)]
-pub mod blob;
 
 /// The device scope a command opens a device with, derived from the window's grant.
 ///
 /// Support: Full.
 pub mod device_scope;
+
+/// Support: Partial. Records a running app's IPC calls, window closes and asset loads on Windows
+/// only; resize, focus and page input are not recorded.
+pub mod record;
 
 #[cfg(windows)]
 pub use app::Running;

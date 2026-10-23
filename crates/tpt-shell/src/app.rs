@@ -24,9 +24,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
 use crate::blob;
-use crate::dev_reload;
 #[cfg(windows)]
-use crate::{devtools, session, ui};
+use crate::{dev_reload, devtools, session, ui};
 use tpt_shell_audit::Policy;
 #[cfg(windows)]
 use tpt_shell_audit::{AuditLog, Entry, Outcome};
@@ -147,6 +146,12 @@ pub struct App {
     /// Where command calls are audited, and what the log keeps.
     #[cfg_attr(not(windows), allow(dead_code))]
     audit: Option<(PathBuf, Policy)>,
+    /// A recording the developer overlay's timeline steps through (see `devtools_recording`).
+    #[cfg(feature = "devtools")]
+    devtools_recording: Option<(PathBuf, tpt_shell_replay::Mode)>,
+    /// Where the run is recorded to, if asked (see `record`).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    record: Option<PathBuf>,
     /// The single-instance id, and what to do with a later launch's arguments.
     #[cfg_attr(not(windows), allow(dead_code))]
     instance: Option<(String, ArgsHandler)>,
@@ -329,6 +334,21 @@ fn kiosk_settings(config: &serde_json::Value) -> Result<KioskSettings> {
     })
 }
 
+/// The agent's page reader: runs a script in the window the agent reads from and gives back its
+/// result. It waits at most ten seconds for the page to answer, and fails before a window exists.
+#[cfg(all(windows, feature = "agent"))]
+fn agent_page_script(
+    window: Rc<std::cell::Cell<Option<tpt_shell_platform_windows::backend::WindowId>>>,
+) -> crate::agent_snapshot::PageScript {
+    Box::new(move |script| {
+        let id = window
+            .get()
+            .ok_or_else(|| "no window is open yet".to_string())?;
+        tpt_shell_platform_windows::backend::eval_window_json(id, script, Duration::from_secs(10))
+            .map_err(|e| e.to_string())
+    })
+}
+
 /// Reads the window placements saved by [`Running::save_window_state`]. Entries that do not parse
 /// are skipped, and a file that is missing or not JSON gives no placements.
 #[cfg(windows)]
@@ -461,6 +481,50 @@ impl App {
     /// `policy` decides whether the parameters are kept; their hash is always kept.
     pub fn audit(mut self, path: impl Into<PathBuf>, policy: Policy) -> Self {
         self.audit = Some((path.into(), policy));
+        self
+    }
+
+    /// Loads a `.tptreplay` recording into the developer overlay's timeline, so the overlay can
+    /// step through it. `mode` decides how strictly it is read. Only debug builds with the
+    /// `devtools` feature show the overlay, and an unreadable file stops the app from starting
+    /// with a message that names it.
+    ///
+    /// Support: Partial. Debug builds on Windows only; the overlay is not created in release.
+    #[cfg(feature = "devtools")]
+    pub fn devtools_recording(
+        mut self,
+        path: impl Into<PathBuf>,
+        mode: tpt_shell_replay::Mode,
+    ) -> Self {
+        self.devtools_recording = Some((path.into(), mode));
+        self
+    }
+
+    /// Loads the app's recording into the overlay's timeline, when the app set one. A file that
+    /// cannot be read stops the app with TS0307, named in the message.
+    #[cfg(feature = "devtools")]
+    fn load_devtools_recording(&self, shell: &devtools::Shell) -> Result<()> {
+        let Some((path, mode)) = &self.devtools_recording else {
+            return Ok(());
+        };
+        shell
+            .load_recording(path, *mode)
+            .map(|_| ())
+            .map_err(|message| Error::Backend(format!("TS0307: {message}")))
+    }
+
+    #[cfg(not(feature = "devtools"))]
+    fn load_devtools_recording(&self, _shell: &devtools::Shell) -> Result<()> {
+        Ok(())
+    }
+
+    /// Records the run to a `.tptreplay` file at `path` (spec §10.5): every IPC call a page makes,
+    /// each window that closes, and each app asset a page loads. The file is written when the event
+    /// loop ends. Off unless asked, and the recording does not change what the app does.
+    ///
+    /// Support: Partial. Windows only; resize, focus and page input are not recorded.
+    pub fn record(mut self, path: impl Into<PathBuf>) -> Self {
+        self.record = Some(path.into());
         self
     }
 
@@ -731,6 +795,11 @@ impl App {
         use tpt_shell_platform_windows::consent::NativeConsent;
         use tpt_shell_platform_windows::webview2::APP_ORIGIN;
 
+        use crate::record::Recording;
+        let recording = self
+            .record
+            .take()
+            .map(|path| Rc::new(Recording::new(path, &self.name)));
         let loader = self
             .loader
             .take()
@@ -777,6 +846,22 @@ impl App {
             tpt_shell_platform_windows::deep_link::register(scheme, &exe, &self.name)
                 .map_err(Error::Backend)?;
         }
+        // The developer overlay's state (debug builds only). It reads the grants and the contract,
+        // so it is made before the grants are moved into the engine.
+        let devtools_shell = match tpt_shell_devtools::enabled().then(|| {
+            devtools::Shell::new(
+                self.audit.as_ref().map(|(path, _)| path.clone()),
+                &self.grants,
+                self.contract.as_ref(),
+            )
+        }) {
+            Some(shell) => {
+                self.load_devtools_recording(&shell)?;
+                Some(Rc::new(shell))
+            }
+            None => None,
+        };
+        // The tray takes its menu out of `self`, so it is made after the overlay reads `self`.
         let tray = match self.tray {
             Some((tooltip, items, on_select)) => {
                 let items = items
@@ -793,16 +878,6 @@ impl App {
             }
             None => None,
         };
-
-        // The developer overlay's state (debug builds only). It reads the grants and the contract,
-        // so it is made before the grants are moved into the engine.
-        let devtools_shell = tpt_shell_devtools::enabled().then(|| {
-            Rc::new(devtools::Shell::new(
-                self.audit.as_ref().map(|(path, _)| path.clone()),
-                &self.grants,
-                self.contract.as_ref(),
-            ))
-        });
         let mut engine = Engine::with_consent_store(consent_store(&data_dir));
         for grant in self.grants {
             engine.add_grant(grant).map_err(|e| Error::Backend(e.0))?;
@@ -848,6 +923,12 @@ impl App {
             );
         }
 
+        // The window the agent reads pages from: the first one the app creates. It is filled in
+        // when that window exists, which is after the agent session is built.
+        #[cfg(feature = "agent")]
+        let agent_window = Rc::new(std::cell::Cell::new(None::<
+            tpt_shell_platform_windows::backend::WindowId,
+        >));
         // The agent, when its manifest profile enables it. It writes to the same audit log.
         #[cfg(feature = "agent")]
         let agent_tick = match self.agent_config.take() {
@@ -856,8 +937,7 @@ impl App {
                     config,
                     profile,
                     tools: std::mem::take(&mut self.agent_tools),
-                    // No platform script runner yet, so `wait_for` is not offered.
-                    page_script: None,
+                    page_script: Some(agent_page_script(agent_window.clone())),
                 };
                 crate::agent::session(setup, audit.clone())
                     .map_err(Error::Backend)?
@@ -929,12 +1009,25 @@ impl App {
         let panes = Rc::new(session::Panes::default());
         // The kiosk's home page as a full URL. Crash recovery goes there when it gives up.
         let kiosk_home = kiosk.as_ref().map(|k| format!("{APP_ORIGIN}/{}", k.home));
-        backend.on_window_closed(session::close_hook(panes.clone()))?;
+        let mut close = session::close_hook(panes.clone());
+        let recording_for_close = recording.clone();
+        let panes_for_close = panes.clone();
+        backend.on_window_closed(move |id| {
+            let name = panes_for_close.name_of(id);
+            close(id);
+            if let (Some(recording), Some(name)) = (&recording_for_close, name) {
+                recording.window_closed(&name);
+            }
+        })?;
         let mut windows = Vec::new();
         for window in self.windows {
             let mut spec = window.spec();
             spec.allow_navigation = kiosk_allow.clone();
             let id = backend.create(&spec)?;
+            #[cfg(feature = "agent")]
+            if agent_window.get().is_none() {
+                agent_window.set(Some(id));
+            }
             panes.add(id, &window.name);
             if let Some(placement) = saved.get(&window.name) {
                 if let Err(e) = backend.set_placement(id, placement.clone()) {
@@ -970,6 +1063,8 @@ impl App {
             }
             let panes_for_page = panes.clone();
             let overlay_for_page = overlay.clone();
+            let recording_for_page = recording.clone();
+            let recording_for_assets = recording.clone();
             backend.set_message_handler(
                 id,
                 Box::new(move |text| {
@@ -991,13 +1086,19 @@ impl App {
                         idle.borrow_mut().touch(Instant::now());
                     }
                     let started = Instant::now();
-                    let reply = router.handle_authorized(
-                        &caller,
-                        &mut engine.borrow_mut(),
-                        &mut prompt,
-                        text.as_bytes(),
-                        &Limits::default(),
-                    );
+                    let mut run = || {
+                        router.handle_authorized(
+                            &caller,
+                            &mut engine.borrow_mut(),
+                            &mut prompt,
+                            text.as_bytes(),
+                            &Limits::default(),
+                        )
+                    };
+                    let reply = match &recording_for_page {
+                        Some(recording) => recording.call(text, run),
+                        None => run(),
+                    };
                     // Built only when something keeps it: the audit log or the overlay's log.
                     let entry = (audit.is_some() || overlay_for_page.is_some())
                         .then(|| audit_entry(&caller, &router, text, &reply, started.elapsed()));
@@ -1025,13 +1126,22 @@ impl App {
             let dev_root = dev_root.clone();
             backend.set_asset_source(
                 id,
-                Box::new(move |path| match path.strip_prefix("__tpt/blob/") {
-                    Some(blob_id) => blob::blob_asset(blob_id),
-                    // A dev folder's file wins; the built-in pages fill in what it lacks.
-                    None => dev_root
-                        .as_deref()
-                        .and_then(|root| dev_reload::disk_asset(root, path))
-                        .or_else(|| assets.get(path).cloned()),
+                Box::new(move |path| {
+                    let asset = match path.strip_prefix("__tpt/blob/") {
+                        Some(blob_id) => blob::blob_asset(blob_id),
+                        // A dev folder's file wins; the built-in pages fill in what it lacks.
+                        None => dev_root
+                            .as_deref()
+                            .and_then(|root| dev_reload::disk_asset(root, path))
+                            .or_else(|| assets.get(path).cloned()),
+                    };
+                    // Blobs are fetched by id, not loaded as app files, so they are not recorded.
+                    if let Some(recording) = &recording_for_assets {
+                        if !path.starts_with("__tpt/blob/") {
+                            recording.asset_loaded(path, asset.is_some());
+                        }
+                    }
+                    asset
                 }),
             )?;
             if overlay.is_some() {
@@ -1118,6 +1228,7 @@ impl App {
             tray,
             state_file,
             snapshot_state,
+            recording,
             _ephemeral: ephemeral,
             _keys: keys,
             devices,
@@ -1209,6 +1320,8 @@ pub struct Running {
     snapshot_state: Option<(PathBuf, SnapshotCapture)>,
     /// The virtual devices from `TPT_VIRTUAL_DEVICES`, if any.
     devices: Option<tpt_shell_devices::hub::DeviceHub>,
+    /// The recording of this run, written when the event loop ends (see `App::record`).
+    recording: Option<Rc<crate::record::Recording>>,
     /// The UI-thread handle other threads use (see `Running::ui_handle`).
     ui: ui::UiHandle,
     /// The health endpoint, which stops when the app does.
@@ -1295,6 +1408,11 @@ impl Running {
         for (name, _) in &self.windows {
             blob::remove_window_blobs(name);
         }
+        if let Some(recording) = &self.recording {
+            if let Err(e) = recording.finish() {
+                eprintln!("tpt-shell: cannot write the recording: {e}");
+            }
+        }
         if let Some((path, capture)) = &self.snapshot_state {
             let value = (capture.borrow_mut())();
             if let Err(e) = tpt_shell_kiosk::state::save(path, &value) {
@@ -1335,6 +1453,13 @@ impl Running {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_is_off_unless_asked() {
+        assert!(App::new().record.is_none());
+        let app = App::new().record("run.tptreplay");
+        assert_eq!(app.record.as_deref(), Some(Path::new("run.tptreplay")));
+    }
 
     #[cfg(windows)]
     #[test]

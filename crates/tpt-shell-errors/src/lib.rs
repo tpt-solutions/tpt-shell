@@ -151,6 +151,18 @@ pub const REGISTRY: &[Entry] = &[
         explanation: "More than one element matched the role and name in the test query, so the driver cannot tell which one to act on. This is not retried, because waiting does not change the match count.",
         fix: "Narrow the query with a more specific name, or give the elements distinct accessible names.",
     },
+    Entry {
+        code: "TS0307",
+        title: "recording not loaded",
+        explanation: "The developer overlay could not read the recording it was given: the file is missing, is not a recording, or fails the strict read. The overlay runs without a timeline.",
+        fix: "Check the path, and that the file was written by the replay recorder. A lenient read skips damaged lines.",
+    },
+    Entry {
+        code: "TS0308",
+        title: "timeline seek refused",
+        explanation: "The overlay asked the timeline to move to a position that is not in the recording, or no recording is loaded.",
+        fix: "Seek to a position between 0 and the number of events shown in the timeline.",
+    },
 ];
 
 /// Looks up a code. The match ignores ASCII case, so `ts0001` finds `TS0001`.
