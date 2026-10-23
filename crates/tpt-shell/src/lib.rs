@@ -23,11 +23,15 @@ mod session;
 #[cfg(windows)]
 mod ui;
 /// Support: Partial. Windows only for windows and pages. macOS and Linux have no app wiring.
-
 pub mod app;
 /// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
 #[cfg(windows)]
 pub mod blob;
+
+/// The device scope a command opens a device with, derived from the window's grant.
+///
+/// Support: Full.
+pub mod device_scope;
 
 #[cfg(windows)]
 pub use app::Running;

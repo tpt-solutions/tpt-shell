@@ -75,17 +75,21 @@ pub(crate) fn session(
             "the agent needs an audit log: call App::audit or App::manifest_audit first".into(),
         );
     };
-    let tools = setup
+    let tools: Vec<AgentTool> = setup
         .tools
         .into_iter()
         .filter(|tool| profile.allows_command(&tool.command))
         .collect();
+    // The session's own allowlist is the same set as the filter above. Passing it again means a
+    // tool the profile does not allow stays unlisted and uncallable even if the filter changes.
+    let allowed: Vec<String> = tools.iter().map(|tool| tool.command.clone()).collect();
     let recorder = SharedAudit {
         log,
         started: Instant::now(),
     };
     Ok(Some(
         Session::new(tools, profile.policy())
+            .with_commands(allowed)
             .with_recorder(Box::new(recorder))
             .with_actor(format!("agent:{}", profile.name)),
     ))
@@ -191,5 +195,40 @@ mod tests {
         let _ = session.handle_line(refused, Duration::ZERO, &mut |_, _| false);
         assert_eq!(log.borrow().len(), 2, "a refused call is recorded too");
         let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
+    }
+
+    #[test]
+    fn the_session_lists_only_the_tools_the_profile_allows() {
+        let path = temp_log("list");
+        let log = Rc::new(RefCell::new(
+            AuditLog::open(&path, Policy::default()).expect("log"),
+        ));
+        let mut session = session(setup(true), Some(log))
+            .expect("session")
+            .expect("enabled");
+        let list = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
+        let reply = session
+            .handle_line(list, Duration::ZERO, &mut |_, _| false)
+            .expect("a reply");
+        assert!(reply.contains("set_volume"), "{reply}");
+        assert!(!reply.contains("format_disk"), "{reply}");
+        let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
+    }
+
+    #[test]
+    fn the_manifest_routes_reach_the_profile_policy() {
+        let text = "[app]\nname = \"demo\"\n[agent]\nenabled = true\n\
+             [agent.profiles.assistant]\nactions = [\"click\"]\n\
+             routes = [\"app://tpt-app.localhost/help.html\"]\n";
+        let parsed = tpt_shell_manifest::parse(text).expect("manifest");
+        let section = parsed
+            .stubs
+            .iter()
+            .find(|(name, _)| name.as_str() == "agent")
+            .map(|(_, table)| table);
+        let config = tpt_shell_agent::profile::parse_agent_section(section).expect("section");
+        let policy = config.profile("assistant").expect("profile").policy();
+        assert!(policy.routes.allows("app://tpt-app.localhost/help.html"));
+        assert!(!policy.routes.allows("https://example.com/"));
     }
 }

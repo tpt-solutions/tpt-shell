@@ -491,17 +491,23 @@ fn a_page_prints_through_a_granted_device_and_the_use_is_audited() {
     use std::sync::{Arc, Mutex};
     use tpt_shell::devices::escpos::{Align, Receipt};
     use tpt_shell::devices::hub::{DeviceHub, EventKind};
-    use tpt_shell::devices::id::{DeviceId, DeviceScope};
+    use tpt_shell::devices::id::DeviceId;
     use tpt_shell::devices::virtual_devices::VirtualPrinter;
+    use tpt_shell::device_scope::scope_from_grant;
 
     let Some((loader, _serial)) = runtime_test_loader() else {
         return;
     };
     let dir = std::env::temp_dir().join(format!("tpt-app-device-{}", std::process::id()));
     let printer_id: DeviceId = "usb:0416:5011".parse().expect("id");
-    let scope = DeviceScope::Usb {
-        vendor: Some(0x0416),
-        product: Some(0x5011),
+    // The grant the app is given. The command opens the printer with the scope derived from this
+    // same grant, so the engine's check and the hub's check cannot disagree.
+    let granted = Grant {
+        capability: "device.print".into(),
+        window: "main".into(),
+        origin: "https://tpt-app.localhost".into(),
+        scope: Scope::Devices(vec!["usb:0416:5011".into()]),
+        consent: false,
     };
     let (printer, output) = VirtualPrinter::new(printer_id.clone());
     let kinds: Arc<Mutex<Vec<EventKind>>> = Arc::new(Mutex::new(Vec::new()));
@@ -516,13 +522,7 @@ fn a_page_prints_through_a_granted_device_and_the_use_is_audited() {
         .name("app-device-test")
         .loader(loader)
         .data_dir(&dir)
-        .grant(Grant {
-            capability: "device.print".into(),
-            window: "main".into(),
-            origin: "https://tpt-app.localhost".into(),
-            scope: Scope::Devices(vec!["usb:0416:5011".into()]),
-            consent: false,
-        })
+        .grant(granted.clone())
         .command(
             "print",
             "device.print",
@@ -531,6 +531,8 @@ fn a_page_prints_through_a_granted_device_and_the_use_is_audited() {
                 None => Target::None,
             },
             move |_args| -> Result<Value, CommandError> {
+                let scope = scope_from_grant(&granted, &printer_id)
+                    .ok_or_else(|| CommandError::new("DEVICE_SCOPE", "the grant does not cover it"))?;
                 let mut receipt = Receipt::new();
                 receipt
                     .align(Align::Center)

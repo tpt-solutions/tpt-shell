@@ -51,7 +51,6 @@ impl Panes {
         });
     }
     /// Support: Partial. Windows only.
-
     pub fn name_of(&self, id: WindowId) -> Option<String> {
         self.list
             .borrow()
@@ -60,7 +59,6 @@ impl Panes {
             .map(|p| p.name.clone())
     }
     /// Support: Partial. Windows only.
-
     pub fn url_of(&self, id: WindowId) -> Option<String> {
         self.list
             .borrow()
