@@ -661,7 +661,13 @@ mod tests {
     fn a_version_two_asset_without_a_hash_still_reads() {
         let header = "{\"format\":\"tptreplay\",\"version\":2,\"app\":\"a\",\"platform\":\"p\"}\n";
         let old = "{\"asset\":{\"data\":\"YWJj\",\"len\":3,\"name\":\"x.bin\"}}\n";
-        assert_eq!(read(&format!("{header}{old}"), Mode::Strict).unwrap().assets.len(), 1);
+        assert_eq!(
+            read(&format!("{header}{old}"), Mode::Strict)
+                .unwrap()
+                .assets
+                .len(),
+            1
+        );
     }
 
     #[test]

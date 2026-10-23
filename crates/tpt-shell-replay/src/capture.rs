@@ -52,7 +52,10 @@ pub enum Input {
     /// recorded as `[redacted]` by the caller.
     Key { path: Vec<PathStep>, key: String },
     /// The value of an input changed. Only the length is recorded.
-    Input { path: Vec<PathStep>, value_length: u64 },
+    Input {
+        path: Vec<PathStep>,
+        value_length: u64,
+    },
 }
 
 /// A window event.
@@ -111,7 +114,11 @@ pub fn ipc_request(
     cmd: &str,
     args: &Value,
 ) -> Result<(), String> {
-    recorder.record(t_ns, "ipc_request", json!({ "id": id, "cmd": cmd, "args": args }))
+    recorder.record(
+        t_ns,
+        "ipc_request",
+        json!({ "id": id, "cmd": cmd, "args": args }),
+    )
 }
 
 /// Records the reply to an IPC request, with how long it took in the recording's clock.
@@ -194,7 +201,11 @@ pub fn protocol_load(
     if !(100..=599).contains(&status) {
         return Err(format!("status {status} is not an HTTP status code"));
     }
-    recorder.record(t_ns, "protocol_load", json!({ "asset": asset, "status": status }))
+    recorder.record(
+        t_ns,
+        "protocol_load",
+        json!({ "asset": asset, "status": status }),
+    )
 }
 
 #[cfg(test)]
@@ -223,9 +234,34 @@ mod tests {
         let path = vec![step(0, "main", ""), step(1, "button", "Cancel")];
         ipc_request(&mut r, 1, 7, "sale.add", &json!({ "sku": "A1" })).unwrap();
         ipc_response(&mut r, 2, 7, 1_000, Ok(&json!({ "total": 3 }))).unwrap();
-        input(&mut r, 3, &Input::Click { path: path.clone(), x: 10, y: 20 }).unwrap();
-        input(&mut r, 4, &Input::Key { path: path.clone(), key: "Enter".into() }).unwrap();
-        input(&mut r, 5, &Input::Input { path, value_length: 9 }).unwrap();
+        input(
+            &mut r,
+            3,
+            &Input::Click {
+                path: path.clone(),
+                x: 10,
+                y: 20,
+            },
+        )
+        .unwrap();
+        input(
+            &mut r,
+            4,
+            &Input::Key {
+                path: path.clone(),
+                key: "Enter".into(),
+            },
+        )
+        .unwrap();
+        input(
+            &mut r,
+            5,
+            &Input::Input {
+                path,
+                value_length: 9,
+            },
+        )
+        .unwrap();
         window(
             &mut r,
             6,
@@ -236,8 +272,22 @@ mod tests {
             },
         )
         .unwrap();
-        window(&mut r, 7, &WindowEvent::Focus { window: "main".into() }).unwrap();
-        window(&mut r, 8, &WindowEvent::Close { window: "main".into() }).unwrap();
+        window(
+            &mut r,
+            7,
+            &WindowEvent::Focus {
+                window: "main".into(),
+            },
+        )
+        .unwrap();
+        window(
+            &mut r,
+            8,
+            &WindowEvent::Close {
+                window: "main".into(),
+            },
+        )
+        .unwrap();
         protocol_load(&mut r, 9, "index.html", 200).unwrap();
         r.finish()
     }
@@ -325,7 +375,10 @@ mod tests {
         assert!(protocol_load(&mut r, 3, "x.js", 99).is_err());
         let replay = read(&r.finish(), Mode::Strict).unwrap();
         assert_eq!(replay.events.len(), 1);
-        assert_eq!(replay.events[0].data, json!({ "asset": "app.js", "status": 200 }));
+        assert_eq!(
+            replay.events[0].data,
+            json!({ "asset": "app.js", "status": 200 })
+        );
     }
 
     #[test]
