@@ -23,10 +23,13 @@
 
 #![forbid(unsafe_code)]
 
-/// The overlay page. The placeholder is replaced by the snapshot as JSON.
+/// The overlay page. The placeholder is replaced by the snapshot as JSON. Built only with the
+/// `overlay` feature, so a build without it has no overlay page in its binary.
+#[cfg(feature = "overlay")]
 const TEMPLATE: &str = include_str!("overlay.html");
 
 /// The placeholder in the template that the snapshot replaces.
+#[cfg(feature = "overlay")]
 const DATA_PLACEHOLDER: &str = "__TPT_DEVTOOLS_DATA__";
 
 /// Whether the overlay is available in this build. Only debug builds have it.
@@ -200,19 +203,28 @@ pub fn audit_rows(jsonl: &str) -> Vec<AuditRow> {
 }
 
 /// Makes JSON safe to place inside a `<script>` element: no `</` can end the element early.
+#[cfg(feature = "overlay")]
 fn script_safe(json: &str) -> String {
     json.replace("</", "<\\/")
 }
 
 /// The overlay page for `snapshot`. It has no external resources.
+#[cfg(feature = "overlay")]
 pub fn page(snapshot: &Snapshot) -> String {
     let data = script_safe(&snapshot.to_json().to_string());
     TEMPLATE.replacen(DATA_PLACEHOLDER, &data, 1)
 }
 
-/// The overlay page in a debug build, `None` in a release build.
+/// The overlay page in a debug build with the `overlay` feature, `None` otherwise.
+#[cfg(feature = "overlay")]
 pub fn page_if_enabled(snapshot: &Snapshot) -> Option<String> {
     enabled().then(|| page(snapshot))
+}
+
+/// Without the `overlay` feature there is no overlay page, in any build.
+#[cfg(not(feature = "overlay"))]
+pub fn page_if_enabled(_snapshot: &Snapshot) -> Option<String> {
+    None
 }
 
 #[cfg(test)]
@@ -284,6 +296,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "overlay")]
     fn the_page_embeds_the_data_and_has_no_external_resources() {
         let html = page(&Snapshot::collect(&Fake));
         assert!(!html.contains(DATA_PLACEHOLDER));
@@ -294,6 +307,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "overlay")]
     fn data_cannot_close_the_script_element() {
         let clean = page(&Snapshot::collect(&Fake)).matches("</script>").count();
         let mut snapshot = Snapshot::collect(&Fake);
@@ -308,6 +322,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "overlay")]
     fn the_page_has_all_six_panels_and_a_call_button() {
         let html = page(&Snapshot::collect(&Fake));
         for panel in ["ipc", "jobs", "caps", "audit", "contract", "engine"] {
@@ -321,6 +336,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "overlay")]
     fn the_explorer_fills_arguments_from_the_schema_properties() {
         // The contract writes a command's arguments as a JSON Schema struct, with the fields
         // under `properties`. The explorer's sample must read that shape.
@@ -330,6 +346,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "overlay")]
     fn the_page_refresh_hook_is_exposed_for_the_host() {
         let html = page(&Snapshot::collect(&Fake));
         assert!(html.contains("window.tptDevtools = {"));
@@ -339,7 +356,10 @@ mod tests {
     #[test]
     fn the_overlay_is_off_in_release_builds() {
         let snapshot = Snapshot::collect(&Fake);
-        assert_eq!(page_if_enabled(&snapshot).is_some(), enabled());
+        assert_eq!(
+            page_if_enabled(&snapshot).is_some(),
+            enabled() && cfg!(feature = "overlay")
+        );
         assert_eq!(enabled(), cfg!(debug_assertions));
     }
 }

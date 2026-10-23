@@ -23,7 +23,7 @@ tpt-shell-audit = { path = "../tpt-shell-audit", version = "0.0.0" }
 tpt-shell-manifest = { path = "../tpt-shell-manifest", version = "0.0.0" }
 tpt-shell-kiosk = { path = "../tpt-shell-kiosk", version = "0.0.0" }
 tpt-shell-devices = { path = "../tpt-shell-devices", version = "0.0.0" }
-tpt-shell-devtools = { path = "../tpt-shell-devtools", version = "0.0.0" }
+tpt-shell-devtools = { path = "../tpt-shell-devtools", version = "0.0.0", default-features = false }
 tpt-shell-profiles = { path = "../tpt-shell-profiles", version = "0.0.0" }
 tpt-shell-compliance = { path = "../tpt-shell-compliance", version = "0.0.0" }
 tpt-shell-agent = { path = "../tpt-shell-agent", version = "0.0.0", optional = true }
@@ -37,6 +37,9 @@ agent = ["dep:tpt-shell-agent"]
 admin-endpoint = ["tpt-shell-kiosk/admin-endpoint"]
 # Local HTTP health endpoint on 127.0.0.1. Off by default (spec 10.1).
 health-endpoint = ["tpt-shell-kiosk/health-endpoint"]
+# The developer overlay (Ctrl+Shift+D) in debug builds. Off by default, so a release binary
+# without it has no overlay page in it. Enable it for a dev build: --features devtools.
+devtools = ["tpt-shell-devtools/overlay"]
 
 [target.'cfg(windows)'.dependencies]
 tpt-shell-platform-windows = { path = "../tpt-shell-platform-windows", version = "0.0.0" }
