@@ -81,6 +81,14 @@ impl Summary {
     pub fn failed(&self) -> usize {
         self.entries.iter().filter(|e| e.failed()).count()
     }
+
+    /// The process exit status for a CI job: 0 when every row passed (or there are no rows), 1
+    /// when any row failed. It follows the threshold each row was compared with.
+    ///
+    /// Support: Full.
+    pub fn exit_code(&self) -> i32 {
+        i32::from(self.failed() > 0)
+    }
 }
 
 /// Compares every screenshot in every job with the baseline job, which is `jobs[baseline]`.
@@ -341,6 +349,60 @@ mod tests {
         assert!(matches!(summary.entries[0].outcome, Outcome::Failed(_)));
         assert_eq!(summary.failed(), 1);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    fn row(outcome: Outcome) -> Entry {
+        Entry {
+            name: "home.png".into(),
+            job: "linux".into(),
+            outcome,
+        }
+    }
+
+    fn compared(changed: u64, compared: u64, passed: bool) -> Outcome {
+        Outcome::Compared(Report {
+            compared,
+            changed,
+            max_distance: 0.0,
+            passed,
+        })
+    }
+
+    #[test]
+    fn exit_code_is_zero_when_every_row_passes() {
+        let summary = Summary {
+            baseline: "windows".into(),
+            entries: vec![row(compared(0, 100, true)), row(compared(3, 100, true))],
+        };
+        assert_eq!(summary.exit_code(), 0);
+    }
+
+    #[test]
+    fn exit_code_is_one_when_a_row_is_over_its_threshold() {
+        let summary = Summary {
+            baseline: "windows".into(),
+            entries: vec![row(compared(0, 100, true)), row(compared(30, 100, false))],
+        };
+        assert_eq!(summary.failed(), 1);
+        assert_eq!(summary.exit_code(), 1);
+    }
+
+    #[test]
+    fn exit_code_is_one_for_a_missing_file() {
+        let summary = Summary {
+            baseline: "windows".into(),
+            entries: vec![row(Outcome::Missing("no file".into()))],
+        };
+        assert_eq!(summary.exit_code(), 1);
+    }
+
+    #[test]
+    fn exit_code_is_zero_when_there_are_no_rows() {
+        let summary = Summary {
+            baseline: "windows".into(),
+            entries: Vec::new(),
+        };
+        assert_eq!(summary.exit_code(), 0);
     }
 
     #[test]

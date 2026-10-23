@@ -448,4 +448,82 @@ mod tests {
         assert_eq!(paeth(10, 20, 10), 20);
         assert_eq!(paeth(0, 0, 0), 0);
     }
+
+    /// Appends one PNG chunk: length, kind, body, and the CRC over kind and body.
+    fn push_chunk(out: &mut Vec<u8>, kind: &[u8; 4], body: &[u8]) {
+        out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        out.extend_from_slice(kind);
+        out.extend_from_slice(body);
+        out.extend_from_slice(&crc32(&[kind, body]).to_be_bytes());
+    }
+
+    /// Encodes an 8-bit, non-interlaced PNG (colour type 2 for RGB, 6 for RGBA) from unfiltered
+    /// rows. Every row is written with filter type 1 (Sub), so the decoder's unfilter runs, and
+    /// the deflate stream is one final stored block, so the test needs no compressor.
+    fn encode(width: u32, height: u32, colour_type: u8, rows: &[Vec<u8>]) -> Vec<u8> {
+        let channels = if colour_type == 2 { 3 } else { 4 };
+        let stride = width as usize * channels;
+        let mut filtered = Vec::new();
+        for row in rows {
+            filtered.push(1u8);
+            for i in 0..stride {
+                let left = if i >= channels { row[i - channels] } else { 0 };
+                filtered.push(row[i].wrapping_sub(left));
+            }
+        }
+        // zlib header, one final stored block (BFINAL 1, BTYPE 00), then the Adler-32 trailer.
+        let len = filtered.len() as u16;
+        let mut zlib = vec![0x78, 0x01, 0x01];
+        zlib.extend_from_slice(&len.to_le_bytes());
+        zlib.extend_from_slice(&(!len).to_le_bytes());
+        zlib.extend_from_slice(&filtered);
+        zlib.extend_from_slice(&crate::inflate::adler32(&filtered).to_be_bytes());
+
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&width.to_be_bytes());
+        ihdr.extend_from_slice(&height.to_be_bytes());
+        ihdr.extend_from_slice(&[8, colour_type, 0, 0, 0]);
+
+        let mut out = SIGNATURE.to_vec();
+        push_chunk(&mut out, b"IHDR", &ihdr);
+        push_chunk(&mut out, b"IDAT", &zlib);
+        push_chunk(&mut out, b"IEND", &[]);
+        out
+    }
+
+    #[test]
+    fn rgb_encoded_in_the_test_decodes_back_exactly() {
+        let (w, h) = (5u32, 4u32);
+        let rows: Vec<Vec<u8>> = (0..h)
+            .map(|y| {
+                (0..w)
+                    .flat_map(|x| [(x * 50) as u8, (y * 60) as u8, ((x + y) * 17) as u8])
+                    .collect()
+            })
+            .collect();
+        let expected: Vec<u8> = (0..h)
+            .flat_map(|y| {
+                (0..w)
+                    .flat_map(move |x| [(x * 50) as u8, (y * 60) as u8, ((x + y) * 17) as u8, 255])
+            })
+            .collect();
+        let img = decode(&encode(w, h, 2, &rows)).unwrap();
+        assert_eq!((img.width(), img.height()), (w, h));
+        assert_eq!(img.rgba(), expected.as_slice());
+    }
+
+    #[test]
+    fn rgba_encoded_in_the_test_keeps_its_alpha() {
+        let (w, h) = (4u32, 3u32);
+        let rows: Vec<Vec<u8>> = (0..h)
+            .map(|y| {
+                (0..w)
+                    .flat_map(|x| [(x * 40) as u8, (y * 70) as u8, 90, (200 - x * 20) as u8])
+                    .collect()
+            })
+            .collect();
+        let expected: Vec<u8> = rows.concat();
+        let img = decode(&encode(w, h, 6, &rows)).unwrap();
+        assert_eq!(img.rgba(), expected.as_slice());
+    }
 }
