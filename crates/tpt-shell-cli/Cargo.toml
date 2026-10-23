@@ -9,6 +9,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 publish.workspace = true
+repository = "https://github.com/tpt-solutions/tpt-shell"
 rust-version.workspace = true
 
 [[bin]]
@@ -33,3 +34,6 @@ tpt-shell-platform-windows = { path = "../tpt-shell-platform-windows", version =
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tpt-shell-platform-linux = { path = "../tpt-shell-platform-linux", version = "0.0.0" }
+
+[package.metadata.dist]
+dist = true

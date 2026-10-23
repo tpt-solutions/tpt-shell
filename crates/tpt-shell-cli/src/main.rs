@@ -44,7 +44,7 @@ const USAGE: &str = "usage:
   tpt-shell new --template <pos|kiosk|audit-app|agent-demo|appfront-dom> <directory> [--tpt-shell <path>]
   tpt-shell run [directory]                   build and launch the Rust project (cargo run)
   tpt-shell init [directory] [--tpt-shell <path to crates/tpt-shell>]   add tpt-shell to an existing crate
-  tpt-shell doctor
+  tpt-shell doctor [--fix]                    report what the build needs; --fix installs cargo-deny when it is missing
   tpt-shell compliance <output-directory> [--key <signing-key-file>]
   tpt-shell audit verify <audit.jsonl> [--key <public-key-file>] [--anchors <anchor-file>]
   tpt-shell audit verify <directory> --rotated <stem> [--key <public-key-file>] [--anchors <anchor-file>]
@@ -141,7 +141,8 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         }
         ["run"] => run_project(Path::new(".")),
         ["run", dir] => run_project(Path::new(dir)),
-        ["doctor"] => Ok(doctor()),
+        ["doctor"] => Ok(doctor(false)),
+        ["doctor", "--fix"] => Ok(doctor(true)),
         ["build"] => build(Path::new(".")),
         ["build", dir] => build(Path::new(dir)),
         ["add", feature] => add::add(feature, Path::new("tpt-shell.toml")),
@@ -774,8 +775,9 @@ const WEBVIEW2_CLIENT: &str =
     r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
 
 /// Reports what the build and run need. Exit 0 when the required parts are present, 1 when
-/// the WebView2 runtime is missing.
-fn doctor() -> ExitCode {
+/// the WebView2 runtime is missing. With `fix`, installs cargo-deny when it is missing; the
+/// other problems have no safe automatic fix and only print their hints.
+fn doctor(fix: bool) -> ExitCode {
     let mut ok = true;
     println!("platform: {}", std::env::consts::OS);
     match tool_version("rustc", &["--version"]) {
@@ -784,7 +786,11 @@ fn doctor() -> ExitCode {
     }
     match tool_version("cargo", &["deny", "--version"]) {
         Some(v) => println!("cargo-deny: {v}"),
-        None => println!("cargo-deny: not found (needed for the licence and advisory gate)"),
+        None if fix => match install_cargo_deny() {
+            Ok(()) => println!("cargo-deny: installed"),
+            Err(e) => println!("cargo-deny: not found, and the install failed: {e}"),
+        },
+        None => println!("cargo-deny: not found (run `tpt-shell doctor --fix` to install it)"),
     }
     match webview2_version() {
         Some(v) => println!("WebView2 runtime: {v}"),
@@ -934,6 +940,20 @@ fn build(dir: &Path) -> Result<ExitCode, String> {
     }
 }
 
+/// Installs cargo-deny with `cargo install --locked`, the same way the CI gate's tool is pinned
+/// by its lock file. Needs the network, which is why it runs only under `doctor --fix`.
+fn install_cargo_deny() -> Result<(), String> {
+    let status = std::process::Command::new("cargo")
+        .args(["install", "cargo-deny", "--locked"])
+        .status()
+        .map_err(|e| format!("cannot run cargo: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("cargo install exited with {status}"))
+    }
+}
+
 /// First line of a tool's output, or `None` when the tool does not run.
 fn tool_version(program: &str, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new(program)
@@ -1008,7 +1028,7 @@ mod doctor_tests {
     #[test]
     fn doctor_runs_without_panicking() {
         // The exit code depends on the machine; the point is that every check completes.
-        let _ = doctor();
+        let _ = doctor(false);
     }
 }
 
