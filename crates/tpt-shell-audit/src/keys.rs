@@ -133,20 +133,63 @@ impl<S: KeyStore + Send + Sync> KeySupplier for StoreKeySupplier<S> {
         let secret = self
             .store
             .get(&self.name)
-            .map_err(|e| unavailable(format!("the keystore failed: {e}")))?
-            .ok_or_else(|| {
-                unavailable(format!(
-                    "no audit key named `{}` in the keystore. Fix: enrol one before opening the log",
-                    self.name
-                ))
-            })?;
-        let bytes: [u8; 32] = secret.try_into().map_err(|_| {
-            unavailable(format!(
-                "the audit key `{}` in the keystore is not 32 bytes",
-                self.name
-            ))
-        })?;
-        Ok(Arc::new(SigningKey::from_bytes(&bytes)))
+            .map_err(|e| unavailable(format!("the keystore failed: {e}")))?;
+        signer_from_secret(&self.name, secret, "the keystore")
+    }
+}
+
+/// Builds a signer from the bytes a source returned for `label`. `None` means the source has no
+/// key under that name, which is a failure: the log must not open unsigned.
+fn signer_from_secret(
+    label: &str,
+    secret: Option<Vec<u8>>,
+    source: &str,
+) -> Result<Arc<dyn CheckpointSigner>, AuditError> {
+    let secret = secret.ok_or_else(|| {
+        unavailable(format!(
+            "no audit key named `{label}` in {source}. Fix: enrol one before opening the log"
+        ))
+    })?;
+    let bytes: [u8; 32] = secret.try_into().map_err(|_| {
+        unavailable(format!(
+            "the audit key `{label}` in {source} is not 32 bytes"
+        ))
+    })?;
+    Ok(Arc::new(SigningKey::from_bytes(&bytes)))
+}
+
+/// Takes the key bytes from a caller-supplied closure, for sources this crate does not know
+/// about: a keystore on another platform, a secret manager, or a test. The closure returns the
+/// 32-byte seed for the named key, or `Ok(None)` when there is none. The audit crate never
+/// depends on the platform that holds the secret.
+///
+/// Support: Full.
+pub struct ClosureKeySupplier<F> {
+    label: String,
+    source: F,
+}
+
+impl<F> ClosureKeySupplier<F>
+where
+    F: Fn() -> Result<Option<Vec<u8>>, String>,
+{
+    /// `label` names the key in error messages. Support: Full.
+    pub fn new(label: impl Into<String>, source: F) -> Self {
+        ClosureKeySupplier {
+            label: label.into(),
+            source,
+        }
+    }
+}
+
+impl<F> KeySupplier for ClosureKeySupplier<F>
+where
+    F: Fn() -> Result<Option<Vec<u8>>, String> + Send + Sync,
+{
+    fn signer(&self) -> Result<Arc<dyn CheckpointSigner>, AuditError> {
+        let secret =
+            (self.source)().map_err(|e| unavailable(format!("the key source failed: {e}")))?;
+        signer_from_secret(&self.label, secret, "the key source")
     }
 }
 

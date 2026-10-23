@@ -149,6 +149,25 @@ pub struct Signing {
     pub every_secs: u64,
 }
 
+impl Signing {
+    /// Takes the checkpoint key from a [`KeySupplier`], such as a keystore entry
+    /// ([`keys::StoreKeySupplier`]) or a closure ([`keys::ClosureKeySupplier`]). Fails closed:
+    /// with no key, no signing settings are made and the log is not opened.
+    ///
+    /// Support: Full.
+    pub fn from_supplier(
+        supplier: &dyn keys::KeySupplier,
+        every: u64,
+        every_secs: u64,
+    ) -> Result<Self, AuditError> {
+        Ok(Signing {
+            key: supplier.signer()?,
+            every,
+            every_secs,
+        })
+    }
+}
+
 /// Where a log segment picks up: the next sequence number, the hash the next record must
 /// name as `prev`, and how many entries (not checkpoints) came before.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -412,8 +431,8 @@ pub fn verify_file_with_key(
 /// Verifies a file and checks its anchors. Each anchor must name a record of the chain with the
 /// same hash, so a truncated or replaced log fails even when its own chain is consistent.
 ///
-/// Support: Partial. The anchor check it runs is tested in tpt-shell-audit (check_anchors), but
-/// this file-level wrapper has no test of its own.
+/// Support: Full. The file-level wrapper is tested with an intact log and with a log cut back
+/// past an anchored record.
 pub fn verify_file_anchored(
     path: impl AsRef<Path>,
     key: Option<&VerifyingKey>,
@@ -1336,5 +1355,156 @@ mod export_tests {
         );
         assert_eq!(verifying_key_from_hex("abcd"), None);
         assert_eq!(verifying_key_from_hex(&"zz".repeat(32)), None);
+    }
+}
+
+#[cfg(test)]
+mod key_and_anchor_tests {
+    use super::*;
+    use anchor::{FileAnchor, CODE_ANCHOR_MISMATCH, CODE_ANCHOR_WRITE};
+    use ed25519_dalek::SigningKey;
+    use keys::{ClosureKeySupplier, KeyStore, StoreKeySupplier, CODE_KEY_UNAVAILABLE};
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct MemoryStore(Mutex<BTreeMap<String, Vec<u8>>>);
+
+    impl KeyStore for MemoryStore {
+        fn get(&self, name: &str) -> Result<Option<Vec<u8>>, String> {
+            Ok(self.0.lock().unwrap().get(name).cloned())
+        }
+        fn set(&self, name: &str, secret: &[u8]) -> Result<(), String> {
+            self.0
+                .lock()
+                .unwrap()
+                .insert(name.to_string(), secret.to_vec());
+            Ok(())
+        }
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "tpt-audit-anchor-tests-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn entry(n: u64) -> Entry {
+        Entry {
+            wall_unix_ms: 1_700_000_000_000 + n,
+            mono_ns: n * 1000,
+            actor: "page".into(),
+            command: format!("cmd_{n}"),
+            capability: None,
+            params: json!({ "n": n }),
+            outcome: Outcome::Ok,
+            duration_us: 5,
+        }
+    }
+
+    const SEED: [u8; 32] = [11; 32];
+
+    fn closure_supplier() -> ClosureKeySupplier<impl Fn() -> Result<Option<Vec<u8>>, String>> {
+        ClosureKeySupplier::new("audit", || Ok(Some(SEED.to_vec())))
+    }
+
+    #[test]
+    fn a_closure_supplied_key_signs_a_log_that_verifies() {
+        let path = temp_dir("closure").join("audit.log");
+        let signing = Signing::from_supplier(&closure_supplier(), 2, 0).unwrap();
+        let mut log = AuditLog::open_signed(&path, Policy::default(), signing).unwrap();
+        for i in 0..5 {
+            log.append(&entry(i)).unwrap();
+        }
+        drop(log);
+        let public = SigningKey::from_bytes(&SEED).verifying_key();
+        let summary = verify_file_with_key(&path, &public).unwrap();
+        assert!(summary.checkpoints >= 2);
+    }
+
+    #[test]
+    fn a_keystore_entry_signs_a_log_that_verifies() {
+        let store = MemoryStore::default();
+        let public = keys::enroll_key(&store, "audit", &SEED).unwrap();
+        let path = temp_dir("store").join("audit.log");
+        let supplier = StoreKeySupplier::new(store, "audit");
+        let signing = Signing::from_supplier(&supplier, 2, 0).unwrap();
+        let mut log = AuditLog::open_signed(&path, Policy::default(), signing).unwrap();
+        for i in 0..4 {
+            log.append(&entry(i)).unwrap();
+        }
+        drop(log);
+        assert!(verify_file_with_key(&path, &public).is_ok());
+    }
+
+    #[test]
+    fn a_source_without_the_key_fails_closed_before_the_log_opens() {
+        let missing = ClosureKeySupplier::new("audit", || Ok(None));
+        let err = Signing::from_supplier(&missing, 2, 0).err().unwrap();
+        assert!(err.to_string().starts_with(CODE_KEY_UNAVAILABLE));
+
+        let broken = ClosureKeySupplier::new("audit", || Err("device locked".to_string()));
+        assert!(Signing::from_supplier(&broken, 2, 0).is_err());
+
+        let short = ClosureKeySupplier::new("audit", || Ok(Some(vec![1, 2, 3])));
+        assert!(Signing::from_supplier(&short, 2, 0).is_err());
+    }
+
+    #[test]
+    fn an_intact_anchored_log_verifies_and_a_truncated_one_does_not() {
+        let dir = temp_dir("anchored");
+        let path = dir.join("audit.log");
+        let anchor_path = temp_dir("anchor-volume").join("anchors.txt");
+        let signing = Signing::from_supplier(&closure_supplier(), 2, 0).unwrap();
+        let mut log = AuditLog::open_signed(&path, Policy::default(), signing).unwrap();
+        log.set_anchor(Box::new(FileAnchor::new(&anchor_path)));
+        for i in 0..6 {
+            log.append(&entry(i)).unwrap();
+        }
+        drop(log);
+        let public = SigningKey::from_bytes(&SEED).verifying_key();
+        let anchors = anchor::read_file_anchors(&anchor_path).unwrap();
+        assert!(!anchors.is_empty());
+        assert!(verify_file_anchored(&path, Some(&public), &anchors).is_ok());
+
+        // Cut the file back to just before the last anchored record. The shorter chain still
+        // verifies on its own; the anchor is what catches it.
+        let last = anchors.last().unwrap().seq;
+        let text = std::fs::read_to_string(&path).unwrap();
+        let kept: Vec<&str> = text.lines().take(last as usize).collect();
+        std::fs::write(&path, kept.join("\n") + "\n").unwrap();
+        assert!(verify_file_with_key(&path, &public).is_ok());
+        let err = verify_file_anchored(&path, Some(&public), &anchors).unwrap_err();
+        assert!(err.to_string().starts_with(CODE_ANCHOR_MISMATCH));
+    }
+
+    #[test]
+    fn a_failed_anchor_write_is_reported_with_its_code() {
+        let missing_dir = temp_dir("no-volume").join("absent").join("anchors.txt");
+        let mut anchor = FileAnchor::new(&missing_dir);
+        let point = AnchorPoint {
+            seq: 1,
+            hash: "0".repeat(64),
+            wall_unix_ms: 1,
+        };
+        let err = anchor.publish(&point).unwrap_err();
+        assert!(err.to_string().starts_with(CODE_ANCHOR_WRITE));
+
+        // The same failure reaches the caller of append, so a checkpoint whose anchor was not
+        // written is never reported as a success.
+        let dir = temp_dir("append-fail");
+        let signing = Signing::from_supplier(&closure_supplier(), 1, 0).unwrap();
+        let mut log =
+            AuditLog::open_signed(dir.join("audit.log"), Policy::default(), signing).unwrap();
+        log.set_anchor(Box::new(FileAnchor::new(&missing_dir)));
+        let err = log.append(&entry(0)).unwrap_err();
+        assert!(err.to_string().starts_with(CODE_ANCHOR_WRITE));
     }
 }
