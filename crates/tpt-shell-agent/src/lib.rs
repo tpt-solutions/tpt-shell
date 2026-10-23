@@ -52,7 +52,7 @@ use resources::ResourceProvider;
 use serde_json::{json, Value};
 use tpt_shell_ipc::contract::json_schema;
 use tpt_shell_ipc::rate_limit::{RateLimit, RateLimiter};
-use tpt_shell_ipc::schema::{validate, Schema};
+use tpt_shell_ipc::schema::{validate, Field, Schema};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
@@ -79,6 +79,80 @@ pub struct AgentTool {
     pub description: String,
     pub args: Schema,
     pub handler: ToolHandler,
+}
+
+/// Takes one snapshot of the page. The platform supplies it, and it must run on the thread that
+/// owns the window.
+///
+/// Support: Full.
+pub type SnapshotSource = Box<dyn FnMut() -> Result<page::Snapshot, String>>;
+
+/// The longest `wait_for` may block, in milliseconds.
+const WAIT_MAX_MS: i64 = 30_000;
+
+const WAIT_ARGS: &[Field] = &[
+    Field {
+        name: "role",
+        schema: Schema::Str {
+            max_len: 40,
+            chars: None,
+        },
+    },
+    Field {
+        name: "name",
+        schema: Schema::Optional(&Schema::Str {
+            max_len: 200,
+            chars: None,
+        }),
+    },
+    Field {
+        name: "timeout_ms",
+        schema: Schema::Optional(&Schema::Int {
+            min: 0,
+            max: WAIT_MAX_MS,
+        }),
+    },
+    Field {
+        name: "poll_ms",
+        schema: Schema::Optional(&Schema::Int { min: 10, max: 1000 }),
+    },
+];
+
+/// The `wait_for` tool: polls the page until an element with `role` (and `name`, when given)
+/// appears, and returns its reference. `timeout_ms` defaults to 5000 and is capped at 30000.
+///
+/// Support: Partial. The wait blocks the session for up to the timeout, so the session answers no
+/// other message meanwhile. The facade does not yet supply a snapshot source.
+pub fn wait_for_tool(mut take: SnapshotSource) -> AgentTool {
+    AgentTool {
+        command: "wait_for".into(),
+        description: "Waits until the page shows an element with this role and name, then returns its reference.".into(),
+        args: Schema::Struct(WAIT_ARGS),
+        handler: Box::new(move |args| {
+            let role = args.get("role").and_then(Value::as_str).unwrap_or("");
+            let name = args.get("name").and_then(Value::as_str).map(str::to_string);
+            let timeout_ms = args
+                .get("timeout_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(5_000)
+                .min(WAIT_MAX_MS.unsigned_abs());
+            let poll_ms = args.get("poll_ms").and_then(Value::as_u64).unwrap_or(100);
+            let want = page::Want {
+                role: role.to_string(),
+                name,
+            };
+            let started = Instant::now();
+            let node = page::wait_for(
+                &want,
+                Duration::from_millis(timeout_ms),
+                Duration::from_millis(poll_ms),
+                &mut || take(),
+                &mut || started.elapsed(),
+                &mut std::thread::sleep,
+            )?;
+            Ok(json!({ "ref": node.ref_id, "role": node.role, "name": node.name }))
+        }),
+    }
 }
 
 /// Asks the user before a sensitive action. The platform crates implement this with a native
@@ -166,6 +240,7 @@ pub struct Session {
     resources: Option<Box<dyn ResourceProvider>>,
     recorder: Option<Box<dyn Recorder>>,
     actor: String,
+    commands: Option<BTreeSet<String>>,
 }
 
 impl Session {
@@ -181,7 +256,22 @@ impl Session {
             resources: None,
             recorder: None,
             actor: "agent".into(),
+            commands: None,
         }
+    }
+
+    /// Offers only the named tools. A tool outside the list is neither listed nor callable, and a
+    /// call to it is refused as if it did not exist. Without this, every tool given to
+    /// [`Session::new`] is offered.
+    ///
+    /// Support: Full.
+    pub fn with_commands<I, S>(mut self, names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.commands = Some(names.into_iter().map(Into::into).collect());
+        self
     }
 
     /// Offers resources (the page tree, the audit tail) over `resources/list` and `resources/read`.
@@ -277,6 +367,7 @@ impl Session {
         }
         self.tools
             .iter()
+            .filter(|t| self.allows_name(&t.command))
             .map(|t| {
                 json!({
                     "name": t.command,
@@ -285,6 +376,11 @@ impl Session {
                 })
             })
             .collect()
+    }
+
+    /// Whether the session's command list, if it has one, names this tool.
+    fn allows_name(&self, name: &str) -> bool {
+        self.commands.as_ref().is_none_or(|c| c.contains(name))
     }
 
     fn resource_list(&self) -> Vec<Value> {
@@ -352,7 +448,11 @@ impl Session {
                 "{CODE_INVOKE}: typed commands are not allowed for this profile"
             ));
         }
-        let Some(index) = self.tools.iter().position(|t| t.command == name) else {
+        let Some(index) = self
+            .tools
+            .iter()
+            .position(|t| t.command == name && self.allows_name(name))
+        else {
             return refused("no such tool");
         };
         if !self.limiter.allow(now) {
@@ -361,17 +461,8 @@ impl Session {
         if let Err(e) = validate(&self.tools[index].args, args, "arguments") {
             return refused(&format!("invalid arguments: {e}"));
         }
-        for key in ["url", "route"] {
-            if let Some(value) = args.get(key) {
-                match value.as_str() {
-                    Some(url) if self.policy.routes.allows(url) => {}
-                    _ => {
-                        return refused(&format!(
-                            "{CODE_ROUTE}: the route is outside the allow-list"
-                        ))
-                    }
-                }
-            }
+        if let Some(reason) = self.route_violation(args) {
+            return refused(&reason);
         }
         if self.policy.confirm.contains(name) && !confirm(name, args) {
             return refused("the user declined");
@@ -387,6 +478,33 @@ impl Session {
                 tool_error(&mark_untrusted(&message)),
             ),
         }
+    }
+
+    /// The refusal for the first URL in the arguments that the route allow-list does not allow.
+    /// A `url` or `route` argument must be a listed URL. So must any string that is a URL, under
+    /// whatever name it has, and at any depth, so a tool cannot reach a URL through another key.
+    fn route_violation(&self, args: &Value) -> Option<String> {
+        let refuse = || Some(format!("{CODE_ROUTE}: the route is outside the allow-list"));
+        for key in ["url", "route"] {
+            if let Some(value) = args.get(key) {
+                match value.as_str() {
+                    Some(url) if self.policy.routes.allows(url) => {}
+                    _ => return refuse(),
+                }
+            }
+        }
+        let mut pending = vec![args];
+        while let Some(value) = pending.pop() {
+            match value {
+                Value::String(text) if looks_like_url(text) && !self.policy.routes.allows(text) => {
+                    return refuse();
+                }
+                Value::Array(items) => pending.extend(items.iter()),
+                Value::Object(fields) => pending.extend(fields.values()),
+                _ => {}
+            }
+        }
+        None
     }
 
     fn read_resource(&mut self, params: &Value, now: Duration) -> Result<Value, (i64, String)> {
@@ -466,6 +584,25 @@ impl Session {
 
 fn refused(reason: &str) -> (Outcome, Value) {
     (Outcome::Refused(reason.to_string()), tool_error(reason))
+}
+
+/// Whether a string is a URL a page could load: a scheme followed by `//`, or a scheme that
+/// carries its content inline or can run script. Leading whitespace is ignored, so it cannot hide
+/// a URL. Plain text such as `note: hello` is not a URL.
+fn looks_like_url(text: &str) -> bool {
+    let text = text.trim_start();
+    let Some((scheme, rest)) = text.split_once(':') else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    let scheme_ok = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'));
+    scheme_ok
+        && (rest.starts_with("//")
+            || matches!(
+                scheme.to_ascii_lowercase().as_str(),
+                "data" | "javascript" | "file" | "about" | "blob" | "mailto"
+            ))
 }
 
 fn tool_result(text: &str) -> Value {
@@ -979,6 +1116,222 @@ mod tests {
         );
         assert_eq!(later["result"]["isError"], true);
         assert_eq!(calls.get(), 1);
+    }
+
+    fn snapshot_with(nodes: &str) -> page::Snapshot {
+        page::parse_snapshot(&format!(
+            r#"{{"title":"t","path":"https://tpt-app.localhost/","truncated":false,"tree":[{nodes}]}}"#
+        ))
+        .unwrap()
+    }
+
+    const SAVE_BUTTON: &str =
+        r#"{"ref":7,"role":"button","name":"Save","bounds":{"x":0,"y":0,"w":1,"h":1}}"#;
+
+    fn wait_call(args: Value) -> String {
+        call_line(1, "wait_for", args)
+    }
+
+    #[test]
+    fn wait_for_returns_a_node_that_appears_on_a_later_poll() {
+        let polls = Rc::new(Cell::new(0));
+        let seen = polls.clone();
+        let source: SnapshotSource = Box::new(move || {
+            seen.set(seen.get() + 1);
+            Ok(snapshot_with(if seen.get() < 3 { "" } else { SAVE_BUTTON }))
+        });
+        let mut s = Session::new(vec![wait_for_tool(source)], Policy::default());
+        let reply = parse(
+            &s.handle_line(
+                &wait_call(json!({ "role": "button", "name": "Save", "poll_ms": 10 })),
+                Duration::ZERO,
+                &mut never_confirm,
+            )
+            .unwrap(),
+        );
+        assert_eq!(reply["result"]["isError"], false);
+        let text = reply["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("\"ref\":7") && text.contains("Save"),
+            "{text}"
+        );
+        assert_eq!(
+            polls.get(),
+            3,
+            "the page was polled until the node appeared"
+        );
+    }
+
+    #[test]
+    fn wait_for_gives_a_stable_error_when_the_node_never_appears() {
+        let source: SnapshotSource = Box::new(|| Ok(snapshot_with("")));
+        let mut s = Session::new(vec![wait_for_tool(source)], Policy::default());
+        let reply = parse(
+            &s.handle_line(
+                &wait_call(json!({ "role": "button", "timeout_ms": 30, "poll_ms": 10 })),
+                Duration::ZERO,
+                &mut never_confirm,
+            )
+            .unwrap(),
+        );
+        assert_eq!(reply["result"]["isError"], true);
+        let text = reply["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("timed out waiting for a button"), "{text}");
+        assert!(matches!(s.log[0].outcome, Outcome::Failed(_)));
+    }
+
+    #[test]
+    fn wait_for_refuses_a_poll_interval_below_its_schema_minimum() {
+        let source: SnapshotSource = Box::new(|| Ok(snapshot_with("")));
+        let mut s = Session::new(vec![wait_for_tool(source)], Policy::default());
+        let reply = parse(
+            &s.handle_line(
+                &wait_call(json!({ "role": "button", "poll_ms": 1 })),
+                Duration::ZERO,
+                &mut never_confirm,
+            )
+            .unwrap(),
+        );
+        assert_eq!(reply["result"]["isError"], true);
+        assert!(matches!(s.log[0].outcome, Outcome::Refused(_)));
+    }
+
+    #[test]
+    fn invoke_runs_only_listed_commands_and_asks_for_the_marked_ones() {
+        let calls = Rc::new(Cell::new(0));
+        let policy = Policy {
+            confirm: BTreeSet::from(["set_volume".to_string()]),
+            ..Policy::default()
+        };
+        let mut s = Session::new(
+            vec![
+                tool("set_volume", calls.clone()),
+                tool("reboot", calls.clone()),
+            ],
+            policy,
+        )
+        .with_commands(["set_volume"]);
+
+        // The list is what tools/list offers.
+        let listed = parse(
+            &s.handle_line(
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }).to_string(),
+                Duration::ZERO,
+                &mut never_confirm,
+            )
+            .unwrap(),
+        );
+        let names: Vec<&str> = listed["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["set_volume"]);
+
+        // An unlisted command is refused as if it did not exist, and never runs.
+        let denied = parse(
+            &s.handle_line(
+                &call_line(2, "reboot", json!({ "level": 1 })),
+                Duration::ZERO,
+                &mut never_confirm,
+            )
+            .unwrap(),
+        );
+        assert_eq!(denied["result"]["isError"], true);
+        assert_eq!(calls.get(), 0);
+
+        // A listed command that needs confirmation runs only when the user says yes.
+        let mut answers = vec![false, true].into_iter();
+        let mut ask = |_: &str, _: &Value| answers.next().unwrap();
+        let declined = parse(
+            &s.handle_line(
+                &call_line(3, "set_volume", json!({ "level": 1 })),
+                Duration::ZERO,
+                &mut ask,
+            )
+            .unwrap(),
+        );
+        assert_eq!(declined["result"]["isError"], true);
+        assert_eq!(calls.get(), 0);
+        let accepted = parse(
+            &s.handle_line(
+                &call_line(4, "set_volume", json!({ "level": 1 })),
+                Duration::ZERO,
+                &mut ask,
+            )
+            .unwrap(),
+        );
+        assert_eq!(accepted["result"]["isError"], false);
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn a_url_in_any_argument_must_be_on_the_route_allow_list() {
+        const TARGET: &[Field] = &[Field {
+            name: "target",
+            schema: Schema::Str {
+                max_len: 300,
+                chars: None,
+            },
+        }];
+        fn open_tool() -> AgentTool {
+            AgentTool {
+                command: "open".into(),
+                description: "opens a target".into(),
+                args: Schema::Struct(TARGET),
+                handler: Box::new(|args| Ok(json!({ "opened": args }))),
+            }
+        }
+        let policy = Policy {
+            routes: profile::RouteRules::new(vec!["https://tpt-app.localhost/*".into()]).unwrap(),
+            ..Policy::default()
+        };
+        let mut s = Session::new(vec![open_tool()], policy);
+        let mut open = |target: &str| {
+            let reply = parse(
+                &s.handle_line(
+                    &call_line(1, "open", json!({ "target": target })),
+                    Duration::ZERO,
+                    &mut never_confirm,
+                )
+                .unwrap(),
+            );
+            reply["result"]["isError"] == false
+        };
+
+        assert!(open("https://tpt-app.localhost/index.html"));
+        assert!(open("note: this is plain text"), "text is not a URL");
+        assert!(!open("https://evil.example/x"));
+        assert!(
+            !open("  https://evil.example/x"),
+            "leading space must not hide a URL"
+        );
+        assert!(!open("HTTPS://evil.example/x"));
+        assert!(!open("javascript:alert(1)"));
+        assert!(!open("data:text/html,hi"));
+    }
+
+    #[test]
+    fn a_url_nested_in_an_object_or_list_is_checked_too() {
+        let policy = Policy {
+            routes: profile::RouteRules::new(vec!["https://tpt-app.localhost/*".into()]).unwrap(),
+            ..Policy::default()
+        };
+        assert!(route_violation_of(
+            &policy,
+            &json!({ "a": [ { "b": "https://evil.example" } ] })
+        ));
+        assert!(!route_violation_of(
+            &policy,
+            &json!({ "a": [ { "b": "https://tpt-app.localhost/x" } ] })
+        ));
+    }
+
+    fn route_violation_of(policy: &Policy, args: &Value) -> bool {
+        Session::new(Vec::new(), policy.clone())
+            .route_violation(args)
+            .is_some()
     }
 
     #[test]
