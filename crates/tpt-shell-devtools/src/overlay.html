@@ -109,6 +109,12 @@
       color: var(--tpt-dt-fg);
     }
     .empty { color: var(--tpt-dt-muted); padding: 12px 0; }
+    .timeline-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .timeline-controls input[type="range"] { flex: 1 1 240px; }
+    .timeline-events { list-style: none; margin: 8px 0 0; padding: 0; max-height: 240px; overflow: auto; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+    .timeline-events li { padding: 2px 6px; }
+    .timeline-events li.current { background: var(--tpt-dt-row, rgba(127, 127, 127, 0.18)); font-weight: 600; }
+    .timeline-events li.divergent { color: var(--tpt-dt-warn, #b45309); }
     @media (max-width: 640px) {
       .explorer { grid-template-columns: 1fr; }
       th, td { padding: 4px 4px; }
@@ -128,6 +134,7 @@
     <button role="tab" type="button" data-panel="audit" aria-selected="false">Audit tail</button>
     <button role="tab" type="button" data-panel="contract" aria-selected="false">Contract</button>
     <button role="tab" type="button" data-panel="engine" aria-selected="false">Engine</button>
+    <button role="tab" type="button" data-panel="timeline" aria-selected="false">Timeline</button>
   </nav>
   <main id="panels">
     <section id="ipc" data-panel="ipc"></section>
@@ -136,6 +143,7 @@
     <section id="audit" data-panel="audit" hidden></section>
     <section id="contract" data-panel="contract" hidden></section>
     <section id="engine" data-panel="engine" hidden></section>
+    <section id="timeline" data-panel="timeline" hidden></section>
   </main>
   <script type="application/json" id="tpt-devtools-data">__TPT_DEVTOOLS_DATA__</script>
   <script>
@@ -367,6 +375,91 @@
         return out;
       }
 
+      // The cursor belongs to the host. The page asks for a position through
+      // window.tptDevtools.onSeek and shows whatever the host sends back in the next update.
+      function seek(position) {
+        var tl = data.timeline;
+        if (!tl) return;
+        var target = Math.max(0, Math.min(tl.len, position));
+        var hook = window.tptDevtools && window.tptDevtools.onSeek;
+        if (typeof hook === "function") hook(target);
+      }
+
+      function renderTimeline() {
+        var panel = document.getElementById("timeline");
+        panel.textContent = "";
+        var tl = data.timeline;
+        if (!tl) {
+          empty(panel, "No recording is loaded. Record a run with the replay recorder to step through it here.");
+          return;
+        }
+        var seekable = window.tptDevtools && typeof window.tptDevtools.onSeek === "function";
+
+        var controls = el("div", "", "timeline-controls");
+        var back = el("button", "Back");
+        back.type = "button";
+        back.disabled = !seekable || tl.position === 0;
+        back.addEventListener("click", function () { seek(tl.position - 1); });
+        var scrub = document.createElement("input");
+        scrub.type = "range";
+        scrub.min = "0";
+        scrub.max = String(tl.len);
+        scrub.value = String(tl.position);
+        scrub.disabled = !seekable;
+        scrub.setAttribute("aria-label", "Recording position");
+        scrub.addEventListener("change", function () { seek(Number(scrub.value)); });
+        var forward = el("button", "Forward");
+        forward.type = "button";
+        forward.disabled = !seekable || tl.position === tl.len;
+        forward.addEventListener("click", function () { seek(tl.position + 1); });
+        controls.appendChild(back);
+        controls.appendChild(scrub);
+        controls.appendChild(forward);
+        controls.appendChild(el("span", "event " + tl.position + " of " + tl.len + ", at " + tl.tNs + " ns", "muted"));
+        if (tl.divergence !== null && tl.divergence !== undefined) {
+          var jump = el("button", "Jump to divergence (event " + tl.divergence + ")");
+          jump.type = "button";
+          jump.disabled = !seekable;
+          jump.addEventListener("click", function () { seek(tl.divergence); });
+          controls.appendChild(jump);
+        }
+        panel.appendChild(controls);
+        if (!seekable) {
+          panel.appendChild(el("p", "The host has not connected seeking, so the position is read-only.", "empty"));
+        }
+
+        panel.appendChild(el("h2", "IPC state at the cursor"));
+        var calls = tl.ipc || [];
+        if (calls.length === 0) {
+          empty(panel, "No IPC calls before this point.");
+        } else {
+          var rows = calls.map(function (c) {
+            var detail = c.state === "failed" ? (c.code + ": " + c.message)
+              : c.state === "ok" ? JSON.stringify(c.data) : "";
+            return [c.command, c.state, c.durationNs === null ? "" : micros(Math.round(c.durationNs / 1000)), detail];
+          });
+          panel.appendChild(table(["Command", "State", "Duration", "Detail"], rows, [2]));
+        }
+
+        panel.appendChild(el("h2", "Events"));
+        var list = el("ol", "", "timeline-events");
+        var shown = tl.events || [];
+        shown.forEach(function (e) {
+          var item = el("li", "#" + e.index + "  " + e.tNs + " ns  " + e.label);
+          if (e.index === tl.position - 1) item.className = "current";
+          if (e.index === tl.divergence) item.classList.add("divergent");
+          item.addEventListener("click", function () { seek(e.index + 1); });
+          list.appendChild(item);
+        });
+        if (shown.length === 0) {
+          empty(panel, "The recording has no events.");
+        } else {
+          panel.appendChild(list);
+        }
+        var current = list.querySelector("li.current");
+        if (current && typeof current.scrollIntoView === "function") current.scrollIntoView({ block: "nearest" });
+      }
+
       function renderAll() {
         var engine = data.engine || {};
         document.getElementById("engine-line").textContent =
@@ -378,6 +471,7 @@
         renderAudit();
         renderContract();
         renderEngine();
+        renderTimeline();
       }
 
       function select(name) {
@@ -408,6 +502,8 @@
       window.tptDevtools = {
         show: function () { setVisible(true); },
         hide: function () { setVisible(false); },
+        // The host sets this to move the timeline cursor: it is called with the position wanted.
+        onSeek: null,
         // The host calls this with a new snapshot (as produced by Snapshot::to_json) to refresh.
         update: function (next) {
           data = next;

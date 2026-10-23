@@ -16,6 +16,7 @@ categories = ["development-tools::debugging"]
 
 [dependencies]
 serde_json = "1"
+tpt-shell-replay = { path = "../tpt-shell-replay", version = "0.0.0" }
 
 [features]
 # The overlay page and its HTML. On by default for this crate; the facade turns it off with

@@ -23,6 +23,12 @@
 
 #![forbid(unsafe_code)]
 
+/// The time-travel view of a recording: the cursor, the IPC state at it, and the first divergence.
+/// The overlay's timeline panel reads its JSON under `timeline` in the snapshot.
+///
+/// Support: Full.
+pub mod timeline;
+
 /// The overlay page. The placeholder is replaced by the snapshot as JSON. Built only with the
 /// `overlay` feature, so a build without it has no overlay page in its binary.
 #[cfg(feature = "overlay")]
@@ -351,6 +357,15 @@ mod tests {
         let html = page(&Snapshot::collect(&Fake));
         assert!(html.contains("window.tptDevtools = {"));
         assert!(html.contains("update: function (next)"));
+    }
+
+    #[cfg(feature = "overlay")]
+    #[test]
+    fn the_page_has_a_timeline_panel_and_a_seek_hook_for_the_host() {
+        let html = page(&Snapshot::collect(&Fake));
+        assert!(html.contains("data-panel=\"timeline\""));
+        assert!(html.contains("function renderTimeline()"));
+        assert!(html.contains("onSeek: null"));
     }
 
     #[test]
