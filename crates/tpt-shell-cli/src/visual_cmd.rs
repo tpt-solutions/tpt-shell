@@ -10,7 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use tpt_shell_test::screens::{self, Job};
+use tpt_shell_test::screens::{self, Entry, Job, Outcome};
 use tpt_shell_test::visual::Comparison;
 
 const USAGE: &str = "usage: tpt-shell visual compare <baseline-dir> <dir> [dir...]
@@ -119,6 +119,9 @@ pub fn compare(args: &[&str]) -> Result<ExitCode, String> {
     fs::write(&parsed.out, html)
         .map_err(|e| format!("cannot write {}: {e}", parsed.out.display()))?;
 
+    for entry in &summary.entries {
+        println!("{}", row_line(entry));
+    }
     let failed = summary.failed();
     println!(
         "{} comparison(s) against baseline {}: {failed} failed",
@@ -126,11 +129,27 @@ pub fn compare(args: &[&str]) -> Result<ExitCode, String> {
         summary.baseline
     );
     println!("report: {}", parsed.out.display());
-    Ok(if failed == 0 {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(1)
-    })
+    Ok(ExitCode::from(summary.exit_code() as u8))
+}
+
+/// One line for a row of the summary: PASS or FAIL, the job, the screenshot name, and either the
+/// share of compared pixels that changed or the reason the row could not be compared.
+///
+/// Support: Full.
+fn row_line(entry: &Entry) -> String {
+    let status = if entry.failed() { "FAIL" } else { "PASS" };
+    let detail = match &entry.outcome {
+        Outcome::Compared(report) => {
+            let share = if report.compared == 0 {
+                0.0
+            } else {
+                report.changed as f64 / report.compared as f64
+            };
+            format!("{share:.4} of compared pixels changed")
+        }
+        Outcome::Missing(reason) | Outcome::Failed(reason) => reason.clone(),
+    };
+    format!("{status} {} {}: {detail}", entry.job, entry.name)
 }
 
 #[cfg(test)]
@@ -213,6 +232,50 @@ mod tests {
         .unwrap();
         assert_eq!(fail, ExitCode::from(1));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn each_row_says_pass_or_fail_with_its_job_and_name() {
+        let row = |outcome| Entry {
+            name: "home.png".into(),
+            job: "win".into(),
+            outcome,
+        };
+        let report = |changed, passed| {
+            Outcome::Compared(tpt_shell_test::visual::Report {
+                compared: 200,
+                changed,
+                max_distance: 0.5,
+                passed,
+            })
+        };
+        assert_eq!(
+            row_line(&row(report(1, true))),
+            "PASS win home.png: 0.0050 of compared pixels changed"
+        );
+        assert!(row_line(&row(report(50, false))).starts_with("FAIL win home.png:"));
+        assert_eq!(
+            row_line(&row(Outcome::Missing("not in the baseline".into()))),
+            "FAIL win home.png: not in the baseline"
+        );
+    }
+
+    #[test]
+    fn a_row_with_no_compared_pixels_reports_zero_not_nan() {
+        let entry = Entry {
+            name: "blank.png".into(),
+            job: "mac".into(),
+            outcome: Outcome::Compared(tpt_shell_test::visual::Report {
+                compared: 0,
+                changed: 0,
+                max_distance: 0.0,
+                passed: true,
+            }),
+        };
+        assert_eq!(
+            row_line(&entry),
+            "PASS mac blank.png: 0.0000 of compared pixels changed"
+        );
     }
 
     #[test]

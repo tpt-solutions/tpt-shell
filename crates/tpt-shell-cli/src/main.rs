@@ -139,8 +139,12 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["init", dir, "--tpt-shell", checkout] => {
             init(Path::new(dir), Some(Path::new(checkout))).map(|()| ExitCode::SUCCESS)
         }
-        ["run"] => run_project(Path::new(".")),
-        ["run", dir] => run_project(Path::new(dir)),
+        ["run"] => run_project(Path::new("."), false),
+        ["run", "--devtools"] => run_project(Path::new("."), true),
+        ["run", "--devtools", dir] | ["run", dir, "--devtools"] => {
+            run_project(Path::new(dir), true)
+        }
+        ["run", dir] => run_project(Path::new(dir), false),
         ["doctor"] => Ok(doctor(false)),
         ["doctor", "--fix"] => Ok(doctor(true)),
         ["build"] => build(Path::new(".")),
@@ -1030,6 +1034,25 @@ mod doctor_tests {
         // The exit code depends on the machine; the point is that every check completes.
         let _ = doctor(false);
     }
+
+    #[test]
+    fn run_passes_the_devtools_feature_only_when_asked() {
+        assert_eq!(run_cargo_args(false), vec!["run"]);
+        assert_eq!(
+            run_cargo_args(true),
+            vec!["run", "--features", "tpt-shell/devtools"]
+        );
+    }
+
+    #[test]
+    fn run_accepts_the_devtools_flag_before_or_after_the_folder() {
+        // A missing folder is an error from run_project, so these only check the arguments
+        // reach it, not that the app launches.
+        let before = run(&["run", "--devtools", "no-such-app"]);
+        let after = run(&["run", "no-such-app", "--devtools"]);
+        assert!(before.unwrap_err().contains("has no Cargo.toml"));
+        assert!(after.unwrap_err().contains("has no Cargo.toml"));
+    }
 }
 
 /// Writes the SBOMs, the attestation, `licenses.html` and `THIRD_PARTY_NOTICES` for the application
@@ -1425,7 +1448,20 @@ fn insert_dependency(cargo: &str, line: &str) -> String {
 }
 
 /// Builds and runs the project in `dir` with `cargo run`.
-fn run_project(dir: &Path) -> Result<ExitCode, String> {
+/// The arguments `tpt-shell run` passes to cargo. With `devtools`, the app is built with the
+/// devtools feature of its tpt-shell dependency, so the overlay is in the build. Without it the
+/// arguments are plain `run`, as before.
+///
+/// Support: Full.
+fn run_cargo_args(devtools: bool) -> Vec<&'static str> {
+    let mut args = vec!["run"];
+    if devtools {
+        args.extend(["--features", "tpt-shell/devtools"]);
+    }
+    args
+}
+
+fn run_project(dir: &Path, devtools: bool) -> Result<ExitCode, String> {
     if !dir.join("Cargo.toml").is_file() {
         return Err(format!(
             "{} has no Cargo.toml; run `tpt-shell run` in the app's Rust project",
@@ -1433,7 +1469,7 @@ fn run_project(dir: &Path) -> Result<ExitCode, String> {
         ));
     }
     let status = std::process::Command::new("cargo")
-        .arg("run")
+        .args(run_cargo_args(devtools))
         .current_dir(dir)
         .status()
         .map_err(|e| format!("cannot run cargo: {e}"))?;
@@ -1560,7 +1596,7 @@ mod rust_template_tests {
     fn run_refuses_a_folder_without_a_project() {
         let root = std::env::temp_dir().join(format!("tpt-cli-run-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
-        assert!(run_project(&root).is_err());
+        assert!(run_project(&root, false).is_err());
         let _ = fs::remove_dir_all(&root);
     }
 

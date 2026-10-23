@@ -207,12 +207,11 @@ pub fn docs(args: &[&str]) -> Result<ExitCode, String> {
     run_script("tools/docs-offline.sh", &script_args)
 }
 
-/// The optional tools `doctor` looks for: the program name, and what it is needed for.
-const OPTIONAL_TOOLS: [(&str, &str); 7] = [
-    ("signtool", "to sign Windows builds"),
+/// The optional tools `doctor` looks for: the program name, and what it is needed for. The
+/// signing tools are in `signing_tool_lines`, which takes its lookup as a parameter.
+const OPTIONAL_TOOLS: [(&str, &str); 5] = [
     ("codesign", "to sign macOS builds"),
     ("notarytool", "to notarise macOS builds"),
-    ("minisign", "to sign release archives"),
     ("ISCC", "to build the Windows installer (Inno Setup)"),
     ("nfpm", "to build .deb and .rpm packages"),
     ("appimagetool", "to build the Linux AppImage"),
@@ -273,6 +272,40 @@ pub fn version_at_least(actual: &str, minimum: &str) -> bool {
     true
 }
 
+/// The lines `doctor` prints for the signing tools that the sign step needs. `signtool` is needed
+/// only on Windows; `minisign` is needed on every platform. Each missing tool carries a fix hint.
+/// `found` answers whether a program is available, so tests can give their own answers.
+///
+/// Support: Full. Detection is tested with an injected lookup; the real lookup is `on_path`.
+pub fn signing_tool_lines(os: &str, found: impl Fn(&str) -> bool) -> Vec<String> {
+    let mut lines = Vec::new();
+    if os == "windows" {
+        lines.push(tool_line(
+            &found,
+            "signtool",
+            "to sign Windows builds",
+            "install the Windows SDK and add its bin folder to PATH",
+        ));
+    }
+    lines.push(tool_line(
+        &found,
+        "minisign",
+        "to sign release archives",
+        "install it from https://jedisct1.github.io/minisign/ and open a new terminal",
+    ));
+    lines
+}
+
+/// One line for an optional tool: its name and whether it was found, with the purpose and a fix
+/// hint when it was not.
+fn tool_line(found: &impl Fn(&str) -> bool, tool: &str, purpose: &str, hint: &str) -> String {
+    if found(tool) {
+        format!("{tool}: found")
+    } else {
+        format!("{tool}: not found (optional, {purpose}; fix: {hint})")
+    }
+}
+
 /// The lines `doctor` prints for the packaging tools and the platform minimums. Never a failure.
 ///
 /// Support: Full.
@@ -285,6 +318,7 @@ pub fn doctor_lines() -> Vec<String> {
             lines.push(format!("{tool}: not found (optional, {purpose})"));
         }
     }
+    lines.extend(signing_tool_lines(std::env::consts::OS, on_path));
     let Some(config) = find_repo_file("packaging/config.env") else {
         lines.push("platform minimums: packaging/config.env not found, not checked".into());
         return lines;
@@ -346,6 +380,32 @@ fn webkitgtk_line(minimum: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signtool_is_checked_only_on_windows() {
+        let none = |_: &str| false;
+        let windows = signing_tool_lines("windows", none);
+        assert_eq!(windows.len(), 2);
+        assert!(windows[0].starts_with("signtool: not found"));
+        assert!(windows[0].contains("Windows SDK"));
+        let linux = signing_tool_lines("linux", none);
+        assert_eq!(linux.len(), 1);
+        assert!(linux[0].starts_with("minisign: not found"));
+    }
+
+    #[test]
+    fn a_found_tool_has_no_fix_hint() {
+        let only_minisign = |t: &str| t == "minisign";
+        let lines = signing_tool_lines("linux", only_minisign);
+        assert_eq!(lines, vec!["minisign: found".to_string()]);
+    }
+
+    #[test]
+    fn a_missing_tool_names_its_fix_and_is_not_a_failure() {
+        let lines = signing_tool_lines("linux", |_| false);
+        assert!(lines[0].contains("jedisct1.github.io/minisign"));
+        assert!(lines.iter().all(|l| !l.contains("fail")));
+    }
 
     #[test]
     fn runtime_usage_errors_are_refused() {
