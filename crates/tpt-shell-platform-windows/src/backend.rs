@@ -42,7 +42,9 @@ use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::HiDpi::{
     GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    EnableWindow, GetKeyState, VK_CONTROL, VK_SHIFT,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetMessageW,
     GetWindowLongPtrW, GetWindowPlacement, KillTimer, PeekMessageW, PostMessageW, PostQuitMessage,
@@ -1491,9 +1493,10 @@ pub struct PageRestrictions {
     /// Stops selecting text in the page. Text fields still take typing and selection.
     pub text_selection: bool,
     pub drag_drop: bool,
-    /// Turns off the browser accelerator keys, which include Ctrl+P (print).
+    /// Blocks Ctrl+P (print), Ctrl+S, Ctrl+O and Ctrl+F before the page sees them, and turns off
+    /// the browser accelerator keys.
     pub print_shortcuts: bool,
-    /// Turns off the browser accelerator keys, which include F1 to F12 and their chords.
+    /// Blocks F1 to F12 before the page sees them, and turns off the browser accelerator keys.
     pub function_keys: bool,
     pub swipe_gestures: bool,
 }
@@ -1537,7 +1540,127 @@ fn apply_restrictions(
             .set_allow_external_drop(false)
             .map_err(|hr| hr_error("put_AllowExternalDrop", hr))?;
     }
+    if restrictions.print_shortcuts || restrictions.function_keys || restrictions.devtools {
+        let blocked = *restrictions;
+        controller
+            .on_accelerator_key_pressed(move |virtual_key| {
+                key_is_blocked(
+                    &blocked,
+                    virtual_key,
+                    modifier_down(VK_CONTROL),
+                    modifier_down(VK_SHIFT),
+                )
+            })
+            .map_err(|hr| hr_error("add_AcceleratorKeyPressed", hr))?;
+    }
     Ok(())
+}
+
+/// Whether a key is down, read from the thread's keyboard state. The high bit of `GetKeyState` is
+/// set while the key is down.
+fn modifier_down(key: u16) -> bool {
+    // SAFETY: GetKeyState takes a virtual-key code and has no other preconditions.
+    unsafe { GetKeyState(i32::from(key)) < 0 }
+}
+
+/// Whether a kiosk restriction blocks a key press. Function keys are checked first, then the
+/// Ctrl chords. Ctrl+Shift+I and F12 open the developer tools; Ctrl+U shows the page source.
+fn key_is_blocked(
+    restrictions: &PageRestrictions,
+    virtual_key: u32,
+    ctrl: bool,
+    shift: bool,
+) -> bool {
+    const F1: u32 = 0x70;
+    const F12: u32 = 0x7B;
+    const P: u32 = 0x50;
+    const S: u32 = 0x53;
+    const O: u32 = 0x4F;
+    const F: u32 = 0x46;
+    const I: u32 = 0x49;
+    const U: u32 = 0x55;
+    if restrictions.function_keys && (F1..=F12).contains(&virtual_key) {
+        return true;
+    }
+    if restrictions.devtools && virtual_key == F12 {
+        return true;
+    }
+    if !ctrl {
+        return false;
+    }
+    match virtual_key {
+        P | S | O | F => restrictions.print_shortcuts,
+        I if shift => restrictions.devtools,
+        U => restrictions.devtools,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod key_policy_tests {
+    use super::*;
+
+    const F1: u32 = 0x70;
+    const F12: u32 = 0x7B;
+    const P: u32 = 0x50;
+    const I: u32 = 0x49;
+    const U: u32 = 0x55;
+    const A: u32 = 0x41;
+
+    fn function_keys() -> PageRestrictions {
+        PageRestrictions {
+            function_keys: true,
+            ..PageRestrictions::default()
+        }
+    }
+
+    #[test]
+    fn function_keys_are_blocked_only_when_the_restriction_is_on() {
+        for key in F1..=F12 {
+            assert!(
+                key_is_blocked(&function_keys(), key, false, false),
+                "F key {key:#x}"
+            );
+            assert!(!key_is_blocked(
+                &PageRestrictions::default(),
+                key,
+                false,
+                false
+            ));
+        }
+        assert!(!key_is_blocked(&function_keys(), F1 - 1, false, false));
+        assert!(!key_is_blocked(&function_keys(), F12 + 1, false, false));
+    }
+
+    #[test]
+    fn ctrl_p_is_blocked_by_print_shortcuts_and_needs_ctrl() {
+        let print = PageRestrictions {
+            print_shortcuts: true,
+            ..PageRestrictions::default()
+        };
+        assert!(key_is_blocked(&print, P, true, false));
+        assert!(!key_is_blocked(&print, P, false, false));
+        assert!(!key_is_blocked(&print, A, true, false));
+    }
+
+    #[test]
+    fn devtools_and_source_chords_follow_the_devtools_restriction() {
+        let devtools = PageRestrictions {
+            devtools: true,
+            ..PageRestrictions::default()
+        };
+        assert!(key_is_blocked(&devtools, I, true, true), "Ctrl+Shift+I");
+        assert!(
+            !key_is_blocked(&devtools, I, true, false),
+            "Ctrl+I alone is not devtools"
+        );
+        assert!(
+            key_is_blocked(&devtools, U, true, false),
+            "Ctrl+U view source"
+        );
+        assert!(key_is_blocked(&devtools, F12, false, false), "F12");
+        assert!(!key_is_blocked(&PageRestrictions::default(), I, true, true));
+    }
 }
 
 /// Turns off text selection in the page, except in text fields. It runs before the page's own

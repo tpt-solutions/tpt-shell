@@ -73,6 +73,15 @@ pub const IID_WEB_MESSAGE_RECEIVED_HANDLER: Guid = Guid {
     data3: 0x49fa,
     data4: [0x8e, 0x07, 0x89, 0x8e, 0xa0, 0x1e, 0xcb, 0xd2],
 };
+/// `ICoreWebView2AcceleratorKeyPressedEventHandler` (WebView2.h: IID_ICoreWebView2AcceleratorKeyPressedEventHandler).
+///
+/// Support: Full. The value is copied from WebView2.h.
+pub const IID_ACCELERATOR_KEY_HANDLER: Guid = Guid {
+    data1: 0xb29c7e28,
+    data2: 0xfa79,
+    data3: 0x41a8,
+    data4: [0x8e, 0x44, 0x65, 0x81, 0x1c, 0x76, 0xdc, 0xb2],
+};
 /// `ICoreWebView2Controller2`: the controller's background colour.
 const IID_CONTROLLER2: Guid = Guid {
     data1: 0xc979_903e,
@@ -185,7 +194,12 @@ struct ControllerVtbl {
     put_is_visible: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
     _before_bounds: [usize; 1],
     put_bounds: unsafe extern "system" fn(*mut c_void, RECT) -> HRESULT,
-    _before_close: [usize; 17],
+    // Slots 7 to 18 (zoom, focus) are not called. add_AcceleratorKeyPressed is slot 19.
+    _before_accelerator: [usize; 12],
+    add_accelerator_key_pressed:
+        unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
+    // Slots 20 to 23 are the remove and parent-window calls, which are not used.
+    _before_close: [usize; 4],
     close: unsafe extern "system" fn(*mut c_void) -> HRESULT,
     get_core_webview2: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
 }
@@ -361,6 +375,17 @@ struct WebResourceRequestVtbl {
 struct ProcessFailedArgsVtbl {
     base: IUnknownVtbl,
     get_process_failed_kind: unsafe extern "system" fn(*mut c_void, *mut i32) -> HRESULT,
+}
+
+/// `ICoreWebView2AcceleratorKeyPressedEventArgs`: get_KeyEventKind = 3, get_VirtualKey = 4,
+/// put_Handled = 8. The getters between them are not used.
+#[repr(C)]
+struct AcceleratorArgsVtbl {
+    base: IUnknownVtbl,
+    _get_key_event_kind: usize,
+    get_virtual_key: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
+    _before_handled: [usize; 3],
+    put_handled: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
 }
 
 /// `ICoreWebView2NavigationStartingEventArgs`: get_Uri = 0, put_Cancel = 5.
@@ -812,6 +837,43 @@ fn check(hr: HRESULT) -> Result<(), HRESULT> {
 }
 
 impl Controller {
+    /// Calls `f` with the virtual key of each accelerator key press, before WebView2 handles it.
+    /// When `f` returns true the press is marked handled, so WebView2 does not act on it.
+    ///
+    /// Support: Partial. The event and its `Handled` flag follow WebView2's documented contract,
+    /// and the slots are checked against WebView2.h. Whether a handled key is withheld from the
+    /// page is not verified on a screen.
+    pub fn on_accelerator_key_pressed(
+        &self,
+        mut f: impl FnMut(u32) -> bool + 'static,
+    ) -> Result<(), HRESULT> {
+        let handler = new_event_handler(IID_ACCELERATOR_KEY_HANDLER, move |_sender, args| {
+            // SAFETY: `args` is valid for the callback; the wrapper takes its own reference.
+            let Some(args) = (unsafe { ComPtr::from_borrowed(args) }) else {
+                return;
+            };
+            let vt: &AcceleratorArgsVtbl = args.vtbl();
+            let mut virtual_key: u32 = 0;
+            // SAFETY: `virtual_key` is a valid out-pointer for a UINT.
+            let hr = unsafe { (vt.get_virtual_key)(args.as_ptr(), &mut virtual_key) };
+            if hr >= 0 && f(virtual_key) {
+                // SAFETY: `args` is live for the call. 1 is TRUE.
+                unsafe { (vt.put_handled)(args.as_ptr(), 1) };
+            }
+        });
+        let mut token = 0i64;
+        let vt: &ControllerVtbl = self.0.vtbl();
+        // SAFETY: `handler` is live for the call; `token` is a valid out-pointer.
+        let hr = unsafe { (vt.add_accelerator_key_pressed)(self.0.as_ptr(), handler, &mut token) };
+        // SAFETY: we release our reference. The controller keeps its own.
+        unsafe { release(handler) };
+        if hr < 0 {
+            Err(hr)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Shows or hides the webview. A webview whose controller is not visible draws nothing, so
     /// the window stays blank.
     pub fn set_visible(&self, visible: bool) -> Result<(), HRESULT> {
@@ -1262,7 +1324,7 @@ mod header_tests {
     use std::path::PathBuf;
 
     /// (interface, header index, method name) for every slot we call.
-    const USED_SLOTS: [(&str, usize, &str); 44] = [
+    const USED_SLOTS: [(&str, usize, &str); 47] = [
         (
             "ICoreWebView2Environment",
             0,
@@ -1270,7 +1332,18 @@ mod header_tests {
         ),
         ("ICoreWebView2Environment", 1, "CreateWebResourceResponse"),
         ("ICoreWebView2Controller", 3, "put_Bounds"),
+        ("ICoreWebView2Controller", 16, "add_AcceleratorKeyPressed"),
         ("ICoreWebView2Controller", 21, "Close"),
+        (
+            "ICoreWebView2AcceleratorKeyPressedEventArgs",
+            1,
+            "get_VirtualKey",
+        ),
+        (
+            "ICoreWebView2AcceleratorKeyPressedEventArgs",
+            5,
+            "put_Handled",
+        ),
         ("ICoreWebView2Controller", 22, "get_CoreWebView2"),
         ("ICoreWebView2", 0, "get_Settings"),
         ("ICoreWebView2", 1, "get_Source"),
