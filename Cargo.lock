@@ -851,6 +851,7 @@ dependencies = [
  "tpt-shell-manifest",
  "tpt-shell-platform-windows",
  "tpt-shell-profiles",
+ "tpt-shell-replay",
 ]
 
 [[package]]
@@ -1009,6 +1010,7 @@ dependencies = [
  "tpt-shell-ipc",
  "tpt-shell-macros",
  "tpt-shell-profiles",
+ "tpt-shell-test",
  "windows-sys",
 ]
 
