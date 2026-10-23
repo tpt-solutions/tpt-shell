@@ -10,14 +10,16 @@
 //!   crate never reaches into the runtime itself.
 //! - [`Snapshot`] is a plain, owned copy of that state. [`page`] turns it into one HTML file with
 //!   no external resources, which the app opens in a window.
-//! - The page shows the data it was given. Live refresh is a call from the host into the page;
-//!   the host side is not wired yet (todo.md, M3 Devtools overlay).
+//! - The page shows the data it was given. The host refreshes it by calling
+//!   `window.tptDevtools.update` with a new snapshot (`Snapshot::to_json`) each time the overlay
+//!   is shown. The facade does this in `crates/tpt-shell/src/devtools.rs`.
 //! - [`enabled`] is `true` only in debug builds. A release build gets `None` from [`page_if_enabled`]
 //!   and never opens the overlay.
 //!
-//! Support: Full for the snapshot, the audit-line reader and the page. Partial for the live
-//! refresh path (the host call is not wired). Nothing here opens a socket or sends data
-//! anywhere; the page calls only `window.tpt.invoke` when a developer presses Call.
+//! Support: Full for the snapshot, the audit-line reader and the page, in debug builds on
+//! Windows. Partial: the jobs panel stays empty in the facade (it runs no jobs), and the engine
+//! version is not reported. Nothing here opens a socket or sends data anywhere; the page calls
+//! only `window.tpt.invoke` when a developer presses Call.
 
 #![forbid(unsafe_code)]
 
@@ -303,6 +305,35 @@ mod tests {
             "data added a close tag"
         );
         assert!(html.contains("<\\/script>"));
+    }
+
+    #[test]
+    fn the_page_has_all_six_panels_and_a_call_button() {
+        let html = page(&Snapshot::collect(&Fake));
+        for panel in ["ipc", "jobs", "caps", "audit", "contract", "engine"] {
+            assert!(
+                html.contains(&format!("data-panel=\"{panel}\"")),
+                "missing panel {panel}"
+            );
+        }
+        assert!(html.contains("el(\"button\", \"Call\""));
+        assert!(html.contains("window.tpt.invoke(name, parsed)"));
+    }
+
+    #[test]
+    fn the_explorer_fills_arguments_from_the_schema_properties() {
+        // The contract writes a command's arguments as a JSON Schema struct, with the fields
+        // under `properties`. The explorer's sample must read that shape.
+        let html = page(&Snapshot::collect(&Fake));
+        assert!(html.contains("schema.properties"));
+        assert!(!html.contains("schema.fields"));
+    }
+
+    #[test]
+    fn the_page_refresh_hook_is_exposed_for_the_host() {
+        let html = page(&Snapshot::collect(&Fake));
+        assert!(html.contains("window.tptDevtools = {"));
+        assert!(html.contains("update: function (next)"));
     }
 
     #[test]

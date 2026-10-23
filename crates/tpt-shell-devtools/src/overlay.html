@@ -357,17 +357,14 @@
         panel.appendChild(layout);
       }
 
-      // A starting value for the arguments, built from the schema's field names. Only the shape
-      // is used; the developer edits the values.
+      // A starting value for the arguments, built from the JSON Schema's property names (the
+      // contract writes each command's arguments as a struct schema). Only the shape is used;
+      // the developer edits the values.
       function sampleFor(schema) {
-        if (!schema || typeof schema !== "object") return {};
-        var fields = schema.fields || schema.struct || null;
-        if (Array.isArray(fields)) {
-          var out = {};
-          fields.forEach(function (f) { if (f && f.name) out[f.name] = null; });
-          return out;
-        }
-        return {};
+        var out = {};
+        if (!schema || typeof schema !== "object" || !schema.properties) return out;
+        Object.keys(schema.properties).forEach(function (name) { out[name] = null; });
+        return out;
       }
 
       function renderAll() {
