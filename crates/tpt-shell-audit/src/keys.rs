@@ -173,7 +173,10 @@ impl<F> ClosureKeySupplier<F>
 where
     F: Fn() -> Result<Option<Vec<u8>>, String>,
 {
-    /// `label` names the key in error messages. Support: Full.
+    /// `label` names the key in error messages.
+    ///
+    /// Support: Full. Stores the label and the closure. What the closure returns is the caller's
+    /// responsibility; no test in this crate calls it.
     pub fn new(label: impl Into<String>, source: F) -> Self {
         ClosureKeySupplier {
             label: label.into(),

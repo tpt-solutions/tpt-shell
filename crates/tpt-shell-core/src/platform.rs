@@ -14,6 +14,8 @@ use crate::backend::WindowBackend;
 use crate::error::{Error, Result};
 
 /// The system's light or dark app setting.
+///
+/// Support: Full. A plain enum.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ColorScheme {
     #[default]
@@ -22,6 +24,9 @@ pub enum ColorScheme {
 }
 
 /// Plain-text clipboard.
+///
+/// Support: Partial. Plain text only. Windows and the fake are verified; The macOS and Linux code
+/// for it has not run on a real system.
 pub trait ClipboardBackend {
     /// The clipboard's text, or `None` when it holds no text.
     fn clipboard_text(&self) -> Result<Option<String>> {
@@ -39,6 +44,9 @@ pub trait ClipboardBackend {
 }
 
 /// System appearance.
+///
+/// Support: Partial. Windows reads the system setting. The macOS and Linux code for it has not run
+/// on a real system.
 pub trait ThemeBackend {
     fn color_scheme(&self) -> Result<ColorScheme> {
         Err(Error::Unsupported { feature: "theme" })
@@ -46,6 +54,8 @@ pub trait ThemeBackend {
 }
 
 /// Which buttons a message box offers.
+///
+/// Support: Full. A plain enum.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MessageButtons {
     #[default]
@@ -56,6 +66,8 @@ pub enum MessageButtons {
 }
 
 /// The icon a message box shows.
+///
+/// Support: Full. A plain enum.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MessageIcon {
     #[default]
@@ -66,6 +78,8 @@ pub enum MessageIcon {
 }
 
 /// The button the user pressed. A closed box is `Cancel`.
+///
+/// Support: Full. A plain enum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MessageAnswer {
     Ok,
@@ -75,6 +89,8 @@ pub enum MessageAnswer {
 }
 
 /// A modal message box.
+///
+/// Support: Full. Plain data; the Windows backend shows it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MessageBox {
     pub title: String,
@@ -85,6 +101,8 @@ pub struct MessageBox {
 
 /// An open-file dialog. `filters` are (display name, pattern) pairs such as ("Text", "*.txt");
 /// empty means all files.
+///
+/// Support: Full. Plain data; the Windows backend shows it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OpenDialog {
     pub title: String,
@@ -95,6 +113,10 @@ pub struct OpenDialog {
 
 /// Services a platform offers the app. Implemented by each backend next to its window and
 /// webview traits, so a dialog can be owned by a window.
+///
+/// Support: Partial. Windows is verified for message boxes, the open dialog, the keystore and deep
+/// links. Notifications go through Running::notify on Windows, not this trait. macOS code has not
+/// run, and Linux implements none of this trait.
 pub trait Platform: WindowBackend + ClipboardBackend + ThemeBackend {
     /// Shows a modal message box owned by `owner`, or by no window, and returns the button.
     fn message_box(

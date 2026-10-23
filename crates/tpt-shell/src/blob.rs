@@ -18,6 +18,8 @@ use tpt_shell_platform_windows::webview2::APP_ORIGIN;
 use crate::{Error, Result};
 
 /// The total size of all blobs held at once, unless the app sets another limit.
+///
+/// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
 pub const LIMIT: usize = 64 * 1024 * 1024;
 
 static STORE: Mutex<Option<BlobStore>> = Mutex::new(None);
@@ -33,23 +35,31 @@ fn with_store<T>(f: impl FnOnce(&mut BlobStore) -> T) -> T {
 
 /// Sets the total size of the blob store. Used by `App::build` with the app's limit. Blobs that
 /// are already stored are kept.
+///
+/// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
 pub fn set_limit(bytes: usize) {
     with_store(|store| store.set_limit(bytes));
 }
 
 /// The total size the store allows, in bytes.
+///
+/// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
 pub fn limit() -> usize {
     with_store(|store| store.limit())
 }
 
 /// Stores `bytes` and returns the URL the page can fetch them from. The id is 128 random bits,
 /// so the URL works as a capability: only a page that was given it can read the blob.
+///
+/// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
 pub fn put_blob(media_type: &str, bytes: Vec<u8>) -> Result<String> {
     put(None, media_type, bytes)
 }
 
 /// Like [`put_blob`], but the blob belongs to `window`: [`remove_window_blobs`] removes it when
 /// that window closes.
+///
+/// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
 pub fn put_blob_for(window: &str, media_type: &str, bytes: Vec<u8>) -> Result<String> {
     put(Some(window), media_type, bytes)
 }
@@ -61,6 +71,8 @@ fn put(owner: Option<&str>, media_type: &str, bytes: Vec<u8>) -> Result<String> 
 }
 
 /// Removes the blob behind `url`, as [`put_blob`] returned it. Returns whether one was removed.
+///
+/// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
 pub fn remove_blob(url: &str) -> bool {
     let Some(id) = id_from_route(url) else {
         return false;
@@ -70,6 +82,8 @@ pub fn remove_blob(url: &str) -> bool {
 
 /// Removes every blob that `window` made with [`put_blob_for`]. Returns how many were removed.
 /// Call it when the window closes, so its payloads do not outlive it.
+///
+/// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
 pub fn remove_window_blobs(window: &str) -> usize {
     with_store(|store| store.remove_owned(window))
 }

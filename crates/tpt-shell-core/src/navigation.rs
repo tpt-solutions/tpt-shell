@@ -7,6 +7,8 @@
 
 /// Whether `entry` is a valid allowlist entry: an `https://` URL with a host, no whitespace,
 /// and no user information (`user@host`), which would let a prefix match a different host.
+///
+/// Support: Full. Unit tested.
 pub fn is_valid_entry(entry: &str) -> bool {
     let Some(rest) = entry.strip_prefix("https://") else {
         return false;
@@ -19,6 +21,8 @@ pub fn is_valid_entry(entry: &str) -> bool {
 /// Whether `url` falls under `entry`. The match stops at a boundary: `https://a.com` allows
 /// `https://a.com/x` and `https://a.com?q`, but not `https://a.com.evil.com` or
 /// `https://a.com@evil.com`. An entry ending in `/` allows everything under that path.
+///
+/// Support: Full. Unit tested.
 pub fn url_matches_entry(url: &str, entry: &str) -> bool {
     if !is_valid_entry(entry) || !url.starts_with(entry) {
         return false;
@@ -33,6 +37,8 @@ pub fn url_matches_entry(url: &str, entry: &str) -> bool {
 }
 
 /// Whether any entry in `allowlist` covers `url`.
+///
+/// Support: Full. Unit tested.
 pub fn url_is_allowlisted(url: &str, allowlist: &[String]) -> bool {
     allowlist.iter().any(|entry| url_matches_entry(url, entry))
 }

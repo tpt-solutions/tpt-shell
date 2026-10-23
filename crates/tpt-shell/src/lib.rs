@@ -22,8 +22,10 @@ mod licenses;
 mod session;
 #[cfg(windows)]
 mod ui;
+/// Support: Partial. Windows only for windows and pages. macOS and Linux have no app wiring.
 
 pub mod app;
+/// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
 #[cfg(windows)]
 pub mod blob;
 
@@ -53,6 +55,8 @@ pub use tpt_shell_profiles::Kind as ProfileKind;
 pub use ui::UiHandle;
 
 /// Paths the macros expand to. Not part of the API; app code uses the names above.
+///
+/// Support: Partial. Macro support, not API. Windows only where it touches blobs.
 #[doc(hidden)]
 pub mod __private {
     pub use tpt_shell_ipc as ipc;
@@ -60,6 +64,8 @@ pub mod __private {
     /// The asset that the app's asset source serves for `path` under the app origin, when the path
     /// is a stored blob (`__tpt/blob/<id>`). The same lookup the app uses, so the conformance
     /// harness can time the blob path that real blobs take. Not for apps.
+    ///
+    /// Support: Partial. Windows only, verified. macOS and Linux do not build it yet.
     #[cfg(windows)]
     pub fn blob_asset_for_path(path: &str) -> Option<tpt_shell_core::backend::Asset> {
         path.strip_prefix("__tpt/blob/")

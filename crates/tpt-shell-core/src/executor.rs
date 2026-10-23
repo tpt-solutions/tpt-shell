@@ -42,6 +42,8 @@ impl Wake for Task {
 }
 
 /// Fixed-size worker pool that runs jobs and polls spawned futures.
+///
+/// Support: Full. Built in, with no external runtime; unit tested.
 pub struct Executor {
     queue: Sender<Work>,
     workers: Vec<JoinHandle<()>>,
@@ -49,6 +51,8 @@ pub struct Executor {
 
 impl Executor {
     /// Starts `threads` workers. Zero is raised to one.
+    ///
+    /// Support: Full. Unit tested.
     pub fn new(threads: usize) -> Self {
         let (queue, rx) = channel::<Work>();
         let rx = Arc::new(Mutex::new(rx));
@@ -63,11 +67,15 @@ impl Executor {
     }
 
     /// Runs `job` on a worker. A panic in the job is caught, so the worker keeps running.
+    ///
+    /// Support: Full. Unit tested.
     pub fn execute(&self, job: impl FnOnce() + Send + 'static) -> Result<()> {
         self.send(Work::Run(Box::new(job)))
     }
 
     /// Spawns `future` onto the pool. It is polled until it completes.
+    ///
+    /// Support: Full. Unit tested.
     pub fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) -> Result<()> {
         let task = Arc::new(Task {
             future: Mutex::new(Some(Box::pin(future))),
@@ -130,6 +138,8 @@ fn poll_task(task: Arc<Task>) {
 }
 
 /// Runs `future` to completion on the calling thread.
+///
+/// Support: Full. Unit tested.
 pub fn block_on<F: Future>(future: F) -> F::Output {
     struct ThreadWaker(thread::Thread);
 

@@ -8,6 +8,8 @@ use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
 /// Source of pseudo-random 64-bit values.
+///
+/// Support: Full. Implemented by the system and seeded generators; unit tested.
 pub trait Rng: Send {
     fn next_u64(&mut self) -> u64;
 
@@ -21,12 +23,15 @@ pub trait Rng: Send {
 }
 
 /// SplitMix64. Small, fast, and a fixed sequence for a fixed seed, so it suits tests and replay.
+///
+/// Support: Full. Unit tested.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeededRng {
     state: u64,
 }
 
 impl SeededRng {
+    /// Support: Full. Unit tested.
     pub fn new(seed: u64) -> Self {
         SeededRng { state: seed }
     }
@@ -45,11 +50,14 @@ impl Rng for SeededRng {
 /// A generator seeded from the standard library's per-process random keys.
 ///
 /// The seed is not cryptographically strong. Use it for ids and jitter only.
+///
+/// Support: Full. Unit tested.
 pub struct SystemRng {
     inner: SeededRng,
 }
 
 impl SystemRng {
+    /// Support: Full. Unit tested.
     pub fn new() -> Self {
         // `RandomState` is seeded from OS randomness once per process.
         let seed = RandomState::new().build_hasher().finish();

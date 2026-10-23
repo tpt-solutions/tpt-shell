@@ -4,6 +4,8 @@
 //! Our own DPI and geometry types (spec §4: no `dpi` crate, which is Apache-2.0 AND MIT).
 
 /// A size in device-independent units.
+///
+/// Support: Full. Plain data; unit tested.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LogicalSize {
     pub width: f64,
@@ -11,6 +13,8 @@ pub struct LogicalSize {
 }
 
 /// A rectangle in device-independent units.
+///
+/// Support: Full. Plain data; unit tested.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LogicalRect {
     pub x: f64,
@@ -20,6 +24,8 @@ pub struct LogicalRect {
 }
 
 /// A size in device pixels.
+///
+/// Support: Full. Plain data; unit tested.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PhysicalSize {
     pub width: u32,
@@ -27,11 +33,15 @@ pub struct PhysicalSize {
 }
 
 /// Device pixels per logical unit. For example 1.5 at 150% scaling.
+///
+/// Support: Full. Plain data; unit tested.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScaleFactor(f64);
 
 impl ScaleFactor {
     /// Creates a scale factor. Values that are not finite or not positive become 1.0.
+    ///
+    /// Support: Full. Unit tested.
     pub fn new(value: f64) -> Self {
         if value.is_finite() && value > 0.0 {
             ScaleFactor(value)
@@ -39,10 +49,12 @@ impl ScaleFactor {
             ScaleFactor(1.0)
         }
     }
+    /// Support: Full. Unit tested.
 
     pub fn get(self) -> f64 {
         self.0
     }
+    /// Support: Full. Unit tested.
 
     pub fn to_physical(self, size: LogicalSize) -> PhysicalSize {
         PhysicalSize {
@@ -50,6 +62,7 @@ impl ScaleFactor {
             height: (size.height * self.0).round().max(0.0) as u32,
         }
     }
+    /// Support: Full. Unit tested.
 
     pub fn to_logical(self, size: PhysicalSize) -> LogicalSize {
         LogicalSize {

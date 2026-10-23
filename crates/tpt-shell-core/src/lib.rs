@@ -5,16 +5,27 @@
 //!
 //! Everything here is OS-independent. Platform crates implement the traits in
 //! [`backend`]. The [`fake`] module implements them in memory for unit tests.
+/// Support: Partial. Its traits are implemented by the Windows backend and the fake. See the items
+/// in it.
 
 pub mod backend;
+/// Support: Full. Unit tested.
 pub mod clock;
+/// Support: Full. Unit tested.
 pub mod error;
+/// Support: Full. Unit tested.
 pub mod executor;
+/// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
 pub mod fake;
+/// Support: Full. Unit tested.
 pub mod geometry;
+/// Support: Full. Unit tested.
 pub mod navigation;
+/// Support: Partial. Clipboard, theme and dialogs are Windows verified. See the items in it.
 pub mod platform;
+/// Support: Full. Unit tested.
 pub mod rng;
+/// Support: Full. Unit tested.
 pub mod theme;
 
 pub use backend::{devtools_policy, PreferredScheme};

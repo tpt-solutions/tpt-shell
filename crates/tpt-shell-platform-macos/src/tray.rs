@@ -14,12 +14,16 @@ use objc2_foundation::{NSData, NSObject, NSObjectProtocol, NSString};
 
 /// What the tray reports when the user picks a menu item: its index in the list given to
 /// [`Tray::new`].
+///
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub type TraySelect = Box<dyn Fn(usize)>;
 
 /// `NSVariableStatusItemLength`: the item is as wide as its content.
 const VARIABLE_LENGTH: f64 = -1.0;
 
 /// Menu item title that is drawn as a separator line.
+///
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
 pub const SEPARATOR: &str = "-";
 
 /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.

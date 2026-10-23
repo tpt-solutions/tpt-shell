@@ -19,11 +19,16 @@ use crate::platform::{
 };
 
 /// The PNG signature, which the fake's snapshots start with.
+///
+/// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
 pub const FAKE_PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 /// Window handle used by the fake backend.
+///
+/// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FakeId(pub u64);
+/// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FakeWindow {
@@ -57,6 +62,8 @@ pub struct FakeWindow {
 type Task = Box<dyn FnOnce() + Send>;
 
 /// Proxy that queues tasks. `FakeBackend::drain` runs them.
+///
+/// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
 #[derive(Clone, Default)]
 pub struct FakeProxy {
     queue: Arc<Mutex<VecDeque<Task>>>,
@@ -71,6 +78,7 @@ impl EventLoopProxy for FakeProxy {
         Ok(())
     }
 }
+/// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
 
 #[derive(Default)]
 pub struct FakeBackend {
@@ -120,9 +128,11 @@ impl ThemeBackend for FakeBackend {
 }
 
 impl FakeBackend {
+    /// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
 
     pub fn window(&self, id: FakeId) -> Result<&FakeWindow> {
         self.windows
@@ -138,6 +148,8 @@ impl FakeBackend {
 
     /// Simulates the user asking a window to close, and applies its close action.
     /// Returns the action taken.
+    ///
+    /// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
     pub fn user_requests_close(&mut self, id: FakeId) -> Result<CloseAction> {
         let w = self.window_mut(id)?;
         let action = w.close_action;
@@ -155,6 +167,8 @@ impl FakeBackend {
     }
 
     /// Runs and clears every task posted through a proxy. Returns how many ran.
+    ///
+    /// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
     pub fn drain(&self) -> usize {
         let tasks: Vec<Task> = match self.proxy.queue.lock() {
             Ok(mut q) => q.drain(..).collect(),
@@ -428,6 +442,8 @@ impl Platform for FakeBackend {
 
 impl FakeBackend {
     /// What the window's asset source returns for `path`, as the page would receive it.
+    ///
+    /// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
     pub fn fetch_asset(&self, id: FakeId, path: &str) -> Result<Option<crate::backend::Asset>> {
         self.window(id)?;
         Ok(self
@@ -438,6 +454,8 @@ impl FakeBackend {
 
     /// Simulates the page posting `text` to the shell. The window's handler runs, and its reply
     /// (if any) is recorded as a message to the page, as the real backend would post it.
+    ///
+    /// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
     pub fn page_sends(&mut self, id: FakeId, text: &str) -> Result<Option<String>> {
         self.window(id)?;
         let reply = match self.page_handlers.get_mut(&id.0) {

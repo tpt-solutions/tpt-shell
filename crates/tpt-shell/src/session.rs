@@ -20,7 +20,10 @@ use crate::blob;
 
 /// A kiosk window that fails more than `CRASH_LIMIT` times within `CRASH_WINDOW` goes home. These
 /// are the facade's values, not a policy setting.
+///
+/// Support: Partial. Windows only.
 pub const CRASH_WINDOW: Duration = Duration::from_secs(60);
+/// Support: Partial. Windows only.
 pub const CRASH_LIMIT: u32 = 3;
 
 struct Pane {
@@ -31,12 +34,15 @@ struct Pane {
 }
 
 /// The windows the app opened, by id, with the URL the shell last loaded in each.
+///
+/// Support: Partial. Windows only.
 #[derive(Default)]
 pub struct Panes {
     list: RefCell<Vec<Pane>>,
 }
 
 impl Panes {
+    /// Support: Partial. Windows only.
     pub fn add(&self, id: WindowId, name: &str) {
         self.list.borrow_mut().push(Pane {
             id,
@@ -44,6 +50,7 @@ impl Panes {
             url: String::new(),
         });
     }
+    /// Support: Partial. Windows only.
 
     pub fn name_of(&self, id: WindowId) -> Option<String> {
         self.list
@@ -52,6 +59,7 @@ impl Panes {
             .find(|p| p.id == id)
             .map(|p| p.name.clone())
     }
+    /// Support: Partial. Windows only.
 
     pub fn url_of(&self, id: WindowId) -> Option<String> {
         self.list
@@ -69,6 +77,8 @@ impl Panes {
 }
 
 /// Loads `url` in window `id` and records it as the window's current URL.
+///
+/// Support: Partial. Windows only.
 pub fn go(panes: &Panes, id: WindowId, url: &str) -> Result<()> {
     navigate_window(id, url)?;
     panes.set_url(id, url);
@@ -76,6 +86,8 @@ pub fn go(panes: &Panes, id: WindowId, url: &str) -> Result<()> {
 }
 
 /// The close hook: removes the blobs of a window when it closes. See `WindowsBackend::on_window_closed`.
+///
+/// Support: Partial. Windows only.
 pub fn close_hook(panes: Rc<Panes>) -> impl FnMut(WindowId) {
     move |id| {
         if let Some(name) = panes.name_of(id) {
@@ -86,6 +98,8 @@ pub fn close_hook(panes: Rc<Panes>) -> impl FnMut(WindowId) {
 
 /// The process-failed handler of a kiosk window: asks `recovery` what to load and loads it.
 /// See `WindowsBackend::on_process_failed`.
+///
+/// Support: Partial. Windows only. Kiosk crash recovery.
 pub fn recover(
     panes: Rc<Panes>,
     id: WindowId,
@@ -108,6 +122,8 @@ pub fn recover(
 /// Clears the browsing data of the profile the windows share, then loads `home` in each window.
 /// The clear is asynchronous: the windows go home when WebView2 reports it done, and also when
 /// it fails (the failure is reported). If the clear cannot start, they go home at once.
+///
+/// Support: Partial. Windows only. Used by the kiosk idle reset.
 pub fn clear_and_go_home(panes: Rc<Panes>, ids: Vec<WindowId>, home: String) {
     let Some(&first) = ids.first() else {
         return;

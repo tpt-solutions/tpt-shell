@@ -4,6 +4,8 @@
 use std::fmt;
 
 /// Support tag for a public API item (spec §3).
+///
+/// Support: Full. A plain enum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Support {
     /// Works on every supported platform.
@@ -15,6 +17,8 @@ pub enum Support {
 }
 
 /// Errors returned by the core and backend traits.
+///
+/// Support: Full. A plain enum; Unsupported is how every backend reports a missing feature.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     /// The requested feature is not available on this platform or backend.
@@ -38,5 +42,6 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+/// Support: Full. An alias for the crate's error type.
 
 pub type Result<T> = std::result::Result<T, Error>;

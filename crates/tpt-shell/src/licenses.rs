@@ -21,6 +21,9 @@ const NOTICE: &str = "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset
 compliance step and embedded when the app is built.</p>\n</body>\n</html>\n";
 
 /// The licence page as an asset of the app origin.
+///
+/// Support: Partial. Shows a notice unless the compliance step embeds the licence page at build
+/// time.
 pub fn asset() -> Asset {
     Asset {
         content_type: "text/html; charset=utf-8".into(),

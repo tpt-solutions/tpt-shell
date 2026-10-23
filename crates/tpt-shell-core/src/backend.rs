@@ -11,6 +11,8 @@ use crate::error::{Error, Result};
 use crate::geometry::{LogicalRect, LogicalSize};
 
 /// Settings used to create a window.
+///
+/// Support: Partial. allow_navigation is enforced on Windows only.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowSpec {
     pub name: String,
@@ -21,6 +23,9 @@ pub struct WindowSpec {
 }
 
 /// Owns the UI thread's event loop.
+///
+/// Support: Partial. Windows is verified with the fake backend. The macOS and Linux code for it has
+/// not run on a real system.
 pub trait EventLoopBackend {
     /// Handle for posting work to the UI thread from any thread.
     type Proxy: EventLoopProxy;
@@ -32,12 +37,18 @@ pub trait EventLoopBackend {
 }
 
 /// Cross-thread handle to the UI thread. The only way to touch UI from another thread.
+///
+/// Support: Partial. Windows is verified with the fake backend. The macOS and Linux code for it has
+/// not run on a real system.
 pub trait EventLoopProxy: Send + Sync + Clone + 'static {
     /// Queues `task` to run on the UI thread.
     fn post(&self, task: Box<dyn FnOnce() + Send>) -> Result<()>;
 }
 
 /// What happens when the user asks a window to close (title bar button, Alt+F4).
+///
+/// Support: Partial. Windows and the fake verify it. The other backend set_close_action code has
+/// not run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CloseAction {
     /// Close the window.
@@ -48,6 +59,9 @@ pub enum CloseAction {
 }
 
 /// System backdrop material behind a window's client area (spec §10.x, Windows 11).
+///
+/// Support: Partial. Mica, Acrylic and Tabbed are Windows effects. macOS maps them to approximate
+/// materials; Linux returns Unsupported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Backdrop {
     #[default]
@@ -61,6 +75,10 @@ pub enum Backdrop {
 ///
 /// Methods past `close` are optional. Their default is [`Error::Unsupported`], so a backend
 /// that does not provide one says so instead of silently ignoring the request.
+///
+/// Support: Partial. Create, show, hide, title, size, fullscreen and close work on Windows and the
+/// fake. Optional methods have their own tags. The macOS and Linux code for it has not run on a
+/// real system.
 pub trait WindowBackend {
     /// Backend-specific window handle.
     type Id: Copy + Eq + std::fmt::Debug;
@@ -140,6 +158,9 @@ pub trait WindowBackend {
 
 /// Whether developer tools may be switched on or opened for a window (spec §9). Release builds
 /// keep them off: turning them on there is refused. Debug builds may switch them either way.
+///
+/// Support: Full. A pure check, called by the Windows and macOS backends and by the fake, which
+/// tests it.
 pub fn devtools_policy(release_build: bool, on: bool) -> Result<()> {
     if release_build && on {
         return Err(Error::Unsupported {
@@ -151,6 +172,8 @@ pub fn devtools_policy(release_build: bool, on: bool) -> Result<()> {
 
 /// Colour scheme a page sees through `prefers-color-scheme` (spec 10.x, theme sync).
 /// `System` follows the operating system and changes with it.
+///
+/// Support: Partial. Applied on Windows and macOS. Linux returns Unsupported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum PreferredScheme {
     #[default]
@@ -160,9 +183,14 @@ pub enum PreferredScheme {
 }
 
 /// Receives a message the page posted, and returns the reply to post back, if there is one.
+///
+/// Support: Partial. Windows and the fake receive page messages. The macOS and Linux code for it
+/// has not run on a real system.
 pub type MessageHandler = Box<dyn FnMut(&str) -> Option<String>>;
 
 /// A file the app serves from its own origin.
+///
+/// Support: Full. Plain data: a content type and a body.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Asset {
     pub content_type: String,
@@ -171,9 +199,14 @@ pub struct Asset {
 
 /// Finds the asset for a path under the app origin, such as `index.html` or `app.js`. `None`
 /// is answered as not found.
+///
+/// Support: Partial. Windows verified; the macOS and Linux asset sources have not run.
 pub type AssetSource = Box<dyn Fn(&str) -> Option<Asset>>;
 
 /// Webview inside a window.
+///
+/// Support: Partial. Load, navigate, eval and messaging work on Windows and the fake. The macOS and
+/// Linux code for it has not run on a real system.
 pub trait WebviewBackend: WindowBackend {
     /// Loads an HTML document into the window's webview.
     fn load_html(&mut self, id: Self::Id, html: &str) -> Result<()>;

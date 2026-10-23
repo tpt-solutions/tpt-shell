@@ -17,9 +17,14 @@ use std::time::UNIX_EPOCH;
 use tpt_shell_core::backend::Asset;
 
 /// The environment variable that names the app's web folder.
+///
+/// Support: Partial. Debug builds only, and the variable is ignored in release builds. Windows
+/// only.
 pub const ENV: &str = "TPT_DEV_DIR";
 
 /// How often the UI thread checks the folder for a change.
+///
+/// Support: Partial. Debug builds only. Windows only.
 pub const PERIOD: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// Most files one check reads. A folder past this is too large to watch, so the extra files are
@@ -31,6 +36,8 @@ const MAX_DEPTH: usize = 16;
 
 /// The folder named by `TPT_DEV_DIR`, for a debug build. `None` when the variable is unset, when
 /// the build is a release build (which says so on stderr), or when the folder does not exist.
+///
+/// Support: Partial. Debug builds only; returns None in release builds. Windows only.
 pub fn dev_dir() -> Option<PathBuf> {
     dev_dir_from(std::env::var_os(ENV), cfg!(debug_assertions))
 }
@@ -57,6 +64,8 @@ fn dev_dir_from(value: Option<OsString>, debug_build: bool) -> Option<PathBuf> {
 /// `None` for a file that is missing, a folder, or any path that would leave `root`: a `..` or
 /// `.` segment, a backslash, a colon (a drive or a stream name), an empty segment, or a link that
 /// resolves outside the folder.
+///
+/// Support: Partial. Debug builds only. Windows only.
 pub fn disk_asset(root: &Path, path: &str) -> Option<Asset> {
     let relative = safe_relative(path)?;
     let real_root = root.canonicalize().ok()?;
@@ -108,6 +117,9 @@ fn content_type(path: &str) -> &'static str {
 }
 
 /// Watches a folder for changes.
+///
+/// Support: Partial. Debug builds only. Windows only. Detects changes by polling, so a change is
+/// seen within one period.
 #[derive(Debug)]
 pub struct Watch {
     root: PathBuf,
@@ -117,12 +129,16 @@ pub struct Watch {
 impl Watch {
     /// Starts watching `root` from its current state, so the first [`Watch::changed`] call reports
     /// only what changed after this.
+    ///
+    /// Support: Partial. Debug builds only. Windows only.
     pub fn new(root: PathBuf) -> Self {
         let last = fingerprint(&root);
         Watch { root, last }
     }
 
     /// Whether a file under the folder was added, removed or changed since the last call.
+    ///
+    /// Support: Partial. Debug builds only. Windows only.
     pub fn changed(&mut self) -> bool {
         let now = fingerprint(&self.root);
         let changed = now != self.last;
@@ -133,6 +149,8 @@ impl Watch {
 
 /// A hash of the path, size and modification time of every file under `root`, down to
 /// [`MAX_DEPTH`] and [`MAX_FILES`]. A file that is added, removed, resized or saved changes it.
+///
+/// Support: Partial. Debug builds only. Windows only.
 pub fn fingerprint(root: &Path) -> u64 {
     let mut files: Vec<(PathBuf, u64, u128)> = Vec::new();
     collect(root, 0, &mut files);

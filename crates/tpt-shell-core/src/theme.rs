@@ -12,6 +12,8 @@ use crate::error::{Error, Result};
 use crate::platform::ColorScheme;
 
 /// Colours and font for the page.
+///
+/// Support: Full. Checked by validate before it reaches the page; unit tested.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Theme {
     pub accent: String,
@@ -32,6 +34,8 @@ impl Default for Theme {
 }
 
 /// Accessibility signals the page can react to.
+///
+/// Support: Full. Plain data; unit tested.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Signals {
     pub high_contrast: bool,
@@ -41,6 +45,8 @@ pub struct Signals {
 
 impl Theme {
     /// Checks every value. Returns the first problem as an error.
+    ///
+    /// Support: Full. Unit tested.
     pub fn validate(&self) -> Result<()> {
         check_color("accent", &self.accent)?;
         check_color("background", &self.background)?;
@@ -85,6 +91,8 @@ fn check_font(value: &str) -> Result<()> {
 /// Variables set: `--tpt-accent`, `--tpt-bg`, `--tpt-fg`, `--tpt-font`. The page also gets
 /// `data-color-scheme`, `data-high-contrast`, `data-reduced-motion` and
 /// `data-reduced-transparency` attributes, and `color-scheme` is set to match.
+///
+/// Support: Full. Unit tested.
 pub fn injection_script(theme: &Theme, scheme: ColorScheme, signals: Signals) -> Result<String> {
     theme.validate()?;
     let scheme = match scheme {
@@ -126,6 +134,8 @@ pub fn injection_script(theme: &Theme, scheme: ColorScheme, signals: Signals) ->
 
 /// The script that updates the colour scheme and accessibility attributes on a page that is
 /// already open, after the user changes a setting. Theme variables are not touched.
+///
+/// Support: Full. Unit tested.
 pub fn settings_script(scheme: ColorScheme, signals: Signals) -> String {
     let scheme = match scheme {
         ColorScheme::Light => "light",

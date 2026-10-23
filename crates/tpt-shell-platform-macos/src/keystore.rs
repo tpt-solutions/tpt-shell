@@ -47,6 +47,9 @@ fn status_error(what: &str, status: i32) -> Error {
 
 impl Keystore {
     /// A keystore whose items are filed under `service`, such as the app's bundle id.
+    ///
+    /// Support: Partial. Security framework generic-password items. Not run on macOS here;
+    /// compile-checked against the Security bindings.
     pub fn new(service: &str) -> Self {
         Keystore {
             service: NSString::from_str(service),

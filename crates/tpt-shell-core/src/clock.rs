@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Source of monotonic and wall-clock time.
+///
+/// Support: Full. Implemented by the system and fake clocks, both unit tested.
 pub trait Clock: Send + Sync {
     /// Time since an arbitrary fixed point. Never goes backwards.
     fn monotonic(&self) -> Duration;
@@ -16,12 +18,15 @@ pub trait Clock: Send + Sync {
 }
 
 /// The operating system's clocks.
+///
+/// Support: Full. Reads the system clock; unit tested.
 #[derive(Debug)]
 pub struct SystemClock {
     started: Instant,
 }
 
 impl SystemClock {
+    /// Support: Full. Unit tested.
     pub fn new() -> Self {
         SystemClock {
             started: Instant::now(),
@@ -46,6 +51,8 @@ impl Clock for SystemClock {
 }
 
 /// A clock that only moves when told to. For tests.
+///
+/// Support: Full. Test clock that moves only when told to.
 #[derive(Debug, Default)]
 pub struct FakeClock {
     monotonic_nanos: AtomicU64,
@@ -54,11 +61,15 @@ pub struct FakeClock {
 
 impl FakeClock {
     /// Starts at zero for the monotonic clock and at the Unix epoch for the wall clock.
+    ///
+    /// Support: Full. Unit tested.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Moves both clocks forward by `by`.
+    ///
+    /// Support: Full. Unit tested.
     pub fn advance(&self, by: Duration) {
         let nanos = by.as_nanos() as u64;
         self.monotonic_nanos.fetch_add(nanos, Ordering::SeqCst);
@@ -66,6 +77,8 @@ impl FakeClock {
     }
 
     /// Moves only the wall clock, as a system time change would. The monotonic clock is unaffected.
+    ///
+    /// Support: Full. Unit tested.
     pub fn set_wall(&self, at: SystemTime) {
         let nanos = at
             .duration_since(UNIX_EPOCH)
