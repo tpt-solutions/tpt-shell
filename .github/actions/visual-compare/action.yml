@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# Compares screenshots from several CI jobs with a baseline (`tpt-shell visual compare`). It
+# writes one HTML report and uploads it. The step fails when a screenshot fails the comparison,
+# so the job's status is the visual result.
+name: Visual compare
+description: Compare screenshot directories against a baseline and upload the HTML report.
+inputs:
+  baseline-dir:
+    description: The baseline directory (the first one given to visual compare).
+    required: true
+  compare-dirs:
+    description: Space-separated directories to compare with the baseline.
+    required: true
+  report:
+    description: Path of the HTML report to write.
+    required: false
+    default: visual-report.html
+  tolerance:
+    description: Per-pixel tolerance from 0 to 1.
+    required: false
+    default: "0.02"
+  max-changed:
+    description: Largest changed fraction a screenshot may have, from 0 to 1.
+    required: false
+    default: "0.001"
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-rust
+    - name: Compare screenshots
+      shell: bash
+      run: |
+        cargo run --locked -p tpt-shell-cli -- visual compare "${{ inputs.baseline-dir }}" ${{ inputs.compare-dirs }} \
+          --out "${{ inputs.report }}" --tolerance "${{ inputs.tolerance }}" --max-changed "${{ inputs.max-changed }}"
+    - name: Upload report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: visual-report
+        path: ${{ inputs.report }}
+        if-no-files-found: warn

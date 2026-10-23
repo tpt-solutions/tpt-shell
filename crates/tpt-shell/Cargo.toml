@@ -10,6 +10,9 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+keywords = ["webview", "desktop", "webview2", "kiosk", "app-shell"]
+categories = ["gui"]
 
 [dependencies]
 tpt-shell-core = { path = "../tpt-shell-core", version = "0.0.0" }

@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# The licence and supply-chain gate: cargo-deny (licences, advisories, bans, sources) and, when a
+# directory of SBOMs is given, the schema check for them (tools/validate-sbom.sh, which needs
+# node and network access). Run it on a release build's output, or on the repository itself.
+name: Compliance gate
+description: cargo-deny check, and optionally validate the SBOMs of a build.
+inputs:
+  sbom-dir:
+    description: Directory holding sbom.cdx.json and sbom.spdx.json from `tpt-shell compliance`. Empty skips the schema check.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: EmbarkStudios/cargo-deny-action@v2
+      with:
+        command: check
+    - name: Validate SBOMs
+      if: inputs.sbom-dir != ''
+      shell: bash
+      run: bash tools/validate-sbom.sh "${{ inputs.sbom-dir }}"

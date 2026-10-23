@@ -10,5 +10,8 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+keywords = ["windowing", "webview", "gui", "dpi", "traits"]
+categories = ["gui"]
 
 [dependencies]

@@ -10,6 +10,9 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+keywords = ["supervisor", "restart", "watchdog", "heartbeat", "backoff"]
+categories = ["command-line-utilities"]
 
 [target.'cfg(windows)'.dependencies]
 tpt-shell-platform-windows = { path = "../tpt-shell-platform-windows", version = "0.0.0" }

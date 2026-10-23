@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# Installs a Rust toolchain and a dependency cache. Every other action in this folder starts
+# with it, so a caller can use the actions in any order.
+name: Set up Rust
+description: Install a Rust toolchain and cache cargo output for the workspace.
+inputs:
+  toolchain:
+    description: Toolchain name for dtolnay/rust-toolchain (stable, 1.90, and so on).
+    required: false
+    default: stable
+  components:
+    description: Comma-separated rustup components, for example rustfmt or clippy.
+    required: false
+    default: ""
+  cache-workspaces:
+    description: Extra cache workspaces, one per line (the root is always cached).
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          .
+          ${{ inputs.cache-workspaces }}

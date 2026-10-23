@@ -10,5 +10,8 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+keywords = ["permissions", "capabilities", "security", "sandbox", "webview"]
+categories = ["development-tools"]
 
 [dependencies]

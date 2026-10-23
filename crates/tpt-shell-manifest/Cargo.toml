@@ -10,6 +10,9 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+keywords = ["manifest", "toml", "parser", "validation", "config"]
+categories = ["config"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

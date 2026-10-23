@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# Builds the release CLI and an app's release binary, writes the compliance outputs and uploads
+# them as one artifact. It does not sign, publish or tag: signing is tools/sign.sh and is run
+# separately once credentials exist, and nothing here uploads to a registry.
+name: Release build
+description: Release build, compliance outputs and an uploaded artifact. Does not sign or publish.
+inputs:
+  app-dir:
+    description: The app project to build with tpt-shell build (a release build).
+    required: true
+  compliance-dir:
+    description: Where the compliance outputs (SBOMs, attestation) are written.
+    required: false
+    default: compliance
+  artifact-name:
+    description: Name of the uploaded artifact.
+    required: false
+    default: release-build
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-rust
+    - name: Build the release CLI
+      shell: bash
+      run: cargo build --locked --release -p tpt-shell-cli
+    - name: Build the app (release)
+      shell: bash
+      run: ./target/release/tpt-shell build "${{ inputs.app-dir }}"
+    - name: Write compliance outputs
+      shell: bash
+      run: ./target/release/tpt-shell compliance "${{ inputs.compliance-dir }}"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: |
+          ${{ inputs.app-dir }}
+          ${{ inputs.compliance-dir }}
+        if-no-files-found: error

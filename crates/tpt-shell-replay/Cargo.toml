@@ -10,6 +10,9 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+keywords = ["replay", "recording", "determinism", "debugging", "jsonl"]
+categories = ["development-tools::debugging"]
 
 [dependencies]
 serde_json = "1"

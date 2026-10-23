@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# Builds the mdBook site and deploys it to GitHub Pages (todo O5). It runs only when started by
+# hand (workflow_dispatch), so nothing is deployed by a push. Before the first run, enable Pages
+# in the repository settings with "GitHub Actions" as the source. The book is the same one the
+# docs-build job checks in ci.yml, including the offline check.
+name: docs-pages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+      - name: Build the book
+        run: mdbook build docs
+      - name: Check that the book loads nothing from the network
+        run: bash tools/check-docs-offline.sh docs/book
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/book
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

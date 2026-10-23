@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# Runs the workspace tests. On Linux the tests run under Xvfb (tools/headless-linux.sh), so a test
+# that opens a window does not need a desktop. Windows and macOS run them directly.
+name: Test
+description: Run cargo test for the workspace, headless on Linux.
+inputs:
+  toolchain:
+    description: Toolchain for setup-rust.
+    required: false
+    default: stable
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-rust
+      with:
+        toolchain: ${{ inputs.toolchain }}
+    - name: Install Xvfb (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y xvfb xauth
+    - name: Test (Linux, headless display)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: bash tools/headless-linux.sh xvfb cargo test --workspace --locked
+    - name: Test
+      if: runner.os != 'Linux'
+      shell: bash
+      run: cargo test --workspace --locked

@@ -10,6 +10,9 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+keywords = ["kiosk", "signed-config", "lockdown", "ed25519", "idle-reset"]
+categories = ["gui"]
 
 [dependencies]
 ed25519-dalek = "2"

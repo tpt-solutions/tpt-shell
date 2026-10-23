@@ -10,6 +10,9 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+keywords = ["windows", "webview2", "win32", "com", "dpapi"]
+categories = ["gui", "os::windows-apis"]
 
 [dependencies]
 tpt-shell-agent = { path = "../tpt-shell-agent", version = "0.0.0" }
