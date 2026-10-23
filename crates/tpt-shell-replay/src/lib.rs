@@ -228,7 +228,12 @@ impl Recorder {
             ));
         }
         let line = json!({
-            "asset": { "name": name, "len": bytes.len(), "data": codec::encode(bytes) }
+            "asset": {
+                "name": name,
+                "len": bytes.len(),
+                "sha256": sha256_hex(bytes),
+                "data": codec::encode(bytes)
+            }
         });
         self.out.push_str(&line.to_string());
         self.out.push('\n');
@@ -241,6 +246,60 @@ impl Recorder {
     pub fn finish(self) -> String {
         self.out
     }
+
+    /// The finished recording, compressed with zstd. [`read_compressed`] reads it back; the plain
+    /// text from [`Recorder::finish`] still reads with [`read`].
+    ///
+    /// Support: Full. The bundled zstd library is compiled at build time, so a build needs a C
+    /// compiler; the Rust-only build paths do not change.
+    pub fn finish_compressed(self) -> Vec<u8> {
+        // Level 3 is zstd's default. Encoding into a Vec cannot fail for a valid level.
+        zstd::encode_all(self.out.as_bytes(), 3).unwrap_or_default()
+    }
+}
+
+/// The largest decompressed recording the reader accepts, in bytes.
+///
+/// Support: Full.
+pub const MAX_RECORDING_BYTES: usize = 256 * 1024 * 1024;
+
+/// The first four bytes of a zstd frame (little-endian magic 0xFD2FB528).
+const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
+
+/// Reads a zstd-compressed recording, as [`Recorder::finish_compressed`] writes it.
+///
+/// A truncated or corrupt stream is refused with an error, and so is output larger than
+/// [`MAX_RECORDING_BYTES`]. The decompressed text is then read exactly as [`read`] reads it.
+///
+/// Support: Full.
+pub fn read_compressed(bytes: &[u8], mode: Mode) -> Result<Replay, ReadError> {
+    let fail = |message: String| ReadError { line: 1, message };
+    if bytes.len() < ZSTD_MAGIC.len() || bytes[..4] != ZSTD_MAGIC {
+        return Err(fail("not a zstd-compressed recording".into()));
+    }
+    let mut out = Vec::new();
+    let decoder = zstd::stream::read::Decoder::new(bytes)
+        .map_err(|e| fail(format!("cannot start zstd decoding: {e}")))?;
+    // One extra byte lets the cap be detected without reading past it.
+    let mut limited = std::io::Read::take(decoder, MAX_RECORDING_BYTES as u64 + 1);
+    std::io::Read::read_to_end(&mut limited, &mut out)
+        .map_err(|e| fail(format!("compressed recording is damaged or truncated: {e}")))?;
+    if out.len() > MAX_RECORDING_BYTES {
+        return Err(fail(format!(
+            "decompressed recording is larger than {MAX_RECORDING_BYTES} bytes"
+        )));
+    }
+    let text = String::from_utf8(out).map_err(|_| fail("recording is not UTF-8".into()))?;
+    read(&text, mode)
+}
+
+/// The SHA-256 of some bytes, as 64 lowercase hex digits.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Reads a recording.
@@ -426,6 +485,17 @@ fn parse_asset(value: &Value) -> Result<Asset, String> {
             bytes.len()
         ));
     }
+    // Version 2 recordings written before the hash was added have no `sha256`, and still read.
+    if let Some(expected) = asset.get("sha256") {
+        let expected = expected
+            .as_str()
+            .ok_or_else(|| format!("asset `{name}` has a `sha256` that is not text"))?;
+        if expected != sha256_hex(&bytes) {
+            return Err(format!(
+                "asset `{name}` does not match its sha256; the recording is damaged or was edited"
+            ));
+        }
+    }
     Ok(Asset {
         name: name.to_string(),
         bytes,
@@ -531,8 +601,64 @@ mod tests {
         r.add_asset("logo.png", b"abc").unwrap();
         assert_eq!(
             r.finish().lines().nth(1).unwrap(),
-            "{\"asset\":{\"data\":\"YWJj\",\"len\":3,\"name\":\"logo.png\"}}"
+            "{\"asset\":{\"data\":\"YWJj\",\"len\":3,\"name\":\"logo.png\",\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"}}"
         );
+    }
+
+    fn compressed_sample() -> Vec<u8> {
+        let mut r = Recorder::new(header());
+        r.record(5, "input", json!({"key": "a"})).unwrap();
+        r.add_asset("logo.png", b"abc").unwrap();
+        r.finish_compressed()
+    }
+
+    #[test]
+    fn a_compressed_recording_round_trips() {
+        let packed = compressed_sample();
+        assert_eq!(packed[..4], ZSTD_MAGIC, "the output is a zstd frame");
+        let replay = read_compressed(&packed, Mode::Strict).unwrap();
+        assert_eq!(replay.header, header());
+        assert_eq!(replay.events.len(), 1);
+        assert_eq!(replay.assets[0].bytes, b"abc");
+    }
+
+    #[test]
+    fn a_truncated_compressed_recording_is_refused_not_panicked() {
+        let packed = compressed_sample();
+        for cut in [4, packed.len() / 2, packed.len() - 1] {
+            assert!(
+                read_compressed(&packed[..cut], Mode::Lenient).is_err(),
+                "cut at {cut}"
+            );
+        }
+    }
+
+    #[test]
+    fn plain_text_is_refused_by_the_compressed_reader_and_compressed_by_the_plain_reader() {
+        assert!(read_compressed(sample().as_bytes(), Mode::Strict).is_err());
+        let as_text = String::from_utf8_lossy(&compressed_sample()).into_owned();
+        assert!(read(&as_text, Mode::Strict).is_err());
+    }
+
+    #[test]
+    fn an_asset_whose_bytes_do_not_match_its_hash_is_refused() {
+        let good = "{\"asset\":{\"data\":\"YWJj\",\"len\":3,\"name\":\"x.bin\",\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"}}";
+        let bad = good.replace("YWJj", "YWJk");
+        let header = "{\"format\":\"tptreplay\",\"version\":2,\"app\":\"a\",\"platform\":\"p\"}\n";
+        assert!(read(&format!("{header}{good}\n"), Mode::Strict).is_ok());
+        let err = read(&format!("{header}{bad}\n"), Mode::Strict).unwrap_err();
+        assert!(err.message.contains("sha256"), "{}", err.message);
+        assert!(read(&format!("{header}{bad}\n"), Mode::Lenient)
+            .unwrap()
+            .assets
+            .is_empty());
+    }
+
+    #[test]
+    fn a_version_two_asset_without_a_hash_still_reads() {
+        let header = "{\"format\":\"tptreplay\",\"version\":2,\"app\":\"a\",\"platform\":\"p\"}\n";
+        let old = "{\"asset\":{\"data\":\"YWJj\",\"len\":3,\"name\":\"x.bin\"}}\n";
+        assert_eq!(read(&format!("{header}{old}"), Mode::Strict).unwrap().assets.len(), 1);
     }
 
     #[test]

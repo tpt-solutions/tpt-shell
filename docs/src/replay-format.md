@@ -11,8 +11,8 @@ The format is specified here. The code is the reference: `crates/tpt-shell-repla
 
 ## Layout
 
-A recording is UTF-8 text, one JSON object per line (JSON Lines). There is no compression and no
-encryption (see [Why plain text](#why-plain-text)).
+A recording is UTF-8 text, one JSON object per line (JSON Lines). A recording can also be stored
+zstd-compressed (see [Compression](#compression)). There is no encryption.
 
 Line 1 is the header:
 
@@ -57,13 +57,27 @@ An asset is a file the run used, such as an image the page loaded. It is stored 
 (RFC 4648, standard alphabet, with padding):
 
 ```json
-{"asset":{"data":"aGVsbG8=","len":5,"name":"logo.png"}}
+{"asset":{"data":"aGVsbG8=","len":5,"name":"logo.png","sha256":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"}}
 ```
 
 - `name` is 1 to 100 ASCII letters, digits, `-`, `_` or `.`. It cannot be `.` or `..`, and it
   never carries a path, so an unpacked asset cannot be written outside its directory.
 - `len` must equal the decoded byte count.
+- `sha256` is the lowercase hex SHA-256 of the decoded bytes. The reader refuses an asset whose
+  bytes do not match it. Version 2 recordings written before the hash was added have no `sha256`
+  and still read; the check runs only when the field is present.
 - The limit is 16 MiB per asset (`MAX_ASSET_BYTES`).
+
+### Compression
+
+`Recorder::finish_compressed` stores the same text as a zstd frame (level 3). `read_compressed`
+reads it. The reader checks the zstd magic, refuses a truncated or damaged stream with an error,
+and refuses output larger than 256 MiB (`MAX_RECORDING_BYTES`) before parsing. The plain-text
+reader `read` does not accept compressed bytes, and `read_compressed` does not accept plain text.
+
+The bundled zstd library is compiled when the crate builds, so a build needs a C compiler. Its
+licence is BSD-3-Clause or GPL-2.0 (dual), and the crate is MIT or Apache-2.0; both are covered by
+the existing `deny.toml` allow-list.
 
 ## Versions
 
@@ -162,12 +176,9 @@ What the format does do:
 Mitigations in code today: the Rust clock and generator are virtualised; the page shim is opt-in
 and off in normal runs; the recorder refuses unknown kinds and time going backwards.
 
-## Why plain text
+## Why plain text is still available
 
-The product spec (§10.5) names zstd compression. The format does not use it. A zstd reader and
-writer would add a dependency that has to pass the licence policy, and the recordings are small
-enough for CI artefacts and bug reports. Plain JSON Lines can be read with any text tool, which
-also helps review. If recordings grow large, compression can come in a later format version. Until
-then, do not share a recording outside the team: it holds IPC arguments and asset bytes unless
-redacted. The redaction hooks in `tpt-shell-replay::report` (used by `tpt-shell report`, not yet
+Plain JSON Lines can be read with any text tool, which helps review, so the writer keeps both
+forms: `finish` for plain text and `finish_compressed` for zstd. Do not share a recording outside
+the team: it holds IPC arguments and asset bytes unless redacted. The redaction hooks in `tpt-shell-replay::report` (used by `tpt-shell report`, not yet
 built) are the planned control.
