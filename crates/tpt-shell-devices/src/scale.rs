@@ -62,6 +62,10 @@ pub enum ScaleError {
     Ambiguous,
     /// A number with more than three decimals, or too large to hold.
     BadNumber(String),
+    /// A tagged line with other than three fields.
+    WrongFieldCount(usize),
+    /// A fixed-width record that is not twelve bytes long.
+    BadLength(usize),
 }
 
 impl std::fmt::Display for ScaleError {
@@ -73,6 +77,8 @@ impl std::fmt::Display for ScaleError {
             ScaleError::NoUnit => write!(f, "scale line has no unit"),
             ScaleError::Ambiguous => write!(f, "scale line has more than one weight or unit"),
             ScaleError::BadNumber(n) => write!(f, "`{n}` is not a weight this parser can hold"),
+            ScaleError::WrongFieldCount(n) => write!(f, "tagged line has {n} fields, not three"),
+            ScaleError::BadLength(n) => write!(f, "fixed-width record is {n} bytes, not twelve"),
         }
     }
 }
@@ -191,6 +197,93 @@ pub fn read_readings(
     Ok(out)
 }
 
+/// The line shapes this module reads. All three are this crate's own layouts, written down here;
+/// none of them is a vendor's protocol.
+///
+/// Support: Full.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineFormat {
+    /// The generic weight line: a number, a unit and status words in any order, separated by spaces
+    /// or commas. See the module docs.
+    WeightLine,
+    /// Exactly three comma-separated fields: a status (`S` stable or `U` unstable), a decimal value
+    /// with an optional sign, and a unit (`g`, `kg`, `lb` or `oz`). For example `S,+1.250,kg`.
+    Tagged,
+    /// Exactly twelve bytes: a status (`S` or `U`), a sign, a value in the form `DDDD.DDD`, and a
+    /// two-byte unit (`kg`, `g `, `lb` or `oz`, the last two padded with a space). For example
+    /// `S+0001.250kg`.
+    FixedWidth,
+}
+
+/// Parses one line in the given format.
+///
+/// Support: Partial. The three formats are this crate's own. A scale that sends a different layout
+/// needs its own parser, and none of these is checked against a vendor's manual.
+pub fn parse_as(format: LineFormat, line: &str) -> Result<Reading, ScaleError> {
+    match format {
+        LineFormat::WeightLine => parse_line(line),
+        LineFormat::Tagged => parse_tagged(line),
+        LineFormat::FixedWidth => parse_fixed_width(line),
+    }
+}
+
+/// Parses a [`LineFormat::Tagged`] line.
+///
+/// Support: Partial. The format is this crate's own; see [`LineFormat::Tagged`].
+fn parse_tagged(line: &str) -> Result<Reading, ScaleError> {
+    let fields: Vec<&str> = line.trim().split(',').collect();
+    let [status, value, unit] = fields.as_slice() else {
+        return Err(ScaleError::WrongFieldCount(fields.len()));
+    };
+    Ok(Reading {
+        weight: Weight {
+            thousandths: parse_thousandths(value.trim())?,
+            unit: parse_unit(unit.trim())?,
+        },
+        stable: parse_status(status.trim())?,
+    })
+}
+
+/// Parses a [`LineFormat::FixedWidth`] record.
+///
+/// Support: Partial. The format is this crate's own; see [`LineFormat::FixedWidth`].
+fn parse_fixed_width(line: &str) -> Result<Reading, ScaleError> {
+    if !line.is_ascii() || line.len() != 12 {
+        return Err(ScaleError::BadLength(line.len()));
+    }
+    let stable = parse_status(&line[0..1])?;
+    // Sign and value: `+DDDD.DDD`, nine bytes with the point at byte 5.
+    let value = &line[1..10];
+    if value.len() != 9 || value.as_bytes()[5] != b'.' {
+        return Err(ScaleError::BadNumber(value.to_string()));
+    }
+    Ok(Reading {
+        weight: Weight {
+            thousandths: parse_thousandths(value)?,
+            unit: parse_unit(line[10..12].trim_end())?,
+        },
+        stable,
+    })
+}
+
+fn parse_status(text: &str) -> Result<bool, ScaleError> {
+    match text {
+        "S" => Ok(true),
+        "U" => Ok(false),
+        other => Err(ScaleError::UnknownWord(other.to_string())),
+    }
+}
+
+fn parse_unit(text: &str) -> Result<Unit, ScaleError> {
+    match text.to_ascii_lowercase().as_str() {
+        "g" => Ok(Unit::Gram),
+        "kg" => Ok(Unit::Kilogram),
+        "lb" => Ok(Unit::Pound),
+        "oz" => Ok(Unit::Ounce),
+        _ => Err(ScaleError::UnknownWord(text.to_string())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,5 +356,65 @@ mod tests {
         assert!(got[1].is_err());
         assert_eq!(got[2].as_ref().expect("third").weight.thousandths, 998);
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn a_tagged_record_parses_with_a_sign_and_a_status() {
+        let r = parse_as(LineFormat::Tagged, "S,+1.250,kg").expect("parse");
+        assert_eq!(r.weight, weight(1250, Unit::Kilogram));
+        assert!(r.stable);
+        let r = parse_as(LineFormat::Tagged, "U,-0.5,g").expect("parse");
+        assert_eq!(r.weight, weight(-500, Unit::Gram));
+        assert!(!r.stable);
+    }
+
+    #[test]
+    fn a_tagged_record_refuses_the_wrong_shape() {
+        assert_eq!(
+            parse_as(LineFormat::Tagged, "S,1.250"),
+            Err(ScaleError::WrongFieldCount(2))
+        );
+        assert_eq!(
+            parse_as(LineFormat::Tagged, "X,1.250,kg"),
+            Err(ScaleError::UnknownWord("X".to_string()))
+        );
+        assert_eq!(
+            parse_as(LineFormat::Tagged, "S,1.250,stone"),
+            Err(ScaleError::UnknownWord("stone".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_fixed_width_record_parses_at_exactly_twelve_bytes() {
+        let r = parse_as(LineFormat::FixedWidth, "S+0001.250kg").expect("parse");
+        assert_eq!(r.weight, weight(1250, Unit::Kilogram));
+        assert!(r.stable);
+        let r = parse_as(LineFormat::FixedWidth, "U-0000.500g ").expect("parse");
+        assert_eq!(r.weight, weight(-500, Unit::Gram));
+        assert!(!r.stable);
+    }
+
+    #[test]
+    fn a_fixed_width_record_refuses_a_wrong_length_or_point() {
+        assert_eq!(
+            parse_as(LineFormat::FixedWidth, "S+001.250kg"),
+            Err(ScaleError::BadLength(11))
+        );
+        assert_eq!(
+            parse_as(LineFormat::FixedWidth, "S+00012.50kg"),
+            Err(ScaleError::BadNumber("+00012.50".to_string()))
+        );
+        assert_eq!(
+            parse_as(LineFormat::FixedWidth, "S+0001.250 g"),
+            Err(ScaleError::UnknownWord(" g".to_string()))
+        );
+    }
+
+    #[test]
+    fn the_weight_line_format_is_the_default_parser() {
+        assert_eq!(
+            parse_as(LineFormat::WeightLine, "ST 1.000 kg"),
+            parse_line("ST 1.000 kg")
+        );
     }
 }
