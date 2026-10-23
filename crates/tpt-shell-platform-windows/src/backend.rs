@@ -376,6 +376,41 @@ fn json_string_field<'a>(json: &'a str, field: &str) -> Option<&'a str> {
     Some(&json[start..end])
 }
 
+/// Runs `script` in a window's page and returns its result as JSON text (`None` when the script
+/// produced no value), pumping messages until the page answers or `timeout` passes.
+///
+/// This is a free function so that code without a backend handle, such as a timer or an agent
+/// session, can read a page. It finds the window in the registry that this thread's backend keeps,
+/// so it must run on the UI thread that created the window, and not inside a window procedure. The
+/// registry is borrowed only to start the script, never while messages are pumped.
+///
+/// Support: Partial. Windows only. The timeout covers the wait for the answer; a script that
+/// blocks the page never returns, so the UI thread waits with it.
+pub fn eval_window_json(id: WindowId, script: &str, timeout: Duration) -> Result<Option<String>> {
+    let slot: EvalSlot = Rc::new(RefCell::new(None));
+    let done = slot.clone();
+    let started = WINDOWS
+        .with(|w| {
+            w.borrow().get(&id.0).map(|entry| {
+                entry.web.execute_script_json(script, move |hr, json| {
+                    *done.borrow_mut() = Some((hr, json))
+                })
+            })
+        })
+        .ok_or(Error::UnknownWindow(id.0 as u64))?;
+    started.map_err(|hr| hr_error("ExecuteScript", hr))?;
+    if !pump_until(timeout, || slot.borrow().is_some()) {
+        return Err(Error::Backend(
+            "the page did not answer the script in time".into(),
+        ));
+    }
+    let (hr, json) = slot.borrow_mut().take().expect("set by the callback");
+    if hr < 0 {
+        return Err(hr_error("ExecuteScript", hr));
+    }
+    Ok(json)
+}
+
 fn hr_error(what: &str, hr: HRESULT) -> Error {
     Error::Backend(format!("{what} failed (HRESULT 0x{hr:08X})"))
 }
@@ -563,24 +598,7 @@ impl WindowsBackend {
     /// a window procedure, such as a message handler.
     pub fn eval_json(&mut self, id: WindowId, script: &str) -> Result<Option<String>> {
         self.check_thread()?;
-        let slot: EvalSlot = Rc::new(RefCell::new(None));
-        let done = slot.clone();
-        self.with_web(id, |w| {
-            w.execute_script_json(script, move |hr, json| {
-                *done.borrow_mut() = Some((hr, json))
-            })
-        })?
-        .map_err(|hr| hr_error("ExecuteScript", hr))?;
-        if !pump_until(CONTROLLER_TIMEOUT, || slot.borrow().is_some()) {
-            return Err(Error::Backend(
-                "the page did not answer the script in time".into(),
-            ));
-        }
-        let (hr, json) = slot.borrow_mut().take().expect("set by the callback");
-        if hr < 0 {
-            return Err(hr_error("ExecuteScript", hr));
-        }
-        Ok(json)
+        eval_window_json(id, script, CONTROLLER_TIMEOUT)
     }
 
     /// Where the window is, for remembering it between runs. Reads the normal (not maximized)
@@ -2993,6 +3011,42 @@ mod surface_tests {
         let dir = std::env::temp_dir().join(format!("tpt-surface-{name}-{}", std::process::id()));
         let backend = WindowsBackend::new(Path::new(&loader), &dir).expect("backend");
         Some((backend, dir, serial))
+    }
+
+    #[test]
+    fn eval_window_json_refuses_a_window_this_thread_does_not_have() {
+        // No backend on this thread, so the registry is empty; no desktop is needed.
+        let err = eval_window_json(WindowId(12345), "1", Duration::from_secs(1)).unwrap_err();
+        assert!(matches!(err, Error::UnknownWindow(12345)), "{err:?}");
+    }
+
+    #[test]
+    fn eval_window_json_reads_a_page_value_without_a_backend_handle() {
+        let Some((mut b, dir, _serial)) = start("eval-window") else {
+            return;
+        };
+        let id = b.create(&spec("main")).expect("create");
+        b.load_html(
+            id,
+            "<!doctype html><title>ready</title><p>hello</p>",
+        )
+        .expect("load_html");
+        let mut title = String::new();
+        let ready = pump_until(Duration::from_secs(30), || {
+            title = b.document_title(id).unwrap_or_default();
+            title == "ready"
+        });
+        assert!(ready, "page never loaded; title was {title:?}");
+        // WebView2 encodes the script's value as JSON itself, so the script returns the text.
+        let value = eval_window_json(
+            id,
+            "document.querySelector('p').textContent",
+            Duration::from_secs(10),
+        )
+        .expect("eval");
+        assert_eq!(value.as_deref(), Some("\"hello\""));
+        drop(b);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

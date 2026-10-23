@@ -21,6 +21,7 @@ tpt-shell-capabilities = { path = "../tpt-shell-capabilities", version = "0.0.0"
 tpt-shell-core = { path = "../tpt-shell-core", version = "0.0.0" }
 tpt-shell-ipc = { path = "../tpt-shell-ipc", version = "0.0.0" }
 tpt-shell-profiles = { path = "../tpt-shell-profiles", version = "0.0.0" }
+tpt-shell-test = { path = "../tpt-shell-test", version = "0.0.0" }
 tpt-shell-macros = { path = "../tpt-shell-macros", version = "0.0.0" }
 serde_json = "1"
 

@@ -51,6 +51,8 @@ pub mod startup;
 #[cfg(windows)]
 pub mod tray;
 #[cfg(windows)]
+pub mod native_tree;
+#[cfg(windows)]
 pub mod uia;
 #[cfg(windows)]
 pub mod webview2;
