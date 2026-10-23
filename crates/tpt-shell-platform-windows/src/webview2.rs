@@ -569,7 +569,7 @@ impl EnvironmentOptions {
 
 /// Checks that a fixed-version runtime folder exists and holds `msedgewebview2.exe`.
 ///
-/// Support: Full. It checks presence only; it does not start the runtime or read its version.
+/// Support: Partial. It checks presence only; it does not start the runtime or read its version.
 pub fn check_fixed_runtime_folder(folder: &Path) -> Result<(), String> {
     if !folder.is_dir() {
         return Err(format!(

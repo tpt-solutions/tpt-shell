@@ -120,5 +120,5 @@ Checked against the project's own pages: Tauri v2 capabilities (v2.tauri.app), E
 - [ ] Search for webview-internal MCP or DOM-tree control projects.
 - [ ] Search for Rust kiosk or digital-signage projects by name.
 - [ ] Search for Rust HID crates and their licences (hidapi and others).
-- [ ] Confirm the WebView2 loader licence from the NuGet package's LICENSE.txt (O1).
+- [x] Confirm the WebView2 loader licence from the NuGet package's LICENSE.txt (O1). Verified 2026-10-20; see "WebView2 loader licence" above.
 - [ ] Repeat the scan at M8 and M12 and update this file.

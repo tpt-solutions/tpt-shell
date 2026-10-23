@@ -32,8 +32,8 @@ Keep scopes narrow. A scope of `COM*` lets the app open every serial port on the
 
 ## The hub
 
-`DeviceHub` is built from the devices that are present and an audit callback. It is the only way
-the app opens a device under a scope:
+`DeviceHub` is built from the devices that are present and an audit callback. The app opens a
+device under a scope through it:
 
 - `list(&scope)` returns the identifiers the scope covers.
 - `open(&id, &scope)` opens a device. It refuses an id outside the scope, a device that is not

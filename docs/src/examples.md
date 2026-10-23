@@ -27,7 +27,7 @@ any, is in `web/`.
 The integration test `crates/tpt-shell/tests/commands.rs` is also a worked example of a typed
 command with a grant and a scope. It is a test, not an app.
 
-The hello-world example in the facade crate is the smallest window program:
+The hello-world example in the facade crate is a minimal window program:
 
 ```sh
 cargo run -p tpt-shell --example hello -- path\to\WebView2Loader.dll

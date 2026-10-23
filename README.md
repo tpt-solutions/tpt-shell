@@ -4,7 +4,7 @@ A webview app shell for Rust that is licence-clean, secure by default, and built
 
 Owner: TPT Solutions
 
-> **Status: pre-alpha.** The Windows backend (WebView2) is the most complete: it opens windows, serves pages, and runs the typed, capability-checked command channel. The macOS and Linux backends are partial and have not yet passed the full conformance suite. The API is still changing. See [platform-notes.md](docs/src/platform-notes.md) for what each platform does, [todo.md](todo.md) for the project checklist and [spec.txt](spec.txt) for the full design.
+> **Status: pre-alpha.** The Windows backend (WebView2) is the one verified to open windows, serve pages and run the typed, capability-checked command channel on a desktop. The macOS and Linux backends are written but partial, and have not yet passed the full conformance suite. The API is still changing. See [platform-notes.md](docs/src/platform-notes.md) for what each platform does, [todo.md](todo.md) for the project checklist and [spec.txt](spec.txt) for the full design.
 
 ## What it is
 
@@ -22,7 +22,7 @@ It does not use wry, tao, winit, Tauri or any other windowing or webview crate. 
 - **Licence-clean.** Dependencies must be MIT, or dual-licensed with MIT. Apache-2.0-only crates are rejected. Enforced by `cargo-deny` (see [deny.toml](deny.toml)).
 - **No telemetry.** The shell does not collect or send usage data.
 - **No network by default.** The shell opens no sockets unless a feature is enabled.
-- **Small unsafe surface.** All FFI lives in isolated platform modules.
+- **Confined unsafe code.** The `unsafe` code and FFI are in the platform, device and kiosk crates, each in its own modules.
 
 ## Quickstart
 
@@ -32,7 +32,7 @@ On Windows, the hello example opens one window that shows one embedded page. It 
 cargo run -p tpt-shell --example hello -- <path to WebView2Loader.dll>
 ```
 
-The example is the smallest app. Its core is this:
+The example is a minimal app. Its core is this:
 
 ```rust
 use tpt_shell::{App, Window};
@@ -67,6 +67,8 @@ Dual-licensed under either of
 - [Apache licence, version 2.0](LICENSE-APACHE)
 
 at your option.
+
+Third-party components are listed in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). That file includes the WebView2 loader (`WebView2Loader.dll`, BSD-3-Clause, from the Microsoft.Web.WebView2 NuGet package) and the decision to use it (O1).
 
 ### Contribution
 

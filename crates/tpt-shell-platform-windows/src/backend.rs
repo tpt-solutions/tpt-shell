@@ -689,7 +689,7 @@ impl WindowsBackend {
     /// closes it, or when `WindowBackend::close` destroys it. It is not called for a window that is
     /// only hidden (`CloseAction::Hide`). Replaces any earlier hook; one hook serves all windows.
     ///
-    /// Support: Full on Windows. Other platforms have no backend yet.
+    /// Support: Partial. Windows only; other platforms have no backend yet.
     pub fn on_window_closed(&mut self, f: impl FnMut(WindowId) + 'static) -> Result<()> {
         self.check_thread()?;
         CLOSED_HOOK.with(|h| *h.borrow_mut() = Some(Box::new(f)));

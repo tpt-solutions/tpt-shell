@@ -28,7 +28,7 @@ const VK_CONTROL: i32 = 0x11;
 
 /// Keeps the hook installed. Dropping it removes the hook and stops its thread.
 ///
-/// Support: Full. Windows only. The test installs and removes the hook.
+/// Support: Partial. Windows only. The test installs and removes the hook.
 pub struct KeyboardHook {
     thread_id: u32,
     thread: Option<JoinHandle<()>>,

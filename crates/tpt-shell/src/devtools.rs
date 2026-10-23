@@ -134,7 +134,7 @@ impl Inspect for Shell {
 /// Creates the overlay window, hidden, with its page loaded. Returns `None` in a release build.
 /// Its close hides it, so the app keeps running when the developer closes it.
 ///
-/// Support: Full in debug builds on Windows; not created in release builds.
+/// Support: Partial. Debug builds on Windows only; not created in release builds.
 pub fn create(backend: &mut WindowsBackend, shell: &Shell) -> Result<Option<WindowId>> {
     let Some(page) = tpt_shell_devtools::page_if_enabled(&Snapshot::collect(shell)) else {
         return Ok(None);

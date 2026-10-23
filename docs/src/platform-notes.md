@@ -7,7 +7,7 @@ Where a box is not ticked, the feature is not built, whatever the code path look
 
 | Platform | Built | Tested on the machine | Notes |
 |---|---|---|---|
-| Windows 10 1809+ and Windows 11, x86_64 | Yes. Windows is the only backend that opens windows | Yes, on Windows 11 | Needs WebView2 Evergreen or a Fixed Version runtime |
+| Windows 10 1809+ and Windows 11, x86_64 | Yes. Windows is the backend verified to open windows; macOS and Linux are not yet verified to open one | Yes, on Windows 11 | Needs WebView2 Evergreen or a Fixed Version runtime |
 | Windows aarch64 | Target listed in the spec. Build not verified here | No | Do not promise it |
 | macOS 12+ (WKWebView) | Partly. The window and webview are written and type-check for macOS | No. Cross-compiled only | Profile isolation needs macOS 14+ |
 | Linux (GTK 3.24 with WebKit2GTK 4.1, or GTK 4 with WebKitGTK 6.0) | Partly. Both GTK adapters and the adapter selection are written and type-check for x86_64 and aarch64 Linux | Not on the machine. They run only in the GitHub CI adapter jobs (Xvfb and headless Weston), which are non-blocking until green | Wayland and X11 are not verified on real desktops |
