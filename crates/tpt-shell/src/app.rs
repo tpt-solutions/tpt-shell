@@ -971,7 +971,7 @@ impl App {
                 id,
                 Box::new(move |text| {
                     if let Some(recovery) = &crash {
-                        if let Some(url) = panes_for_page.url_of(id) {
+                        if let Some(url) = session::current_route(&panes_for_page, id) {
                             recovery.borrow_mut().page_loaded(&url);
                         }
                     }

@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use tpt_shell_core::Result;
 use tpt_shell_kiosk::recovery::{CrashRecovery, Recovery};
-use tpt_shell_platform_windows::backend::{clear_session, navigate_window, WindowId};
-use tpt_shell_platform_windows::webview2::ProcessFailure;
+use tpt_shell_platform_windows::backend::{clear_session, navigate_window, page_source, WindowId};
+use tpt_shell_platform_windows::webview2::{ProcessFailure, APP_ORIGIN};
 
 use crate::blob;
 
@@ -94,6 +94,27 @@ pub fn close_hook(panes: Rc<Panes>) -> impl FnMut(WindowId) {
             blob::remove_window_blobs(&name);
         }
     }
+}
+
+/// The route a window's page is on now, for crash recovery to return to. A page that sends a
+/// message is alive, so the document the view shows then is a good route, even when the page moved
+/// itself without the shell's help. When the view cannot say, or shows something outside the app,
+/// the last URL the shell loaded stands in.
+///
+/// Support: Partial. Windows only.
+pub fn current_route(panes: &Panes, id: WindowId) -> Option<String> {
+    match page_source(id).ok().as_deref().and_then(app_route) {
+        Some(route) => Some(route.to_string()),
+        None => panes.url_of(id),
+    }
+}
+
+/// `source` when it is a page of the app, under the app origin. Anything else is not a route the
+/// window should return to.
+fn app_route(source: &str) -> Option<&str> {
+    let under_origin =
+        source == APP_ORIGIN || source.starts_with(&format!("{APP_ORIGIN}/"));
+    under_origin.then_some(source)
 }
 
 /// The process-failed handler of a kiosk window: asks `recovery` what to load and loads it.
@@ -183,5 +204,15 @@ mod tests {
         );
         assert_eq!(panes.name_of(WindowId(7)).as_deref(), Some("main"));
         assert_eq!(panes.url_of(WindowId(8)), None);
+    }
+
+    #[test]
+    fn only_pages_of_the_app_count_as_routes() {
+        let page = format!("{APP_ORIGIN}/form?step=2");
+        assert_eq!(app_route(&page), Some(page.as_str()));
+        assert_eq!(app_route(APP_ORIGIN), Some(APP_ORIGIN));
+        assert_eq!(app_route("https://tpt-app.localhost.example.com/form"), None);
+        assert_eq!(app_route("https://example.com/"), None);
+        assert_eq!(app_route(""), None);
     }
 }

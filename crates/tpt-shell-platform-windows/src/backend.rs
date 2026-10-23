@@ -232,6 +232,20 @@ pub fn reload_window(id: WindowId) -> Result<()> {
     })
 }
 
+/// The URI of the document window `id` shows now, read on the UI thread. Kiosk crash recovery
+/// uses it to note the last route before it reloads.
+///
+/// Support: Full on Windows.
+pub fn page_source(id: WindowId) -> Result<String> {
+    WINDOWS.with(|w| {
+        let windows = w.borrow();
+        let entry = windows
+            .get(&id.0)
+            .ok_or(Error::UnknownWindow(id.0 as u64))?;
+        entry.web.source().map_err(|hr| hr_error("get_Source", hr))
+    })
+}
+
 /// Clears the browsing data of window `id`'s profile (cookies, cache, storage), from code on the
 /// UI thread. The profile is shared by every window of the environment. `on_done` runs on the UI
 /// thread when WebView2 finishes. A call that fails at once returns the error and does not run it.

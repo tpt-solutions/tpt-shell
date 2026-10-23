@@ -252,7 +252,8 @@ struct Controller4Vtbl {
 struct WebViewVtbl {
     base: IUnknownVtbl,
     get_settings: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-    _before_navigate: [usize; 1],
+    // get_Source (1): the URI of the document now shown, used to note the last route at a crash.
+    get_source: unsafe extern "system" fn(*mut c_void, *mut *mut u16) -> HRESULT,
     navigate: unsafe extern "system" fn(*mut c_void, *const u16) -> HRESULT,
     navigate_to_string: unsafe extern "system" fn(*mut c_void, *const u16) -> HRESULT,
     add_navigation_starting:
@@ -1189,6 +1190,19 @@ impl WebView {
         }
     }
 
+    /// The URI of the document the view shows now (`ICoreWebView2::get_Source`).
+    pub fn source(&self) -> Result<String, HRESULT> {
+        let vt: &WebViewVtbl = self.0.vtbl();
+        let mut out: *mut u16 = null_mut();
+        // SAFETY: `out` is a valid out-pointer for a COM-allocated string.
+        let hr = unsafe { (vt.get_source)(self.0.as_ptr(), &mut out) };
+        if hr < 0 {
+            return Err(hr);
+        }
+        // SAFETY: on success `out` is a COM-allocated, NUL-terminated string.
+        Ok(unsafe { crate::com::take_co_string(out) })
+    }
+
     pub fn document_title(&self) -> Result<String, HRESULT> {
         let vt: &WebViewVtbl = self.0.vtbl();
         let mut out: *mut u16 = null_mut();
@@ -1248,7 +1262,7 @@ mod header_tests {
     use std::path::PathBuf;
 
     /// (interface, header index, method name) for every slot we call.
-    const USED_SLOTS: [(&str, usize, &str); 43] = [
+    const USED_SLOTS: [(&str, usize, &str); 44] = [
         (
             "ICoreWebView2Environment",
             0,
@@ -1259,6 +1273,7 @@ mod header_tests {
         ("ICoreWebView2Controller", 21, "Close"),
         ("ICoreWebView2Controller", 22, "get_CoreWebView2"),
         ("ICoreWebView2", 0, "get_Settings"),
+        ("ICoreWebView2", 1, "get_Source"),
         ("ICoreWebView2", 2, "Navigate"),
         ("ICoreWebView2Settings", 8, "get_AreDevToolsEnabled"),
         ("ICoreWebView2Settings", 9, "put_AreDevToolsEnabled"),
