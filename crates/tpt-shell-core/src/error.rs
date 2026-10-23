@@ -43,5 +43,4 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 /// Support: Full. An alias for the crate's error type.
-
 pub type Result<T> = std::result::Result<T, Error>;

@@ -29,7 +29,6 @@ pub const FAKE_PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FakeId(pub u64);
 /// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FakeWindow {
     pub spec: WindowSpec,
@@ -79,7 +78,6 @@ impl EventLoopProxy for FakeProxy {
     }
 }
 /// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
-
 #[derive(Default)]
 pub struct FakeBackend {
     windows: Vec<FakeWindow>,
@@ -133,7 +131,6 @@ impl FakeBackend {
         Self::default()
     }
     /// Support: Full. In-memory test backend, used by the unit tests; it is not a platform.
-
     pub fn window(&self, id: FakeId) -> Result<&FakeWindow> {
         self.windows
             .get(id.0 as usize)

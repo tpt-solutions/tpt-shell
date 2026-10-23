@@ -50,12 +50,10 @@ impl ScaleFactor {
         }
     }
     /// Support: Full. Unit tested.
-
     pub fn get(self) -> f64 {
         self.0
     }
     /// Support: Full. Unit tested.
-
     pub fn to_physical(self, size: LogicalSize) -> PhysicalSize {
         PhysicalSize {
             width: (size.width * self.0).round().max(0.0) as u32,
@@ -63,7 +61,6 @@ impl ScaleFactor {
         }
     }
     /// Support: Full. Unit tested.
-
     pub fn to_logical(self, size: PhysicalSize) -> LogicalSize {
         LogicalSize {
             width: size.width as f64 / self.0,

@@ -7,7 +7,6 @@
 //! [`backend`]. The [`fake`] module implements them in memory for unit tests.
 /// Support: Partial. Its traits are implemented by the Windows backend and the fake. See the items
 /// in it.
-
 pub mod backend;
 /// Support: Full. Unit tested.
 pub mod clock;
