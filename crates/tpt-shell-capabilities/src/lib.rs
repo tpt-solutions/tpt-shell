@@ -11,7 +11,7 @@
 //! - [`Scope::Paths`]: directory roots. Paths are normalized first (see [`normalize_path`]).
 //! - [`Scope::PathGlobs`]: path patterns, where `*` and `?` match within one segment and
 //!   `**` matches any number of segments.
-//! - [`Scope::Devices`]: exact device identifiers.
+//! - [`Scope::Devices`]: device identifiers, or globs over them, each naming a device kind.
 //! - [`Scope::Urls`]: URL prefixes, matched on a path-segment boundary.
 //! - [`Scope::MaxBytes`]: a size cap.
 //!
@@ -34,7 +34,10 @@ pub enum Scope {
     Paths(Vec<String>),
     /// Path patterns such as `C:/Data/**/*.txt`. A request must match one pattern in full.
     PathGlobs(Vec<String>),
-    /// Exact device identifiers such as `serial:COM3`.
+    /// Device identifiers such as `serial:COM3`, or globs such as `serial:COM*` or
+    /// `usb:0416:*`. `*` matches any run of characters and `?` one character. Matching ignores
+    /// ASCII case. Each entry must name a device kind (`serial`, `hid`, `usb` or `net`), and a
+    /// `device.<kind>` grant may only name that kind (see [`Engine::add_grant`]).
     Devices(Vec<String>),
     /// URL prefixes such as `https://example.com/app`.
     Urls(Vec<String>),
@@ -256,6 +259,11 @@ impl Engine {
             for pattern in patterns {
                 normalize_path(pattern)
                     .map_err(|why| GrantError(format!("path pattern `{pattern}`: {why}")))?;
+            }
+        }
+        if let Scope::Devices(ids) = &grant.scope {
+            for id in ids {
+                check_device_entry(&grant.capability, id).map_err(GrantError)?;
             }
         }
         self.grants.push(grant);
@@ -487,7 +495,12 @@ fn in_scope(scope: &Scope, request: Request, resolve_roots: bool) -> Result<(), 
             let Request::Device(id) = request else {
                 return Err(bad_request("this grant needs a device request"));
             };
-            if ids.iter().any(|allowed| allowed == id) {
+            // A request names one device. A wildcard in it would let a grant for `serial:*`
+            // match the text `serial:*` itself, so it is refused outright.
+            if id.contains(['*', '?']) {
+                return Err(bad_request("a device identifier cannot contain `*` or `?`"));
+            }
+            if ids.iter().any(|allowed| device_glob_matches(allowed, id)) {
                 Ok(())
             } else {
                 Err(outside("the device"))
@@ -655,6 +668,70 @@ fn normalize_url(raw: &str) -> Result<String, String> {
         return Err("`..` segments are not allowed in URLs".into());
     }
     Ok(raw.to_string())
+}
+
+/// The device kinds an identifier can start with. These match the prefixes of
+/// `tpt_shell_devices::id::DeviceId`, which this crate does not depend on.
+const DEVICE_KINDS: [&str; 4] = ["serial", "hid", "usb", "net"];
+
+/// The one kind a `device.<kind>` capability may name. `device.print` and other capabilities name
+/// no single kind, so they return `None`.
+fn device_kind_of(capability: &str) -> Option<&'static str> {
+    DEVICE_KINDS
+        .iter()
+        .copied()
+        .find(|kind| capability.strip_prefix("device.") == Some(*kind))
+}
+
+/// Checks one `Scope::Devices` entry when its grant is added. The entry must start with a known
+/// kind, and a `device.<kind>` grant must name that kind, so `device.serial` cannot reach an HID
+/// device even through a glob.
+fn check_device_entry(capability: &str, entry: &str) -> Result<(), String> {
+    let kind = entry
+        .split_once(':')
+        .map(|(kind, _)| kind)
+        .unwrap_or_default();
+    if !DEVICE_KINDS.contains(&kind) {
+        return Err(format!(
+            "device `{entry}` must start with a kind: serial, hid, usb or net"
+        ));
+    }
+    if let Some(expected) = device_kind_of(capability) {
+        if kind != expected {
+            return Err(format!(
+                "`{capability}` grants may only name {expected} devices, not `{entry}`"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Whether the device pattern `pattern` covers the identifier `id`. A pattern with no wildcards
+/// is an exact match. Case is ignored, as it is for port and host names in the devices crate.
+fn device_glob_matches(pattern: &str, id: &str) -> bool {
+    let (pattern, id) = (pattern.as_bytes(), id.as_bytes());
+    let (mut p, mut t) = (0, 0);
+    // The last `*` seen, and the text position it has consumed up to. Backtracking goes only
+    // there, so the match is linear in the pattern times the text, with no exponential case.
+    let mut star: Option<(usize, usize)> = None;
+    while t < id.len() {
+        if p < pattern.len() && pattern[p] == b'*' {
+            star = Some((p, t));
+            p += 1;
+        } else if p < pattern.len()
+            && (pattern[p] == b'?' || pattern[p].eq_ignore_ascii_case(&id[t]))
+        {
+            p += 1;
+            t += 1;
+        } else if let Some((star_p, star_t)) = star {
+            p = star_p + 1;
+            t = star_t + 1;
+            star = Some((star_p, star_t + 1));
+        } else {
+            return false;
+        }
+    }
+    pattern[p..].iter().all(|&c| c == b'*')
 }
 
 fn is_capability_name(name: &str) -> bool {
@@ -942,6 +1019,172 @@ mod tests {
             ))
             .unwrap_err();
         assert!(err.0.contains("path root"));
+    }
+
+    fn device_engine(capability: &str, ids: &[&str]) -> Engine {
+        let mut e = Engine::new();
+        let scope = Scope::Devices(ids.iter().map(|id| id.to_string()).collect());
+        e.add_grant(grant("main", ORIGIN, capability, scope))
+            .unwrap();
+        e
+    }
+
+    #[test]
+    fn a_serial_grant_cannot_open_an_hid_device() {
+        let e = device_engine("device.serial", &["serial:*"]);
+        assert_eq!(
+            e.check(
+                "main",
+                ORIGIN,
+                "device.serial",
+                Request::Device("serial:COM3")
+            ),
+            Decision::Allow
+        );
+        assert_eq!(
+            code(e.check(
+                "main",
+                ORIGIN,
+                "device.serial",
+                Request::Device("hid:1234:5678")
+            )),
+            "CAP_OUT_OF_SCOPE"
+        );
+    }
+
+    #[test]
+    fn a_net_grant_cannot_open_a_serial_port() {
+        let e = device_engine("device.net", &["net:*:9100"]);
+        assert_eq!(
+            e.check(
+                "main",
+                ORIGIN,
+                "device.net",
+                Request::Device("net:printer.local:9100")
+            ),
+            Decision::Allow
+        );
+        assert_eq!(
+            code(e.check("main", ORIGIN, "device.net", Request::Device("serial:COM3"))),
+            "CAP_OUT_OF_SCOPE"
+        );
+        assert_eq!(
+            code(e.check(
+                "main",
+                ORIGIN,
+                "device.net",
+                Request::Device("net:printer.local:9101")
+            )),
+            "CAP_OUT_OF_SCOPE"
+        );
+    }
+
+    #[test]
+    fn a_device_grant_that_names_another_kind_is_refused_when_added() {
+        let mut e = Engine::new();
+        for (capability, entry) in [
+            ("device.serial", "hid:*"),
+            ("device.hid", "serial:COM3"),
+            ("device.usb", "net:*:9100"),
+            ("device.net", "*"),
+            ("device.print", "bluetooth:AA"),
+            ("device.print", "*:*"),
+        ] {
+            let scope = Scope::Devices(vec![entry.into()]);
+            assert!(
+                e.add_grant(grant("main", ORIGIN, capability, scope))
+                    .is_err(),
+                "{capability} accepted {entry}"
+            );
+        }
+        let scope = Scope::Devices(vec!["usb:0416:5011".into()]);
+        assert!(e
+            .add_grant(grant("main", ORIGIN, "device.print", scope))
+            .is_ok());
+    }
+
+    #[test]
+    fn device_globs_ignore_case_and_stay_inside_their_kind() {
+        let e = device_engine("device.print", &["usb:0416:*", "serial:com*"]);
+        for allowed in ["usb:0416:5011", "serial:COM3"] {
+            assert_eq!(
+                e.check("main", ORIGIN, "device.print", Request::Device(allowed)),
+                Decision::Allow,
+                "{allowed} should be inside the scope"
+            );
+        }
+        for refused in ["usb:0417:5011", "net:printer.local:9100"] {
+            assert_eq!(
+                code(e.check("main", ORIGIN, "device.print", Request::Device(refused))),
+                "CAP_OUT_OF_SCOPE",
+                "{refused} should be outside the scope"
+            );
+        }
+    }
+
+    #[test]
+    fn a_request_that_names_a_wildcard_is_refused_not_matched() {
+        let e = device_engine("device.serial", &["serial:*"]);
+        assert_eq!(
+            code(e.check("main", ORIGIN, "device.serial", Request::Device("serial:*"))),
+            "CAP_BAD_REQUEST"
+        );
+    }
+
+    #[test]
+    fn the_glob_matcher_handles_stars_and_question_marks() {
+        assert!(device_glob_matches("serial:COM*", "serial:COM12"));
+        assert!(device_glob_matches("serial:COM?", "serial:com3"));
+        assert!(device_glob_matches("usb:*:5011", "usb:0416:5011"));
+        assert!(device_glob_matches("serial:COM3", "SERIAL:com3"));
+        assert!(!device_glob_matches("serial:COM?", "serial:COM12"));
+        assert!(!device_glob_matches("serial:COM3", "serial:COM30"));
+        assert!(!device_glob_matches("usb:*:5011", "usb:0416:5012"));
+        assert!(device_glob_matches("*", ""));
+        assert!(!device_glob_matches("?", ""));
+    }
+
+    #[test]
+    fn consent_for_an_hid_grant_is_asked_once_and_kept_in_the_profile() {
+        let path = scratch_file("consent-hid.txt");
+        let _ = fs::remove_file(&path);
+        let mut g = grant(
+            "main",
+            ORIGIN,
+            "device.hid",
+            Scope::Devices(vec!["hid:1234:*".into()]),
+        );
+        g.consent = true;
+        {
+            let mut e = Engine::with_consent_store(Box::new(FileConsent::open(&path).unwrap()));
+            e.add_grant(g.clone()).unwrap();
+            let mut prompt = Answer(true, 0);
+            assert_eq!(
+                e.authorize(
+                    &mut prompt,
+                    "main",
+                    ORIGIN,
+                    "device.hid",
+                    Request::Device("hid:1234:5678")
+                ),
+                Decision::Allow
+            );
+            assert_eq!(prompt.1, 1);
+        }
+        let mut e = Engine::with_consent_store(Box::new(FileConsent::open(&path).unwrap()));
+        e.add_grant(g).unwrap();
+        let mut prompt = Answer(false, 0);
+        assert_eq!(
+            e.authorize(
+                &mut prompt,
+                "main",
+                ORIGIN,
+                "device.hid",
+                Request::Device("hid:1234:5678")
+            ),
+            Decision::Allow
+        );
+        assert_eq!(prompt.1, 0, "the answer should be remembered across runs");
     }
 
     #[test]

@@ -171,7 +171,33 @@ pub enum DeviceScope {
     Net { host: String, port: Option<u16> },
 }
 
+impl DeviceId {
+    /// The kind prefix of the identifier: `serial`, `hid`, `usb` or `net`.
+    ///
+    /// Support: Full.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            DeviceId::Serial { .. } => "serial",
+            DeviceId::Hid { .. } => "hid",
+            DeviceId::Usb { .. } => "usb",
+            DeviceId::Net { .. } => "net",
+        }
+    }
+}
+
 impl DeviceScope {
+    /// The kind of device this scope covers.
+    ///
+    /// Support: Full.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            DeviceScope::Serial { .. } => "serial",
+            DeviceScope::Hid { .. } => "hid",
+            DeviceScope::Usb { .. } => "usb",
+            DeviceScope::Net { .. } => "net",
+        }
+    }
+
     /// Whether `id` falls inside this scope. A scope never matches another kind of device.
     ///
     /// Support: Full.

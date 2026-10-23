@@ -78,11 +78,7 @@ impl DeviceHub {
     ///
     /// Support: Full.
     pub fn open(&mut self, id: &DeviceId, scope: &DeviceScope) -> Result<OpenDevice, DeviceError> {
-        if !scope.matches(id) {
-            return Err(DeviceError::Denied(format!(
-                "{id} is outside the granted scope"
-            )));
-        }
+        check_scope(id, scope)?;
         let index = self
             .available
             .iter()
@@ -110,11 +106,7 @@ impl DeviceHub {
         options: &OpenOptions,
     ) -> Result<OpenDevice, DeviceError> {
         options.validate()?;
-        if !scope.matches(id) {
-            return Err(DeviceError::Denied(format!(
-                "{id} is outside the granted scope"
-            )));
-        }
+        check_scope(id, scope)?;
         if self.available.iter().any(|d| d.id() == id) {
             return self.open(id, scope);
         }
@@ -200,6 +192,24 @@ impl Drop for OpenDevice {
     fn drop(&mut self) {
         record(&self.sink, EventKind::Close, self.transport.id(), 0);
     }
+}
+
+/// Refuses an open when the scope is for another kind of device, or does not cover this one. A
+/// refused open is not audited, since the device was never opened.
+fn check_scope(id: &DeviceId, scope: &DeviceScope) -> Result<(), DeviceError> {
+    if scope.kind() != id.kind() {
+        return Err(DeviceError::Denied(format!(
+            "a {} scope cannot open {id}, which is a {} device",
+            scope.kind(),
+            id.kind()
+        )));
+    }
+    if !scope.matches(id) {
+        return Err(DeviceError::Denied(format!(
+            "{id} is outside the granted scope"
+        )));
+    }
+    Ok(())
 }
 
 fn record(sink: &Sink, kind: EventKind, device: &DeviceId, bytes: usize) {
@@ -328,6 +338,60 @@ mod tests {
         drop(open);
         let kinds: Vec<EventKind> = events.lock().expect("e").iter().map(|e| e.kind).collect();
         assert_eq!(kinds, vec![EventKind::Open, EventKind::Close]);
+    }
+
+    #[test]
+    fn a_serial_scope_cannot_open_an_hid_device_and_nothing_is_audited() {
+        use crate::virtual_devices::VirtualHid;
+        let events: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+        let log = events.clone();
+        let hid_id: DeviceId = "hid:1234:5678".parse().expect("id");
+        let (hid, _handle) = VirtualHid::new(hid_id.clone());
+        let mut hub = DeviceHub::new(vec![Box::new(hid)], move |e| {
+            log.lock().expect("log").push(e.clone())
+        });
+        let serial_everything = DeviceScope::Serial { port: "*".into() };
+        let hid_everything = DeviceScope::Hid {
+            vendor: None,
+            product: None,
+        };
+        let options = OpenOptions::default();
+        for result in [
+            hub.open(&hid_id, &serial_everything).map(|_| ()),
+            hub.open_with(&hid_id, &serial_everything, &options)
+                .map(|_| ()),
+        ] {
+            let Err(DeviceError::Denied(message)) = result else {
+                panic!("a serial scope opened an HID device");
+            };
+            assert!(message.contains("cannot open"), "{message}");
+        }
+        assert!(
+            events.lock().expect("e").is_empty(),
+            "a refused open was audited"
+        );
+        assert_eq!(hub.list(&hid_everything), vec![hid_id.clone()]);
+        assert!(hub.open(&hid_id, &hid_everything).is_ok());
+    }
+
+    #[test]
+    fn a_net_scope_cannot_open_a_serial_port() {
+        let mut hub = DeviceHub::new(
+            vec![Box::new(VirtualSerial::loopback(port("COM7")))],
+            |_| {},
+        );
+        let net_everything = DeviceScope::Net {
+            host: "*".into(),
+            port: None,
+        };
+        assert!(matches!(
+            hub.open(&port("COM7"), &net_everything),
+            Err(DeviceError::Denied(_))
+        ));
+        assert_eq!(
+            hub.list(&DeviceScope::Serial { port: "*".into() }),
+            vec![port("COM7")]
+        );
     }
 
     #[test]
