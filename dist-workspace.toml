@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright (c) 2026 TPT Solutions
+#
+# cargo-dist configuration for the tpt-shell CLI release binaries (todo M12 "cargo-dist binaries").
+# cargo-dist reads this file from the workspace root. The release workflow is generated from it
+# with `dist generate` (.github/workflows/release.yml). Regenerate after any change here.
+#
+# Checked with `dist plan` (uploads nothing) using cargo-dist 0.32.0, which is the version pinned
+# below. Tags trigger the release; none has been pushed.
+#
+# Decisions recorded here:
+#   O4: no crates.io publish at M12 (publish-jobs is empty; the name check happens at release).
+#   Scope: the CLI binary only. Library crates are not distributed as binaries.
+#   Installers: shell and PowerShell scripts from cargo-dist. The winget, Scoop and Homebrew
+#   manifests are written by hand from packaging/winget, packaging/scoop and packaging/homebrew,
+#   because those are submitted to other repositories by a person.
+
+[workspace]
+members = ["cargo:crates/tpt-shell-cli"]
+
+[dist]
+cargo-dist-version = "0.32.0"
+ci = "github"
+# Only the release steps. The build matrix covers the three OSes and aarch64 where the runner exists
+# (spec §15).
+targets = [
+  "x86_64-pc-windows-msvc",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+]
+installers = ["shell", "powershell"]
+unix-archive = ".tar.gz"
+windows-archive = ".zip"
+install-path = "CARGO_HOME"
+# No crates.io publish at M12 (decision O4). Left empty on purpose.
+publish-jobs = []
+# Build provenance attestations for the artifacts, made by the release workflow.
+github-attestations = true
+# Pull requests only plan the release; they build nothing and publish nothing.
+pr-run-mode = "plan"
+# The release commit must have a committed lock file (spec §10.8, --locked).
+allow-dirty = []

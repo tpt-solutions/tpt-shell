@@ -25,8 +25,9 @@ steps by itself. Tick a box only when the evidence is recorded (the log, the lin
 
 ## B. Build the artifacts (on CI, from the release commit)
 
-- [ ] cargo-dist plan (`dist plan`) reviewed; `dist-workspace.toml` copied to the repo root
-      (packaging/dist/dist-workspace.toml) and its cargo-dist version checked
+- [x] cargo-dist plan (`dist plan`) reviewed; `dist-workspace.toml` at the repo root (copy in
+      packaging/dist/dist-workspace.toml), pinned to cargo-dist 0.32.0; the plan passes. Review the
+      generated `.github/workflows/release.yml` again before the release tag
 - [ ] Release build of the CLI with `--locked` (`tools/repro-build.sh`)
 - [ ] Windows: `tools/bundle-windows.sh --installer` (portable folder, zip, installer)
 - [ ] macOS: `tools/bundle-macos.sh --dmg` on a macOS runner

@@ -17,7 +17,7 @@ publishes, uploads, submits or signs by itself. The scripts that do the work are
 | `runtime/webview2-fixed.example.toml` | Fields of a pinned WebView2 Fixed Version record | Written; the crate does not read it yet |
 | `repro/REPRODUCIBLE.md`, `repro/cargo-config.toml` | Reproducible-build guidance and build config | Written; check not run |
 | `procurement/PROCUREMENT-PACK.md.tmpl` | Procurement pack, filled by `tools/procurement-pack.py` | Written; filled once from test outputs |
-| `dist/dist-workspace.toml` | cargo-dist configuration (copy to the repo root to use) | Written; cargo-dist not run |
+| `dist/dist-workspace.toml` | cargo-dist configuration (copy of the repo-root file; keep them equal) | Copied to the root; `dist plan` passes with cargo-dist 0.32.0; workflow generated; no tag pushed |
 | `winget/`, `scoop/`, `homebrew/` | Manifest templates | Written; not submitted |
 | `release/RELEASE-CHECKLIST.md` | Release and v1.0.0 tag checklist | Written; no tag made |
 | `release/RELEASE-NOTES.md.tmpl` | Release notes template | Written |
