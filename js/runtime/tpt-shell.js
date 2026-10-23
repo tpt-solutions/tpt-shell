@@ -154,6 +154,11 @@
   // The APIs this runtime provides. Pages can check `tpt.caps.apis` before they call one.
   var apis = ['invoke', 'on', 'job', 'normalize', 'compat.tauri'];
 
+  // The profile level is set by the host before this file runs (window.tptProfileLevel). Anything
+  // else is reported as unknown, so a page never reads a level the host did not give.
+  var profileLevels = ['full', 'partial', 'unsupported'];
+  var profileLevel = profileLevels.indexOf(window.tptProfileLevel) >= 0 ? window.tptProfileLevel : 'unknown';
+
   window.tpt = {
     invoke: invoke,
     on: on,
@@ -163,6 +168,7 @@
     caps: {
       engine: 'webview2',
       version: edge ? edge[1] : null,
+      profile: profileLevel,
       apis: apis.slice()
     }
   };

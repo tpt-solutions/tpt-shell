@@ -38,6 +38,58 @@ pub enum Kind {
     Ephemeral,
 }
 
+/// How well the platform keeps one profile's data apart from another's. The host reports it to
+/// pages as `tpt.caps.profile`.
+///
+/// Support: Full.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
+    /// Each profile has its own storage folder, and it is removed when the session ends.
+    Full,
+    /// Profiles are kept apart, with a gap the platform's mapping describes (see [`level_on`]).
+    Partial,
+    /// Profiles cannot be kept apart on this platform.
+    Unsupported,
+}
+
+impl Level {
+    /// The lowercase name the page sees: `full`, `partial` or `unsupported`.
+    ///
+    /// Support: Full.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Level::Full => "full",
+            Level::Partial => "partial",
+            Level::Unsupported => "unsupported",
+        }
+    }
+}
+
+/// The level for a profile kind on the operating system `os` (as `std::env::consts::OS` names it).
+///
+/// Windows gives every kind its own WebView2 user-data folder, so it is Full. On macOS and Linux
+/// the default store is the platform's own, so it is Full. A named profile there needs a data-store
+/// identifier (macOS 14 and later) or a WebsiteDataManager base folder (Linux), and an ephemeral
+/// session on either is non-persistent but not isolated from the default store, so both are
+/// Partial. Any other system is Unsupported.
+///
+/// Support: Full.
+pub fn level_on(kind: &Kind, os: &str) -> Level {
+    match (os, kind) {
+        ("windows", _) => Level::Full,
+        ("macos" | "linux", Kind::Default) => Level::Full,
+        ("macos" | "linux", Kind::Named(_) | Kind::Ephemeral) => Level::Partial,
+        _ => Level::Unsupported,
+    }
+}
+
+/// The level for a profile kind on the system this build runs on.
+///
+/// Support: Full.
+pub fn level(kind: &Kind) -> Level {
+    level_on(kind, std::env::consts::OS)
+}
+
 /// Why a profile name was refused.
 ///
 /// Support: Full.
@@ -567,5 +619,69 @@ mod tests {
         assert!(policy.should_wipe(start, start + Duration::from_secs(60)));
         let never = IdlePolicy { after: None };
         assert!(!never.should_wipe(start, start + Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn named_profiles_do_not_see_each_others_files_file_level() {
+        let base = scratch("isolation");
+        let store = ProfileStore::new(&base);
+        let a = store.create("alpha").unwrap();
+        let b = store.create("beta").unwrap();
+        fs::write(a.join("cookies.db"), b"secret").unwrap();
+
+        assert!(a.join("cookies.db").exists(), "A does not see its own file");
+        assert!(
+            !b.join("cookies.db").exists(),
+            "B can see A's file by its name"
+        );
+        assert_eq!(store.usage("beta").unwrap(), 0);
+        assert_eq!(store.usage("alpha").unwrap(), 6);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn an_ephemeral_session_leaves_no_files_after_it_is_dropped_file_level() {
+        let base = scratch("ephemeral-drop");
+        let session = Ephemeral::create(&base).unwrap();
+        let dir = session.path().to_path_buf();
+        fs::write(dir.join("state.json"), b"{\"x\":1}").unwrap();
+        assert!(dir.join("state.json").exists());
+
+        drop(session);
+        assert!(
+            !dir.exists(),
+            "the session folder is still there after drop"
+        );
+        let left = fs::read_dir(base.join("ephemeral")).unwrap().count();
+        assert_eq!(left, 0, "{left} session folder(s) left behind");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn an_ephemeral_session_is_gone_after_an_explicit_wipe_file_level() {
+        let base = scratch("ephemeral-wipe");
+        let mut session = Ephemeral::create(&base).unwrap();
+        let dir = session.path().to_path_buf();
+        fs::write(dir.join("cache.bin"), vec![7u8; 4096]).unwrap();
+
+        session.wipe().unwrap();
+        assert!(
+            !dir.exists(),
+            "the session folder is still there after wipe"
+        );
+        assert!(!dir.join("cache.bin").exists());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn profile_levels_by_os_and_kind() {
+        let named = Kind::Named("work".into());
+        assert_eq!(level_on(&named, "windows"), Level::Full);
+        assert_eq!(level_on(&Kind::Ephemeral, "windows"), Level::Full);
+        assert_eq!(level_on(&Kind::Default, "macos"), Level::Full);
+        assert_eq!(level_on(&named, "macos"), Level::Partial);
+        assert_eq!(level_on(&Kind::Ephemeral, "linux"), Level::Partial);
+        assert_eq!(level_on(&named, "freebsd"), Level::Unsupported);
+        assert_eq!(Level::Partial.as_str(), "partial");
     }
 }

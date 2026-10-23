@@ -13,10 +13,14 @@ const vm = require('node:vm');
 const SOURCE = fs.readFileSync(path.join(__dirname, '..', 'runtime', 'tpt-shell.js'), 'utf8');
 
 // Builds a page window with a fake WebView2 host. `fromRust(msg)` delivers a message to the page.
-function loadRuntime({ userAgent = 'Mozilla/5.0 Chrome/155.0 Safari/537.36 Edg/155.0.4283.62' } = {}) {
+function loadRuntime({
+  userAgent = 'Mozilla/5.0 Chrome/155.0 Safari/537.36 Edg/155.0.4283.62',
+  profileLevel,
+} = {}) {
   const listeners = [];
   const sent = [];
   const window = {
+    tptProfileLevel: profileLevel,
     chrome: {
       webview: {
         addEventListener(type, fn) {
@@ -100,6 +104,18 @@ test('caps reports the engine and the WebView2 version from the user agent', () 
 test('caps has a null version when the user agent does not name one', () => {
   const { tpt } = loadRuntime({ userAgent: 'Something/1.0' });
   assert.equal(tpt.caps.version, null);
+});
+
+test('caps.profile reports the level the host set', () => {
+  for (const level of ['full', 'partial', 'unsupported']) {
+    const { tpt } = loadRuntime({ profileLevel: level });
+    assert.equal(tpt.caps.profile, level);
+  }
+});
+
+test('caps.profile is unknown when the host sets no level or an unexpected one', () => {
+  assert.equal(loadRuntime().tpt.caps.profile, 'unknown');
+  assert.equal(loadRuntime({ profileLevel: 'everything' }).tpt.caps.profile, 'unknown');
 });
 
 test('the runtime does nothing without chrome.webview', () => {
