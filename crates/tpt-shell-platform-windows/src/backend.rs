@@ -1430,6 +1430,12 @@ impl WindowsBackend {
         let script = injection_script(&self.theme, scheme, crate::accessibility::current())?;
         web.add_document_start_script(&script, |_| {})
             .map_err(|hr| hr_error("AddScriptToExecuteOnDocumentCreated", hr))?;
+        // The profile level is read by the page runtime, so it goes in first. Windows gives every
+        // profile kind its own folder, so the level for the default kind is the level for all.
+        let profile_level = tpt_shell_profiles::level(&tpt_shell_profiles::Kind::Default);
+        let profile_script = format!("window.tptProfileLevel = '{}';", profile_level.as_str());
+        web.add_document_start_script(&profile_script, |_| {})
+            .map_err(|hr| hr_error("AddScriptToExecuteOnDocumentCreated", hr))?;
         // The page runtime (`window.tpt`) goes in before any page script runs.
         web.add_document_start_script(SHIM_JS, |_| {})
             .map_err(|hr| hr_error("AddScriptToExecuteOnDocumentCreated", hr))?;
