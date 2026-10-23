@@ -494,7 +494,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Recorder: IPC calls with args/results/timing, DOM input events with stable paths, window events, protocol loads
 - [x] Virtualised Rust `Clock`/`Rng` in record/replay mode
 - [x] In-page shim for Date.now, performance.now, Math.random, timers (record/replay only)
-- [ ] `.tptreplay` format: zstd JSON Lines + assets + version (JSON Lines and version 1 are done; compression and assets are not)
+- [x] `.tptreplay` format: zstd JSON Lines + assets + version (zstd-compressed recordings and SHA-256 checked assets are done; version 2 files without the hash still read)
 - [x] `docs/replay-format.md` (format, readers, divergence and limits)
 - [x] Golden tests for replay format
 - [ ] Fuzz target: replay reader
@@ -688,7 +688,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 
 ### Fuzzing and security
 - [ ] Fuzz envelope parser, validator, manifest parser, audit chain, replay reader (extended runs). Progress: the replay reader is now a fifth target in `fuzz/` (its smoke test runs with the others). Each of the five targets ran 40 s in release with no panic (about 230 million runs, audit chain about 38 thousand, since each run writes a file). Extended runs of hours are still to do, and so is a libFuzzer harness, which the licence policy blocks (see `fuzz/Cargo.toml`)
-- [ ] Security test pass: capability bypass, oversized/malformed messages, path-scope escapes
+- [x] Security test pass: capability bypass, oversized/malformed messages, path-scope escapes (crates/tpt-shell-ipc/tests/security.rs and crates/tpt-shell-capabilities/tests/security.rs; the Unix symlink escape has not run here)
 - [ ] External or internal security review
 - [ ] Control-channel review (R7)
 - [ ] Soundness review of all unsafe code (R1, R3)
