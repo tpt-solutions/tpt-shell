@@ -47,6 +47,13 @@ pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 /// Support: Full.
 pub const NOT_FOUND: &str = "TS0303";
 
+/// The error code for a locator that matches more than one element. The driver refuses it rather
+/// than guess which element a test meant. It is not retried.
+///
+/// Support: Partial. The code is not in the public registry yet; tpt-shell-errors needs an entry
+/// before a release (routed to the errors crate's owner).
+pub const AMBIGUOUS: &str = "TS0306";
+
 /// Carries commands to the app and returns its answers. The file channel implements it.
 ///
 /// Support: Full.
@@ -146,16 +153,28 @@ impl<T: Transport> Driver<T> {
         &self.transport
     }
 
-    /// Finds the first element that matches, once. Returns a not-found error when none
-    /// matches.
+    /// Finds the element that matches. Returns a not-found error when none matches, and an
+    /// ambiguous error when the app reports more than one match. An answer without a `matches`
+    /// count is taken as one match.
     ///
-    /// Support: Full.
+    /// Support: Full. The app must report `matches`; without it the driver cannot refuse an
+    /// ambiguous locator, and the app side is routed to the facade.
     pub fn find(&mut self, locator: &Locator) -> Result<Element, ChannelError> {
         let name = locator.name.clone();
         let data = self.transport.call(&Command::Find {
             role: locator.role.clone(),
             name,
         })?;
+        let matches = data.get("matches").and_then(Value::as_u64).unwrap_or(1);
+        if matches > 1 {
+            return Err(ChannelError {
+                code: AMBIGUOUS,
+                message: format!(
+                    "{matches} elements match role {:?}; give the locator a name or a more specific role",
+                    locator.role
+                ),
+            });
+        }
         let handle = data
             .get("handle")
             .and_then(Value::as_u64)
@@ -298,7 +317,7 @@ impl<T: Transport> Driver<T> {
 /// Typed text is recorded as sent. Redact the recording before it leaves the machine
 /// (see tpt_shell_replay::report).
 ///
-/// Support: Full. Virtual devices (spec 10.2) are not wired in: a device event would be a
+/// Support: Partial. Virtual devices (spec 10.2) are not wired in: a device event would be a
 /// command the app reports, and that path is routed to the device crates.
 pub struct Recording<T: Transport> {
     inner: T,
@@ -510,6 +529,118 @@ mod tests {
         );
         assert_eq!(replay.events[1].data["id"], 0);
         assert_eq!(replay.events[3].data["code"], NOT_FOUND);
+    }
+
+    /// A page the test can change: elements have a role and a name, `hidden` ones appear when the
+    /// element that reveals them is clicked, and every click and typed text is recorded.
+    struct FakePage {
+        elements: Vec<(u64, String, String)>,
+        hidden: Vec<(u64, String, String)>,
+        reveal_on: Option<u64>,
+        clicks: Vec<u64>,
+        typed: Vec<(u64, String)>,
+    }
+
+    impl FakePage {
+        fn new(elements: Vec<(u64, &str, &str)>) -> Self {
+            FakePage {
+                elements: elements
+                    .into_iter()
+                    .map(|(h, r, n)| (h, r.into(), n.into()))
+                    .collect(),
+                hidden: Vec::new(),
+                reveal_on: None,
+                clicks: Vec::new(),
+                typed: Vec::new(),
+            }
+        }
+    }
+
+    impl Transport for FakePage {
+        fn call(&mut self, command: &Command) -> Result<Value, ChannelError> {
+            match command {
+                Command::Find { role, name } => {
+                    let found: Vec<&(u64, String, String)> = self
+                        .elements
+                        .iter()
+                        .filter(|(_, r, n)| r == role && name.as_ref().is_none_or(|want| want == n))
+                        .collect();
+                    match found.first() {
+                        None => Err(not_found()),
+                        Some((handle, _, _)) => {
+                            Ok(json!({ "handle": handle, "matches": found.len() }))
+                        }
+                    }
+                }
+                Command::Click { handle } => {
+                    self.clicks.push(*handle);
+                    if self.reveal_on == Some(*handle) {
+                        self.elements.append(&mut self.hidden);
+                    }
+                    Ok(Value::Null)
+                }
+                Command::TypeText { handle, text } => {
+                    self.typed.push((*handle, text.clone()));
+                    Ok(Value::Null)
+                }
+                _ => Ok(Value::Null),
+            }
+        }
+
+        fn artifact(&self, _name: &str) -> Result<Vec<u8>, ChannelError> {
+            Err(ChannelError {
+                code: "TS0305",
+                message: "no artifacts on the fake page".into(),
+            })
+        }
+    }
+
+    #[test]
+    fn an_ambiguous_locator_is_refused_and_not_retried() {
+        let page = FakePage::new(vec![(1, "button", "Save"), (2, "button", "Save")]);
+        let mut d = Driver::new(page);
+        let err = d
+            .wait_for(&role("button").name("Save"), Duration::from_secs(5))
+            .unwrap_err();
+        assert_eq!(err.code, AMBIGUOUS);
+        assert_eq!(d.transport().clicks.len(), 0);
+        assert_eq!(
+            d.eventually(Duration::ZERO, |d| d.find(&role("button").name("Save")))
+                .unwrap_err()
+                .code,
+            AMBIGUOUS
+        );
+    }
+
+    #[test]
+    fn a_unique_match_with_a_count_of_one_is_accepted() {
+        let page = FakePage::new(vec![(7, "textbox", "Name")]);
+        let mut d = Driver::new(page);
+        assert_eq!(d.find(&role("textbox").name("Name")).unwrap().handle(), 7);
+    }
+
+    #[test]
+    fn wait_for_finds_a_control_that_appears_after_a_click() {
+        let mut page = FakePage::new(vec![(1, "button", "Open")]);
+        page.hidden.push((2, "button".into(), "Save".into()));
+        page.reveal_on = Some(1);
+        let mut d = Driver::new(page);
+
+        // Before the click the control is not on the page, so the wait gives up with the code.
+        let early = d
+            .wait_for(&role("button").name("Save"), Duration::from_millis(120))
+            .unwrap_err();
+        assert_eq!(early.code, NOT_FOUND);
+
+        let open = d.find(&role("button").name("Open")).unwrap();
+        d.click(&open).unwrap();
+        let save = d
+            .wait_for(&role("button").name("Save"), Duration::from_secs(5))
+            .unwrap();
+        d.type_text(&save, "report.pdf").unwrap();
+
+        assert_eq!(d.transport().clicks, vec![1]);
+        assert_eq!(d.transport().typed, vec![(2, "report.pdf".to_string())]);
     }
 
     #[test]

@@ -145,6 +145,12 @@ pub const REGISTRY: &[Entry] = &[
         explanation: "A test artifact path points outside the artifact directory, or is not a plain relative path.",
         fix: "Use a plain relative file name inside the artifact directory.",
     },
+    Entry {
+        code: "TS0306",
+        title: "element is ambiguous",
+        explanation: "More than one element matched the role and name in the test query, so the driver cannot tell which one to act on. This is not retried, because waiting does not change the match count.",
+        fix: "Narrow the query with a more specific name, or give the elements distinct accessible names.",
+    },
 ];
 
 /// Looks up a code. The match ignores ASCII case, so `ts0001` finds `TS0001`.
