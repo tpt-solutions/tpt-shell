@@ -11,7 +11,7 @@
 //! This host has no window. A window's page is not offered to the agent yet (see todo.md, M9).
 
 use std::cell::RefCell;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::rc::Rc;
 use std::time::Instant;
 

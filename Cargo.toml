@@ -1,5 +1,18 @@
 [workspace]
 resolver = "2"
+# Templates and examples are standalone projects that depend on the crates by path.
+exclude = [
+    "templates/agent-demo",
+    "templates/appfront-dom",
+    "templates/audit-app",
+    "templates/kiosk",
+    "templates/pos",
+    "examples/agent-demo",
+    "examples/audit-viewer",
+    "examples/devices-sim",
+    "examples/kiosk",
+    "examples/pos",
+]
 members = [
     "crates/tpt-shell",
     "crates/tpt-shell-agent",
