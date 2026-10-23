@@ -9,6 +9,9 @@
 #[cfg(feature = "agent")]
 #[cfg_attr(not(windows), allow(dead_code))]
 mod agent;
+#[cfg(feature = "agent")]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod agent_snapshot;
 #[cfg(windows)]
 mod devtools;
 #[cfg(any(feature = "admin-endpoint", feature = "health-endpoint"))]

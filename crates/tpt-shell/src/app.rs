@@ -856,6 +856,8 @@ impl App {
                     config,
                     profile,
                     tools: std::mem::take(&mut self.agent_tools),
+                    // No platform script runner yet, so `wait_for` is not offered.
+                    page_script: None,
                 };
                 crate::agent::session(setup, audit.clone())
                     .map_err(Error::Backend)?

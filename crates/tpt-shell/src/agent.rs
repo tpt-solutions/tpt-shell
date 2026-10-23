@@ -15,8 +15,10 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 use tpt_shell_agent::profile::AgentConfig;
 use tpt_shell_agent::record::{RecordedAction, Recorder};
-use tpt_shell_agent::{AgentTool, Outcome as AgentOutcome, Session};
+use tpt_shell_agent::{wait_for_tool, AgentTool, Outcome as AgentOutcome, Session};
 use tpt_shell_audit::{AuditLog, Entry, Outcome};
+
+use crate::agent_snapshot::{snapshot_source, PageScript};
 
 /// How often the UI thread looks for agent lines. Responses are not latency sensitive.
 pub(crate) const TICK: Duration = Duration::from_millis(20);
@@ -27,6 +29,9 @@ pub(crate) struct AgentSetup {
     pub(crate) config: AgentConfig,
     pub(crate) profile: String,
     pub(crate) tools: Vec<AgentTool>,
+    /// Runs the snapshot script in a window's page. When set, the session offers `wait_for`, if
+    /// the profile allows it. The app sets it once the platform can run page scripts for it.
+    pub(crate) page_script: Option<PageScript>,
 }
 
 /// Writes agent calls to the audit log the app's own commands use.
@@ -75,8 +80,11 @@ pub(crate) fn session(
             "the agent needs an audit log: call App::audit or App::manifest_audit first".into(),
         );
     };
-    let tools: Vec<AgentTool> = setup
-        .tools
+    let mut offered = setup.tools;
+    if let Some(script) = setup.page_script {
+        offered.push(wait_for_tool(snapshot_source(script)));
+    }
+    let tools: Vec<AgentTool> = offered
         .into_iter()
         .filter(|tool| profile.allows_command(&tool.command))
         .collect();
@@ -152,7 +160,62 @@ mod tests {
             config,
             profile: "assistant".into(),
             tools: vec![tool("set_volume"), tool("format_disk")],
+            page_script: None,
         }
+    }
+
+    /// A page script for a page whose one button is always there.
+    fn page_with_save() -> PageScript {
+        let page = r#"{"title":"t","path":"https://tpt-app.localhost/","truncated":false,"tree":[{"ref":7,"role":"button","name":"Save","bounds":{"x":0,"y":0,"w":1,"h":1}}]}"#;
+        Box::new(move |_| Ok(Some(page.to_string())))
+    }
+
+    #[test]
+    fn wait_for_is_offered_only_when_the_profile_allows_it_and_a_page_script_is_given() {
+        let text = "[app]\nname = \"demo\"\n[agent]\nenabled = true\n\
+             [agent.profiles.assistant]\nactions = [\"invoke\"]\ncommands = [\"wait_for\"]\n";
+        let parsed = tpt_shell_manifest::parse(text).expect("manifest");
+        let section = parsed
+            .stubs
+            .iter()
+            .find(|(name, _)| name.as_str() == "agent")
+            .map(|(_, table)| table);
+        let config = tpt_shell_agent::profile::parse_agent_section(section).expect("section");
+        let setup_with = |script: Option<PageScript>| AgentSetup {
+            config: config.clone(),
+            profile: "assistant".into(),
+            tools: Vec::new(),
+            page_script: script,
+        };
+        let list = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
+
+        let path = temp_log("wait");
+        let log = Rc::new(RefCell::new(
+            AuditLog::open(&path, tpt_shell_audit::Policy::default()).expect("log"),
+        ));
+        let mut offered = session(setup_with(Some(page_with_save())), Some(log.clone()))
+            .expect("session")
+            .expect("enabled");
+        let reply = offered
+            .handle_line(list, Duration::ZERO, &mut |_, _| false)
+            .expect("a reply");
+        assert!(reply.contains("wait_for"), "{reply}");
+
+        let call = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"wait_for","arguments":{"role":"button","name":"Save","timeout_ms":1000,"poll_ms":10}}}"#;
+        let found = offered
+            .handle_line(call, Duration::ZERO, &mut |_, _| false)
+            .expect("a reply");
+        assert!(found.contains("Save"), "{found}");
+        assert!(!found.contains("isError\":true"), "{found}");
+
+        let mut without = session(setup_with(None), Some(log))
+            .expect("session")
+            .expect("enabled");
+        let reply = without
+            .handle_line(list, Duration::ZERO, &mut |_, _| false)
+            .expect("a reply");
+        assert!(!reply.contains("wait_for"), "{reply}");
+        let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
     }
 
     fn temp_log(name: &str) -> std::path::PathBuf {
