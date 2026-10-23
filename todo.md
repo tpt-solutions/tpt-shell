@@ -250,7 +250,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Streamed results with backpressure (job results are one value; streams are a separate channel in `tpt-shell-ipc::stream`)
 - [x] Typed job events in TS client (`job.cancel()`)
 - [x] Optional progress component
-- [ ] Tests with fake backend (jobs are tested directly on threads, not through the fake backend)
+- [x] Tests with fake backend (a job runs end to end through the fake window: spawn, progress, result, cancel, and window ownership of cancel)
 
 ### Theming
 - [x] Inject `--tpt-accent`, `--tpt-bg`, `--tpt-fg`, `--tpt-font` etc. (`tpt-shell-core::theme`, applied at document start on Windows; a change applies to windows created after `set_theme`)
