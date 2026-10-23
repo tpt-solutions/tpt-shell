@@ -24,6 +24,12 @@ use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::{Expr, FnArg, Ident, ItemFn, LitBool, LitStr, Pat, PatType, ReturnType, Token, Type};
 
+/// The items a stream command may have in flight before the receiver grants more credit.
+const STREAM_CREDIT: u32 = 8;
+
+/// The largest item, in bytes, that a stream command sends.
+const STREAM_MAX_CHUNK: usize = 64 * 1024;
+
 /// Options accepted by `#[command(...)]`.
 #[derive(Default)]
 struct Options {
@@ -43,6 +49,8 @@ enum CommandKind {
     Sync,
     Async,
     Job,
+    /// A job whose function returns an iterator of items, each sent to the page's stream.
+    Stream,
 }
 
 /// The kinds of target a grant's scope can check (see `tpt_shell_ipc::Target`).
@@ -106,12 +114,12 @@ fn parse_options(attr: TokenStream2) -> syn::Result<Options> {
                 "sync" => CommandKind::Sync,
                 "async" => CommandKind::Async,
                 "job" => CommandKind::Job,
-                "stream" => {
+                "stream" => CommandKind::Stream,
+                _ => {
                     return Err(
-                        meta.error("stream commands are not built yet; use tpt_shell_ipc::stream")
+                        meta.error("expected kind = \"sync\", \"async\", \"job\" or \"stream\"")
                     )
                 }
-                _ => return Err(meta.error("expected kind = \"sync\", \"async\" or \"job\"")),
             };
             Ok(())
         } else if meta.path.is_ident("job") {
@@ -142,6 +150,67 @@ fn is_result(ty: &Type) -> bool {
             .last()
             .is_some_and(|s| s.ident == "Result"),
         _ => false,
+    }
+}
+
+/// The `T` of a `Result<T, E>`, if `ty` is one.
+fn result_ok_type(ty: &Type) -> Option<&Type> {
+    let Type::Path(path) = ty else { return None };
+    let segment = path.path.segments.last()?;
+    if segment.ident != "Result" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    match args.args.first()? {
+        syn::GenericArgument::Type(inner) => Some(inner),
+        _ => None,
+    }
+}
+
+/// Whether a type is `impl Iterator<Item = T>` for some `T`.
+fn is_item_iterator(ty: &Type) -> bool {
+    let Type::ImplTrait(imp) = ty else {
+        return false;
+    };
+    imp.bounds.iter().any(|bound| {
+        let syn::TypeParamBound::Trait(tb) = bound else {
+            return false;
+        };
+        let Some(segment) = tb.path.segments.last() else {
+            return false;
+        };
+        if segment.ident != "Iterator" {
+            return false;
+        }
+        let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+            return false;
+        };
+        args.args.iter().any(
+            |arg| matches!(arg, syn::GenericArgument::AssocType(assoc) if assoc.ident == "Item"),
+        )
+    })
+}
+
+/// A stream command's output is `impl Iterator<Item = T>`, or a `Result` of one. Anything else
+/// has no items to send, so it is refused here rather than at run time.
+fn check_stream_output(output: &ReturnType) -> syn::Result<()> {
+    let refusal =
+        "a stream command returns an iterator of items, such as `-> impl Iterator<Item = T>` \
+         or `-> Result<impl Iterator<Item = T>, CommandError>`";
+    let ReturnType::Type(_, ty) = output else {
+        return Err(syn::Error::new_spanned(output, refusal));
+    };
+    let items = if is_result(ty) {
+        result_ok_type(ty).ok_or_else(|| syn::Error::new_spanned(ty, refusal))?
+    } else {
+        ty.as_ref()
+    };
+    if is_item_iterator(items) {
+        Ok(())
+    } else {
+        Err(syn::Error::new_spanned(ty, refusal))
     }
 }
 
@@ -227,7 +296,16 @@ pub fn expand_command(attr: TokenStream2, item: ItemFn) -> syn::Result<TokenStre
                 "a job body runs on its own thread; write it as a plain `fn` that takes a `&JobContext`",
             ))
         }
+        (CommandKind::Stream, true) => {
+            return Err(syn::Error::new_spanned(
+                &item.sig,
+                "a stream body runs on its own thread; write it as a plain `fn` that returns an iterator of items",
+            ))
+        }
         _ => {}
+    }
+    if options.kind == CommandKind::Stream {
+        check_stream_output(&item.sig.output)?;
     }
 
     let fname = item.sig.ident.clone();
@@ -293,10 +371,14 @@ pub fn expand_command(attr: TokenStream2, item: ItemFn) -> syn::Result<TokenStre
     let job_fn = format_ident!("__tpt_job_{}", fname);
     let register_fn = format_ident!("__tpt_register_{}", fname);
 
+    // A stream answers with a job id, exactly as a job does, so the contract records it as a job.
+    // The contract has no stream kind until the page transport carries items.
     let kind_path = match options.kind {
         CommandKind::Sync => quote! { ::tpt_shell::__private::ipc::contract::Kind::Sync },
         CommandKind::Async => quote! { ::tpt_shell::__private::ipc::contract::Kind::Async },
-        CommandKind::Job => quote! { ::tpt_shell::__private::ipc::contract::Kind::Job },
+        CommandKind::Job | CommandKind::Stream => {
+            quote! { ::tpt_shell::__private::ipc::contract::Kind::Job }
+        }
     };
 
     let fields = params.iter().map(|(_, ty, name)| {
@@ -325,7 +407,43 @@ pub fn expand_command(attr: TokenStream2, item: ItemFn) -> syn::Result<TokenStre
         quote! { let out = #call_expr; }
     };
 
-    let handler = if options.kind == CommandKind::Job {
+    let handler = if options.kind == CommandKind::Stream {
+        // The function is called on the job's thread, so its iterator is never sent across threads.
+        // Each item is sent with send_item_wait, which waits for credit from the receiver.
+        let items_call = if returns_result {
+            quote! { let items = #fname(#(#call_args),*)?; }
+        } else {
+            quote! { let items = #fname(#(#call_args),*); }
+        };
+        let credit = STREAM_CREDIT;
+        let chunk = STREAM_MAX_CHUNK;
+        quote! {
+            #[doc(hidden)]
+            pub fn #job_fn(
+                args: &::tpt_shell::__private::ipc::Value,
+                jobs: &::std::rc::Rc<::std::cell::RefCell<::tpt_shell::__private::ipc::jobs::Jobs>>,
+            ) -> ::core::result::Result<::tpt_shell::__private::ipc::Value, ::tpt_shell::__private::ipc::router::CommandError> {
+                #(#reads)*
+                ::tpt_shell::__private::ipc::stream::start_streamed_shared(
+                    jobs,
+                    #credit,
+                    #chunk,
+                    move |ctx: &::tpt_shell::__private::ipc::jobs::JobContext| -> ::core::result::Result<::tpt_shell::__private::ipc::Value, ::tpt_shell::__private::ipc::router::CommandError> {
+                        #items_call
+                        let mut sent: u64 = 0;
+                        for item in items {
+                            let value = ::tpt_shell::__private::ipc::reflect::__private::to_value(&item)?;
+                            if ctx.send_item_wait(value.to_string().into_bytes()).is_err() {
+                                break;
+                            }
+                            sent += 1;
+                        }
+                        ::core::result::Result::Ok(::tpt_shell::__private::ipc::Value::from(sent))
+                    },
+                )
+            }
+        }
+    } else if options.kind == CommandKind::Job {
         let body_call = if returns_result {
             quote! { let out = #fname(#(#call_args),*)?; }
         } else {
@@ -362,13 +480,13 @@ pub fn expand_command(attr: TokenStream2, item: ItemFn) -> syn::Result<TokenStre
     // lets it run. A command that acts on a path, device or URL names it with `target(...)`.
     let target_of = target_of(options.target.as_ref());
     let register_call = match (&options.capability, options.kind) {
-        (Some(c), CommandKind::Job) => {
+        (Some(c), CommandKind::Job | CommandKind::Stream) => {
             let c = LitStr::new(c, proc_macro2::Span::call_site());
             quote! {
                 router.register_job_guarded(command.name, #c, command.args, #target_of, #job_fn);
             }
         }
-        (None, CommandKind::Job) => {
+        (None, CommandKind::Job | CommandKind::Stream) => {
             if options.target.is_some() {
                 return Err(syn::Error::new_spanned(
                     &item.sig.ident,

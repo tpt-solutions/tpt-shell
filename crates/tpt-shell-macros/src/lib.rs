@@ -134,8 +134,11 @@ pub fn derive_contract(input: TokenStream) -> TokenStream {
 /// - `name`: the wire name (defaults to the function name);
 /// - `capability`, and `target(path = "arg")` (or `device`, `url`, `bytes`): the argument the
 ///   grant's scope checks, which needs a capability;
-/// - `kind = "sync" | "async" | "job"`: an `async fn` needs `async`, a job body takes a
-///   `&JobContext` parameter and answers with a job id. `job` is shorthand for `kind = "job"`;
+/// - `kind = "sync" | "async" | "job" | "stream"`: an `async fn` needs `async`, a job body takes a
+///   `&JobContext` parameter and answers with a job id. `job` is shorthand for `kind = "job"`.
+///   A stream is a plain `fn` that returns `impl Iterator<Item = T>` (or a `Result` of one); each
+///   item is sent on the job's stream with credit, and the command answers with a job id, as a job
+///   does. The contract records a stream as a job until the page transport carries items;
 /// - `ui` and `agent`: flags, both off by default (`ui` runs on the UI thread; `agent` exposes
 ///   the command to the agent surface).
 ///

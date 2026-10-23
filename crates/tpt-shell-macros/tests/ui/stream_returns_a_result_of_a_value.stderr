@@ -1,0 +1,5 @@
+error: a stream command returns an iterator of items, such as `-> impl Iterator<Item = T>` or `-> Result<impl Iterator<Item = T>, CommandError>`
+ --> tests/ui/stream_returns_a_result_of_a_value.rs:8:14
+  |
+8 | fn scan() -> Result<u32, CommandError> {
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^

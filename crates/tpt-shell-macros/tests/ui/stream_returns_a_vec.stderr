@@ -1,0 +1,5 @@
+error: a stream command returns an iterator of items, such as `-> impl Iterator<Item = T>` or `-> Result<impl Iterator<Item = T>, CommandError>`
+ --> tests/ui/stream_returns_a_vec.rs:8:21
+  |
+8 | fn items(n: u32) -> Result<Vec<u32>, CommandError> {
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

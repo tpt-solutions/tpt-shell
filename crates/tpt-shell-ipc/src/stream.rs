@@ -34,6 +34,34 @@ impl std::fmt::Display for SendError {
 
 impl std::error::Error for SendError {}
 
+/// Starts a streamed job on the runner that a router's job commands share, and returns the
+/// page's answer, `{"job": id}`. A refused start is `JOB_LIMIT`, as for [`crate::jobs::start_shared`].
+/// The `kind = "stream"` commands of `#[command]` call this.
+///
+/// Support: Partial. The stream runs in Rust; the page transport for it is not built.
+pub fn start_streamed_shared<F>(
+    jobs: &std::rc::Rc<std::cell::RefCell<crate::jobs::Jobs>>,
+    initial_credit: u32,
+    max_chunk: usize,
+    body: F,
+) -> Result<serde_json::Value, crate::router::CommandError>
+where
+    F: FnOnce(&crate::jobs::JobContext) -> Result<serde_json::Value, crate::router::CommandError>
+        + Send
+        + 'static,
+{
+    let id = jobs
+        .borrow_mut()
+        .start_streamed(initial_credit, max_chunk, body)
+        .map_err(|e| match e {
+            crate::jobs::StartError::TooMany { limit } => crate::router::CommandError::new(
+                "JOB_LIMIT",
+                &format!("{limit} jobs are already running; wait for one to finish or cancel it"),
+            ),
+        })?;
+    Ok(serde_json::json!({ "job": id.0 }))
+}
+
 /// The sending end. It holds credit and queues chunks until the receiver takes them.
 ///
 /// Support: Full.

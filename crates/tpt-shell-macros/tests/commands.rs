@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tpt_shell::__private::ipc::contract::{Flags, Kind};
-use tpt_shell::__private::ipc::jobs::JobContext;
+use tpt_shell::__private::ipc::jobs::{JobContext, JobId};
 use tpt_shell::__private::ipc::ScopedPath;
 use tpt_shell::{command, commands, register_commands, Caller, CommandError, Contract, Limits};
 use tpt_shell::{Engine, Router};
@@ -66,6 +66,19 @@ fn count_first(job: &JobContext, n: u32) -> Result<u32, CommandError> {
     Ok(n * 2)
 }
 
+#[command(kind = "stream", capability = "fs.read")]
+fn numbers(n: u32) -> impl Iterator<Item = u32> {
+    0..n
+}
+
+#[command(kind = "stream")]
+fn checked_numbers(n: u32) -> Result<impl Iterator<Item = u32>, CommandError> {
+    if n > 9 {
+        return Err(CommandError::new("TOO_MANY", "at most nine items"));
+    }
+    Ok(0..n)
+}
+
 #[command(agent = false)]
 fn ping() -> String {
     "pong".into()
@@ -80,9 +93,39 @@ fn full_router() -> Router {
         later,
         scan,
         count_first,
+        numbers,
+        checked_numbers,
         ping
     );
     router
+}
+
+/// Takes every item a streamed job sends, returning credit as each item is taken, until the
+/// stream is closed and empty.
+fn drain_stream(router: &mut Router, job: u64) -> Vec<String> {
+    let jobs = router.jobs();
+    let id = JobId(job);
+    let mut items = Vec::new();
+    let begin = Instant::now();
+    loop {
+        let taken = jobs.borrow_mut().stream_take(id);
+        match taken {
+            Some(chunk) => {
+                items.push(String::from_utf8(chunk).expect("a JSON item"));
+                jobs.borrow_mut().stream_grant(id, 1);
+            }
+            None => {
+                if !jobs.borrow().stream_is_open(id) {
+                    return items;
+                }
+                assert!(
+                    begin.elapsed() < Duration::from_secs(10),
+                    "stream did not close"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
 }
 
 fn engine_granting_fs_read() -> Engine {
@@ -270,4 +313,53 @@ fn a_job_command_needs_its_capability_like_any_other() {
 fn a_sync_command_still_runs_without_flags() {
     let router = full_router();
     assert_eq!(request(&router, "ping", json!({}))["data"], "pong");
+}
+
+#[test]
+fn a_stream_command_sends_each_item_in_order_under_credit() {
+    let mut router = full_router();
+    let mut engine = engine_granting_fs_read();
+    let started = authorized(&router, &mut engine, "numbers", json!({ "n": 20 }));
+    let job = started["data"]["job"].as_u64().expect("a job id");
+    // Eight items fit in the initial credit, so the rest wait for the grants drain_stream returns.
+    let items = drain_stream(&mut router, job);
+    assert_eq!(items, (0..20).map(|n| n.to_string()).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_stream_command_that_refuses_its_arguments_fails_the_job_with_its_code() {
+    let router = full_router();
+    let started = request(&router, "checked_numbers", json!({ "n": 12 }));
+    let job = started["data"]["job"].as_u64().expect("a job id");
+    let mut seen: Vec<Value> = Vec::new();
+    let begin = Instant::now();
+    while begin.elapsed() < Duration::from_secs(10)
+        && !seen.iter().any(|e| e["event"] == "job.failed")
+    {
+        seen.extend(router.drain_job_events());
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let failed = seen
+        .iter()
+        .find(|e| e["event"] == "job.failed")
+        .expect("a failed event");
+    assert_eq!(failed["data"]["job"], job);
+    assert_eq!(failed["data"]["code"], "TOO_MANY");
+}
+
+#[test]
+fn a_stream_command_needs_its_capability_like_any_other() {
+    let router = full_router();
+    let mut engine = Engine::new();
+    let refused = authorized(&router, &mut engine, "numbers", json!({ "n": 3 }));
+    assert!(refused["data"]["job"].is_null(), "{refused}");
+    assert_eq!(refused["error"]["code"], "CAP_NO_GRANT");
+}
+
+#[test]
+fn a_stream_command_is_recorded_as_a_job_until_the_page_transport_exists() {
+    let contract = commands![numbers, checked_numbers];
+    let kind = |name: &str| contract.commands().find(|c| c.name == name).map(|c| c.kind);
+    assert_eq!(kind("numbers"), Some(Kind::Job));
+    assert_eq!(kind("checked_numbers"), Some(Kind::Job));
 }

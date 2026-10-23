@@ -1,0 +1,5 @@
+error: JobContext is only for a command with kind = "job"
+  --> tests/ui/stream_with_a_job_context.rs:10:23
+   |
+10 | fn items(n: u32, ctx: &JobContext) -> impl Iterator<Item = u32> {
+   |                       ^^^^^^^^^^^

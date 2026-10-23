@@ -1,0 +1,5 @@
+error: a stream body runs on its own thread; write it as a plain `fn` that returns an iterator of items
+ --> tests/ui/stream_async.rs:8:1
+  |
+8 | async fn items(n: u32) -> impl Iterator<Item = u32> {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
