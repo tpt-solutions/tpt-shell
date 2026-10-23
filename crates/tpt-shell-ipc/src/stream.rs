@@ -85,6 +85,13 @@ impl Sender {
         self.queue.pop_front()
     }
 
+    /// Chunks queued and not yet taken by the receiver.
+    ///
+    /// Support: Full.
+    pub fn queued(&self) -> usize {
+        self.queue.len()
+    }
+
     /// The receiver grants `n` more chunks of credit.
     ///
     /// Support: Full.

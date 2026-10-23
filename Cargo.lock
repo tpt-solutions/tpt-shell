@@ -879,6 +879,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tpt-shell-capabilities",
+ "tpt-shell-core",
 ]
 
 [[package]]
