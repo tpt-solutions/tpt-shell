@@ -1,0 +1,22 @@
+{
+  "name": "tpt-shell-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Browser runtime for tpt-shell pages: window.tpt, the mock for plain browser tabs, the progress element and TypeScript declarations.",
+  "license": "MIT OR Apache-2.0",
+  "author": "TPT Solutions",
+  "files": [
+    "runtime/tpt-shell.js",
+    "runtime/tpt-shell-mock.js",
+    "components/tpt-progress.js",
+    "types/tpt-shell.d.ts",
+    "README.md"
+  ],
+  "types": "types/tpt-shell.d.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

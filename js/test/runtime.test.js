@@ -185,3 +185,47 @@ test('normalize without a document reports that it did nothing', () => {
   const { tpt } = loadRuntime();
   assert.equal(tpt.normalize({ viewport: true }), false);
 });
+
+test('the tauri shim provides exactly the subset the migration guide documents', () => {
+  const { tpt, window } = loadRuntime();
+  tpt.compat.tauri.install();
+  assert.deepEqual(Object.keys(window.__TAURI__).sort(), ['core', 'event']);
+  assert.deepEqual(Object.keys(window.__TAURI__.core), ['invoke']);
+  assert.deepEqual(Object.keys(window.__TAURI__.event), ['listen']);
+  assert.deepEqual(Object.keys(window.__TAURI_INTERNALS__), ['invoke']);
+});
+
+test('the tauri shim does not provide emit or plugin APIs', () => {
+  const { tpt, window } = loadRuntime();
+  tpt.compat.tauri.install();
+  assert.equal(window.__TAURI__.event.emit, undefined);
+  assert.equal(window.__TAURI__.core.transformCallback, undefined);
+});
+
+test('install can run twice and the listeners from the first install keep working', async () => {
+  const { tpt, fromRust, window } = loadRuntime();
+  tpt.compat.tauri.install();
+  const seen = [];
+  await window.__TAURI__.event.listen('tick', (e) => seen.push(e.payload));
+  tpt.compat.tauri.install();
+  fromRust({ event: 'tick', data: 7 });
+  assert.deepEqual(seen, [7]);
+});
+
+test('a tauri listen handler receives { event, payload } and unlisten stops it', async () => {
+  const { tpt, fromRust, window } = loadRuntime();
+  tpt.compat.tauri.install();
+  const got = [];
+  const unlisten = await window.__TAURI__.event.listen('scan', (e) => got.push(e));
+  fromRust({ event: 'scan', data: { done: 1 } });
+  unlisten();
+  fromRust({ event: 'scan', data: { done: 2 } });
+  // The handler's objects come from the VM context, so compare plain copies.
+  assert.deepEqual(JSON.parse(JSON.stringify(got)), [{ event: 'scan', payload: { done: 1 } }]);
+});
+
+test('a tauri invoke with no arguments sends an empty args object', () => {
+  const { tpt, sent } = loadRuntime();
+  tpt.compat.tauri.invoke('ping');
+  assert.deepEqual(sent[0].args, {});
+});

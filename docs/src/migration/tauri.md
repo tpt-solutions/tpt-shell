@@ -4,9 +4,9 @@ This guide maps a Tauri v2 app onto tpt-shell. It covers what carries over, what
 the compatibility shim does not do. Claims about Tauri come from its public documentation, cited
 below. Claims about tpt-shell come from the code.
 
-Status: the shim `tpt.compat.tauri` is a documented subset and is not finished (todo M11, "finalise
-`tpt.compat.tauri`"). The migration is a rewrite of the Rust side plus a small change to the page.
-Plan for that, not for a drop-in replacement.
+Status: the shim `tpt.compat.tauri` provides the subset described under "The shim" below, and its
+tests check that the subset is exactly that and no more. It is not a drop-in replacement for
+`@tauri-apps/api`. The migration is a rewrite of the Rust side plus a small change to the page.
 
 ## What is the same
 
