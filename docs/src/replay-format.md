@@ -51,6 +51,30 @@ Object keys are written in sorted order, so the same recording always produces t
 Recorders refuse any other kind, so a recording never holds a kind that the strict reader would
 reject.
 
+### Capture shapes
+
+The Rust helpers in `tpt_shell_replay::capture` and the page shim in `js/replay/shim.js` write
+these shapes. A shim recorded with `recordDom` on emits the `input` and `window` events; the host
+gives each one its time.
+
+- `ipc_request`: `{"id","cmd","args"}`.
+- `ipc_response`: `{"id","ok":true,"data","duration_ns"}`, or `{"id","ok":false,"code","message",
+  "duration_ns"}`. The duration is in the recording's clock.
+- `input`: `{"kind":"click","path","x","y"}`, `{"kind":"key","path","key"}` or
+  `{"kind":"input","path","value_length"}`.
+- `window`: `{"op":"resize","window","width","height"}`, `{"op":"focus","window"}` or
+  `{"op":"close","window"}`. `close` is the page hiding (`pagehide`).
+- `protocol_load`: `{"asset","status"}`. The asset name passes the same rule as an asset name, and
+  the response body is not recorded.
+
+**Stable paths.** A `path` lists the steps from the root down to the target. Each step is
+`{"index","role","name"}`: the element's position among its siblings, its ARIA role (or the role
+implied by its tag), and its accessible name, cut to 80 characters. No CSS selector or id is used,
+because those break when the page changes.
+
+**What is not recorded.** An input's value, only its length. A key typed into a password field is
+recorded as `[redacted]`. A protocol load's body.
+
 ### Assets (version 2)
 
 An asset is a file the run used, such as an image the page loaded. It is stored inline as base64

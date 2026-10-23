@@ -18,13 +18,14 @@
 //! [`divergence`] compares a recording with the events of a new run. It compares kind and
 //! data, and ignores timing, which varies between runs.
 //!
-//! Compression: none. A recording is raw JSON Lines. zstd would need a new dependency, and the
-//! files are small enough for CI and bug reports, so the format stays plain text (documented
-//! in `docs/replay-format.md`). Version 1 recordings still read; they have no assets.
+//! Compression: [`Recorder::finish_compressed`] writes the same text as a zstd frame, and
+//! [`read_compressed`] reads it back. Plain text still reads with [`read`]. Assets carry a
+//! SHA-256 that the reader checks. Version 1 recordings still read; they have no assets.
 //!
-//! Modules: [`virtual_time`] makes the Clock and Rng traits replayable; [`player`] runs a
-//! recording against a target; [`timeline`] is the data model for time-travel; [`report`]
-//! builds the bug-report bundle with redaction.
+//! Modules: [`capture`] has one typed helper per event kind for the record side; [`virtual_time`]
+//! makes the Clock and Rng traits replayable; [`player`] runs a recording against a target;
+//! [`timeline`] is the data model for time-travel; [`report`] builds the bug-report bundle with
+//! redaction.
 //!
 //! Support: Full for the format, readers, recorder and divergence. Partial: the capture hooks
 //! inside a running app and the hidden player window are routed to the facade and the
@@ -34,6 +35,8 @@ use std::fmt;
 
 use serde_json::{json, Map, Value};
 
+/// Support: Full.
+pub mod capture;
 /// Support: Full.
 pub mod codec;
 /// Support: Full.

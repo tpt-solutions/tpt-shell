@@ -119,3 +119,203 @@ test('a timer that keeps itself due forever is stopped, not allowed to hang', ()
     shim.restore();
   }
 });
+
+// A fake page for the DOM tests: a target with listeners that a test can fire by hand, and a
+// small element tree with the fields the shim reads (tagName, children, parentElement, getAttribute).
+function fakeTarget() {
+  const handlers = new Map();
+  return {
+    addEventListener(type, fn) {
+      if (!handlers.has(type)) handlers.set(type, []);
+      handlers.get(type).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const list = handlers.get(type) || [];
+      const at = list.indexOf(fn);
+      if (at >= 0) list.splice(at, 1);
+    },
+    fire(type, event = {}) {
+      for (const fn of [...(handlers.get(type) || [])]) fn(event);
+    },
+  };
+}
+
+function element(tag, { role, name, type, value, text, children = [] } = {}) {
+  const attrs = { role, 'aria-label': name };
+  const el = {
+    tagName: tag.toUpperCase(),
+    type,
+    value,
+    textContent: text || '',
+    children: [],
+    parentElement: null,
+    getAttribute: (n) => (attrs[n] === undefined ? null : attrs[n]),
+  };
+  for (const child of children) {
+    child.parentElement = el;
+    el.children.push(child);
+  }
+  return el;
+}
+
+// Installs a fake window and document for the duration of `body`, then puts the globals back.
+function withFakePage(body) {
+  const win = fakeTarget();
+  const doc = fakeTarget();
+  const saved = {
+    document: globalThis.document,
+    addEventListener: globalThis.addEventListener,
+    removeEventListener: globalThis.removeEventListener,
+    innerWidth: globalThis.innerWidth,
+    innerHeight: globalThis.innerHeight,
+  };
+  Object.assign(globalThis, {
+    document: doc,
+    addEventListener: win.addEventListener,
+    removeEventListener: win.removeEventListener,
+    innerWidth: 800,
+    innerHeight: 600,
+  });
+  try {
+    return body({ win, doc });
+  } finally {
+    for (const key of Object.keys(saved)) {
+      if (saved[key] === undefined) delete globalThis[key];
+      else globalThis[key] = saved[key];
+    }
+  }
+}
+
+test('a click records a stable element path of index, role and name, and no selector', () => {
+  withFakePage(({ doc }) => {
+    const cancel = element('button', { text: 'Cancel' });
+    const ok = element('button', { text: 'OK' });
+    const main = element('main', { children: [ok, cancel] });
+    const body = element('body', { children: [main] });
+    element('html', { children: [body] });
+    const trace = [];
+    const shim = install({ recordDom: true, onEvent: (kind, data) => trace.push({ kind, data }) });
+    try {
+      doc.fire('click', { target: cancel, clientX: 10.4, clientY: 20.6 });
+    } finally {
+      shim.restore();
+    }
+    assert.equal(trace.length, 1);
+    assert.equal(trace[0].kind, 'input');
+    assert.deepEqual(trace[0].data, {
+      kind: 'click',
+      path: [
+        { index: 0, role: 'html', name: '' },
+        { index: 0, role: 'body', name: '' },
+        { index: 0, role: 'main', name: '' },
+        { index: 1, role: 'button', name: 'Cancel' },
+      ],
+      x: 10,
+      y: 21,
+    });
+  });
+});
+
+test('a key records its name, and a key typed into a password field is redacted', () => {
+  withFakePage(({ doc }) => {
+    const pin = element('input', { type: 'password', name: 'PIN' });
+    const search = element('input', { type: 'text', name: 'Search' });
+    element('body', { children: [pin, search] });
+    const trace = [];
+    const shim = install({ recordDom: true, onEvent: (kind, data) => trace.push(data) });
+    try {
+      doc.fire('keydown', { target: pin, key: '4' });
+      doc.fire('keydown', { target: search, key: 'Enter' });
+    } finally {
+      shim.restore();
+    }
+    assert.equal(trace[0].kind, 'key');
+    assert.equal(trace[0].key, '[redacted]');
+    assert.equal(trace[1].key, 'Enter');
+    assert.equal(trace[1].path[trace[1].path.length - 1].role, 'textbox');
+  });
+});
+
+test('an input records its length and never its value', () => {
+  withFakePage(({ doc }) => {
+    const field = element('input', { type: 'text', name: 'Card', value: 'secret123' });
+    element('body', { children: [field] });
+    const trace = [];
+    const shim = install({ recordDom: true, onEvent: (kind, data) => trace.push(data) });
+    try {
+      doc.fire('input', { target: field });
+    } finally {
+      shim.restore();
+    }
+    assert.equal(trace[0].value_length, 9);
+    assert.equal('value' in trace[0], false);
+    assert.equal(JSON.stringify(trace).includes('secret123'), false);
+  });
+});
+
+test('resize, focus and close record the window name and its size', () => {
+  withFakePage(({ win }) => {
+    const trace = [];
+    const shim = install({
+      recordDom: true,
+      windowName: 'till',
+      onEvent: (kind, data) => trace.push({ kind, data }),
+    });
+    try {
+      win.fire('resize');
+      win.fire('focus');
+      win.fire('pagehide');
+    } finally {
+      shim.restore();
+    }
+    assert.deepEqual(trace, [
+      { kind: 'window', data: { op: 'resize', window: 'till', width: 800, height: 600 } },
+      { kind: 'window', data: { op: 'focus', window: 'till' } },
+      { kind: 'window', data: { op: 'close', window: 'till' } },
+    ]);
+  });
+});
+
+test('a protocol load records the asset and its status, never a body, and refuses bad names', () => {
+  const trace = [];
+  const shim = install({ onEvent: (kind, data) => trace.push({ kind, data }) });
+  try {
+    shim.protocolLoad('index.html', 200);
+    assert.throws(() => shim.protocolLoad('..', 200), TypeError);
+    assert.throws(() => shim.protocolLoad('.', 200), TypeError);
+    assert.throws(() => shim.protocolLoad('a/b.js', 200), TypeError);
+    assert.throws(() => shim.protocolLoad('x.js', 99), RangeError);
+  } finally {
+    shim.restore();
+  }
+  assert.deepEqual(trace, [{ kind: 'protocol_load', data: { asset: 'index.html', status: 200 } }]);
+});
+
+test('without recordDom, page events are not recorded', () => {
+  withFakePage(({ doc, win }) => {
+    const field = element('input', { type: 'text', value: 'abc' });
+    element('body', { children: [field] });
+    const trace = [];
+    const shim = install({ onEvent: (kind, data) => trace.push({ kind, data }) });
+    try {
+      doc.fire('click', { target: field });
+      doc.fire('input', { target: field });
+      win.fire('resize');
+    } finally {
+      shim.restore();
+    }
+    assert.deepEqual(trace, []);
+  });
+});
+
+test('restore removes the DOM listeners', () => {
+  withFakePage(({ doc }) => {
+    const field = element('button', { text: 'Go' });
+    element('body', { children: [field] });
+    const trace = [];
+    const shim = install({ recordDom: true, onEvent: (kind, data) => trace.push(data) });
+    shim.restore();
+    doc.fire('click', { target: field });
+    assert.deepEqual(trace, []);
+  });
+});

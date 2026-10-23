@@ -23,9 +23,19 @@
   'use strict';
 
   const MAX_FIRINGS_PER_ADVANCE = 10000;
+  // Asset names as the Rust reader accepts them (crates/tpt-shell-replay is_asset_name).
+  const ASSET_NAME = /^[A-Za-z0-9._-]{1,100}$/;
+  const NAME_LIMIT = 80;
+  const IMPLICIT_ROLE = {
+    A: 'link', BUTTON: 'button', SELECT: 'combobox', TEXTAREA: 'textbox', IMG: 'img',
+    H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading',
+  };
 
   function install(options) {
-    const opts = Object.assign({ seed: 1, start: 0, onEvent: null }, options || {});
+    const opts = Object.assign(
+      { seed: 1, start: 0, onEvent: null, recordDom: false, windowName: 'main' },
+      options || {}
+    );
     if (!Number.isFinite(opts.start) || opts.start < 0) {
       throw new RangeError('start must be a non-negative number');
     }
@@ -77,9 +87,83 @@
       return best;
     };
 
+    // DOM capture. A click, key or input is recorded with a stable element path: each step is the
+    // element's position among its siblings, its role and its accessible name, from the root down.
+    // No CSS selector or id is used, since those break when the page changes. An input's value is
+    // never recorded, only its length, and a key typed into a password field is recorded as
+    // [redacted].
+    const attr = (el, name) => {
+      const value = typeof el.getAttribute === 'function' ? el.getAttribute(name) : null;
+      return value || '';
+    };
+    const roleOf = (el) => {
+      const explicit = attr(el, 'role');
+      if (explicit) return explicit;
+      const tag = el.tagName.toUpperCase();
+      if (tag === 'INPUT') {
+        const type = String(el.type || 'text').toLowerCase();
+        if (type === 'button' || type === 'submit' || type === 'reset') return 'button';
+        if (type === 'checkbox' || type === 'radio') return type;
+        return 'textbox';
+      }
+      return IMPLICIT_ROLE[tag] || el.tagName.toLowerCase();
+    };
+    const nameOf = (el) => {
+      const text = attr(el, 'aria-label') || attr(el, 'alt') || attr(el, 'title') || el.textContent || '';
+      return Array.from(String(text).replace(/\s+/g, ' ').trim()).slice(0, NAME_LIMIT).join('');
+    };
+    const pathOf = (el) => {
+      const steps = [];
+      for (let node = el; node && node.tagName; node = node.parentElement) {
+        const siblings = node.parentElement ? node.parentElement.children : [node];
+        const index = Array.prototype.indexOf.call(siblings, node);
+        steps.unshift({ index, role: roleOf(node), name: nameOf(node) });
+      }
+      return steps;
+    };
+    const isSecret = (el) => String(el.type || '').toLowerCase() === 'password';
+    const listeners = [];
+    const listen = (target, type, handler) => {
+      if (!target || typeof target.addEventListener !== 'function') return;
+      target.addEventListener(type, handler, true);
+      listeners.push({ target, type, handler });
+    };
+    if (opts.recordDom) {
+      const doc = root.document;
+      listen(doc, 'click', (e) => {
+        const x = Math.round(e.clientX || 0);
+        const y = Math.round(e.clientY || 0);
+        emit('input', { kind: 'click', path: pathOf(e.target), x, y });
+      });
+      listen(doc, 'keydown', (e) => {
+        const key = isSecret(e.target) ? '[redacted]' : String(e.key);
+        emit('input', { kind: 'key', path: pathOf(e.target), key });
+      });
+      listen(doc, 'input', (e) => {
+        const value_length = String(e.target.value || '').length;
+        emit('input', { kind: 'input', path: pathOf(e.target), value_length });
+      });
+      listen(root, 'resize', () => {
+        emit('window', { op: 'resize', window: opts.windowName, width: root.innerWidth | 0, height: root.innerHeight | 0 });
+      });
+      listen(root, 'focus', () => emit('window', { op: 'focus', window: opts.windowName }));
+      listen(root, 'pagehide', () => emit('window', { op: 'close', window: opts.windowName }));
+    }
+
     const shim = {
       now() {
         return nowMs;
+      },
+
+      // Records that the page loaded an app asset, with its HTTP status. The body is not recorded.
+      protocolLoad(asset, status) {
+        if (typeof asset !== 'string' || !ASSET_NAME.test(asset) || asset === '.' || asset === '..') {
+          throw new TypeError('not a valid asset name');
+        }
+        if (!Number.isInteger(status) || status < 100 || status > 599) {
+          throw new RangeError('status must be an HTTP status code');
+        }
+        emit('protocol_load', { asset, status });
       },
 
       // Moves the virtual clock forward, firing timers that come due on the way.
@@ -107,6 +191,9 @@
       },
 
       restore() {
+        for (const { target, type, handler } of listeners.splice(0)) {
+          if (typeof target.removeEventListener === 'function') target.removeEventListener(type, handler, true);
+        }
         Date.now = originals.dateNow;
         if (root.performance && originals.perfNow) root.performance.now = originals.perfNow;
         Math.random = originals.random;
