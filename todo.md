@@ -266,7 +266,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Audit tail
 - [ ] Contract explorer (browse and call commands)
 - [ ] Engine and caps info
-- [ ] Toggle in dev builds only
+- [x] Toggle in dev builds only (the overlay needs the devtools feature and Ctrl+Shift+D; `tpt-shell dev` does not enable the feature yet)
 
 ### Windows baseline features (first pass)
 - [ ] Multiple windows, parent/child, modal, frameless, always-on-top, transparent (multiple windows, parent/child, modal, frameless and always-on-top work on Windows and are tested; transparency is still `Unsupported`)
@@ -382,7 +382,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] Windows low-level keyboard hook (Alt+Tab, Win, Alt+F4, Ctrl+Esc), best effort
 - [ ] Document OS lock-down recipes: Windows Assigned Access, macOS guided access/MDM, Linux dedicated session (R10)
 - [ ] `app.snapshot_state()` on interval and on exit, typed state store, restore on restart (`App::snapshot_state(path, every, capture, restore)` saves what `capture` returns on a UI-thread timer and when the event loop ends, and calls `restore` once with the saved value before the windows show; live test. Typed state is `serde_json::Value` for now, not a derived struct; a corrupt file is reported and skipped)
-- [ ] Page crash recovery: reload to last good state
+- [x] Page crash recovery: reload to last good state (routes are read from WebView2 get_Source; bounded at three failures in 60 s)
 - [ ] Idle reset: home route, clear session, ephemeral integration (`App::kiosk_config` with `idle_seconds` resets every window to the `home` page after that long with no page messages; live test. Clearing the session and the ephemeral profile are not done)
 - [ ] Multi-monitor placement, rotation, per-monitor kiosk windows
 - [ ] Signed local config (Ed25519) (`App::kiosk_config` loads the config only when its signature checks out, and rejects a `home` path that leaves the app; tested. The signing tool is not written, and the config does not yet set the windows or the policy beyond home and idle)
