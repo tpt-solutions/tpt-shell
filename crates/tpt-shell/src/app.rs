@@ -24,6 +24,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
 use crate::blob;
+use crate::dev_reload;
 #[cfg(windows)]
 use crate::{devtools, session, ui};
 use tpt_shell_audit::Policy;
@@ -48,6 +49,24 @@ use tpt_shell_kiosk::idle::IdleTimer;
 use tpt_shell_kiosk::recovery::CrashRecovery;
 #[cfg(windows)]
 use tpt_shell_platform_windows::webview2::default_user_data_dir;
+
+/// The page restrictions a kiosk config's lock-down asks for. Each flag maps to one WebView2
+/// switch or script (see `PageRestrictions`).
+#[cfg(windows)]
+fn page_restrictions(
+    lockdown: &tpt_shell_kiosk::policy::Lockdown,
+) -> tpt_shell_platform_windows::backend::PageRestrictions {
+    tpt_shell_platform_windows::backend::PageRestrictions {
+        devtools: lockdown.devtools,
+        context_menu: lockdown.context_menu,
+        zoom: lockdown.zoom,
+        text_selection: lockdown.text_selection,
+        drag_drop: lockdown.drag_drop,
+        print_shortcuts: lockdown.print_shortcuts,
+        function_keys: lockdown.function_keys,
+        swipe_gestures: lockdown.swipe_gestures,
+    }
+}
 
 pub use tpt_shell_capabilities::Scope;
 pub use tpt_shell_ipc::CommandError;
@@ -707,7 +726,7 @@ impl App {
         use tpt_shell_core::backend::{EventLoopBackend, WebviewBackend, WindowBackend};
         use tpt_shell_ipc::{Caller, Limits};
         use tpt_shell_kiosk::policy::Mode;
-        use tpt_shell_platform_windows::backend::WindowsBackend;
+        use tpt_shell_platform_windows::backend::{reload_window, WindowsBackend};
         use tpt_shell_platform_windows::consent::NativeConsent;
         use tpt_shell_platform_windows::webview2::APP_ORIGIN;
 
@@ -814,6 +833,19 @@ impl App {
             .or_insert_with(crate::licenses::asset);
         let assets = Rc::new(app_assets);
         let mut backend = WindowsBackend::new(&loader, &data_dir)?;
+        // A kiosk config's lock-down applies to every window this run creates.
+        if let Some(settings) = &self.kiosk {
+            backend.set_page_restrictions(page_restrictions(&settings.policy.lockdown))?;
+        }
+        // In a debug build, TPT_DEV_DIR serves the pages from a folder, and the windows reload
+        // when a file in it changes.
+        let dev_root = dev_reload::dev_dir();
+        if let Some(root) = &dev_root {
+            eprintln!(
+                "tpt-shell: dev reload: serving pages from {}",
+                root.display()
+            );
+        }
 
         // The agent, when its manifest profile enables it. It writes to the same audit log.
         #[cfg(feature = "agent")]
@@ -987,11 +1019,16 @@ impl App {
                 }),
             )?;
             let assets = assets.clone();
+            let dev_root = dev_root.clone();
             backend.set_asset_source(
                 id,
                 Box::new(move |path| match path.strip_prefix("__tpt/blob/") {
                     Some(blob_id) => blob::blob_asset(blob_id),
-                    None => assets.get(path).cloned(),
+                    // A dev folder's file wins; the built-in pages fill in what it lacks.
+                    None => dev_root
+                        .as_deref()
+                        .and_then(|root| dev_reload::disk_asset(root, path))
+                        .or_else(|| assets.get(path).cloned()),
                 }),
             )?;
             if overlay.is_some() {
@@ -1001,6 +1038,21 @@ impl App {
             windows.push((window.name, id));
         }
         let window_ids: Vec<_> = windows.iter().map(|(_, id)| *id).collect();
+        if let Some(root) = dev_root {
+            // Checks the folder a few times a second on the UI thread, and reloads every window
+            // once when it changed. Nothing is sent over a socket.
+            let mut watch = dev_reload::Watch::new(root);
+            let ids = window_ids.clone();
+            backend.every(dev_reload::PERIOD, move || {
+                if watch.changed() {
+                    for id in &ids {
+                        if let Err(e) = reload_window(*id) {
+                            eprintln!("tpt-shell: dev reload failed: {e}");
+                        }
+                    }
+                }
+            })?;
+        }
         if let (Some(settings), Some(idle)) = (&kiosk, idle) {
             // Ticks a few times per idle period, so a reset happens soon after the limit.
             let limit = settings.idle.unwrap_or_default();
@@ -1520,6 +1572,26 @@ mod tests {
         assert_eq!(
             app.assets["app.js"].content_type,
             "text/javascript; charset=utf-8"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_kiosk_lockdown_maps_onto_the_page_restrictions() {
+        use tpt_shell_kiosk::policy::Lockdown;
+        use tpt_shell_platform_windows::backend::PageRestrictions;
+
+        let single = page_restrictions(&Lockdown::single_app());
+        assert!(single.devtools && single.context_menu && single.zoom);
+        assert!(single.drag_drop && single.print_shortcuts && single.function_keys);
+        assert!(single.swipe_gestures);
+        assert!(
+            !single.text_selection,
+            "text selection is left on by default"
+        );
+        assert_eq!(
+            page_restrictions(&Lockdown::none()),
+            PageRestrictions::default()
         );
     }
 

@@ -15,6 +15,8 @@ mod devtools;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod endpoints;
 #[cfg_attr(not(windows), allow(dead_code))]
+mod dev_reload;
+#[cfg_attr(not(windows), allow(dead_code))]
 mod licenses;
 #[cfg(windows)]
 mod session;

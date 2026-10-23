@@ -87,6 +87,34 @@ const IID_SETTINGS9: Guid = Guid {
     data3: 0x49f4,
     data4: [0x92, 0x7a, 0xe5, 0x47, 0xdd, 0xda, 0xa3, 0x7d],
 };
+/// `ICoreWebView2Settings3`: browser accelerator keys (print, find, reload and function keys).
+const IID_SETTINGS3: Guid = Guid {
+    data1: 0xfdb5_ab74,
+    data2: 0xaf33,
+    data3: 0x4854,
+    data4: [0x84, 0xf0, 0x0a, 0x63, 0x1d, 0xeb, 0x5e, 0xba],
+};
+/// `ICoreWebView2Settings5`: pinch zoom.
+const IID_SETTINGS5: Guid = Guid {
+    data1: 0x183e_7052,
+    data2: 0x1d03,
+    data3: 0x43a0,
+    data4: [0xab, 0x99, 0x98, 0xe0, 0x43, 0xb6, 0x6b, 0x39],
+};
+/// `ICoreWebView2Settings6`: swipe navigation.
+const IID_SETTINGS6: Guid = Guid {
+    data1: 0x11cb_3acd,
+    data2: 0x9bc8,
+    data3: 0x43b8,
+    data4: [0x83, 0xbf, 0xf4, 0x07, 0x53, 0x71, 0x4f, 0x87],
+};
+/// `ICoreWebView2Controller4`: whether files and content dropped from outside may enter the page.
+const IID_CONTROLLER4: Guid = Guid {
+    data1: 0x97d4_18d5,
+    data2: 0xa426,
+    data3: 0x4e49,
+    data4: [0xa1, 0x51, 0xe1, 0xa1, 0x0f, 0x32, 0x7d, 0x9e],
+};
 /// `ICoreWebView2_13`: the webview's profile, which holds the preferred colour scheme.
 const IID_WEBVIEW_13: Guid = Guid {
     data1: 0xf75f_09a8,
@@ -162,16 +190,62 @@ struct ControllerVtbl {
     get_core_webview2: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
 }
 
-/// `ICoreWebView2Settings`. The slots we use: get_AreDevToolsEnabled = 8, put_AreDevToolsEnabled
-/// = 9, put_AreDefaultContextMenusEnabled = 11 (BOOL is an i32 in the vtable).
+/// `ICoreWebView2Settings`. The slots we use: put_IsStatusBarEnabled = 10,
+/// get_AreDevToolsEnabled = 11, put_AreDevToolsEnabled = 12, put_AreDefaultContextMenusEnabled
+/// = 14, put_IsZoomControlEnabled = 18 (BOOL is an i32 in the vtable).
 #[repr(C)]
 struct SettingsVtbl {
     base: IUnknownVtbl,
-    _before_devtools_get: [usize; 8],
+    _before_status_bar: [usize; 6],
+    _get_status_bar_enabled: usize,
+    put_status_bar_enabled: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
     get_devtools_enabled: unsafe extern "system" fn(*mut c_void, *mut i32) -> HRESULT,
     put_devtools_enabled: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
     _before_context_menus: [usize; 1],
     put_default_context_menus_enabled: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
+    _before_zoom: [usize; 2],
+    _get_zoom_control_enabled: usize,
+    put_zoom_control_enabled: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
+}
+
+/// `ICoreWebView2Settings3`: put_AreBrowserAcceleratorKeysEnabled = 24 (the getter is 23). The
+/// base interface takes slots 3-22.
+#[repr(C)]
+struct Settings3Vtbl {
+    base: IUnknownVtbl,
+    _before_accelerators: [usize; 20],
+    _get_browser_accelerator_keys: usize,
+    put_browser_accelerator_keys_enabled: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
+}
+
+/// `ICoreWebView2Settings5`: put_IsPinchZoomEnabled = 30 (the getter is 29). The base interfaces
+/// take slots 3-28.
+#[repr(C)]
+struct Settings5Vtbl {
+    base: IUnknownVtbl,
+    _before_pinch: [usize; 26],
+    _get_pinch_zoom_enabled: usize,
+    put_pinch_zoom_enabled: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
+}
+
+/// `ICoreWebView2Settings6`: put_IsSwipeNavigationEnabled = 32 (the getter is 31). The base
+/// interfaces take slots 3-30.
+#[repr(C)]
+struct Settings6Vtbl {
+    base: IUnknownVtbl,
+    _before_swipe: [usize; 28],
+    _get_swipe_navigation_enabled: usize,
+    put_swipe_navigation_enabled: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
+}
+
+/// `ICoreWebView2Controller4`: put_AllowExternalDrop = 37 (the getter is 36). The base interfaces
+/// take slots 3-35.
+#[repr(C)]
+struct Controller4Vtbl {
+    base: IUnknownVtbl,
+    _before_external_drop: [usize; 33],
+    _get_allow_external_drop: usize,
+    put_allow_external_drop: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
 }
 
 #[repr(C)]
@@ -609,6 +683,48 @@ impl Settings {
         // SAFETY: `s9` is a live ICoreWebView2Settings9 object.
         check(unsafe { (vt.put_non_client_region_support)(s9.as_ptr(), i32::from(on)) })
     }
+
+    /// Shows or hides the status bar that WebView2 draws over the bottom edge of the page.
+    pub fn set_status_bar_enabled(&self, on: bool) -> Result<(), HRESULT> {
+        let vt: &SettingsVtbl = self.0.vtbl();
+        // SAFETY: `self.0` is a live settings object.
+        check(unsafe { (vt.put_status_bar_enabled)(self.0.as_ptr(), i32::from(on)) })
+    }
+
+    /// Turns the zoom control on or off: Ctrl+wheel and Ctrl+plus or Ctrl+minus.
+    pub fn set_zoom_control_enabled(&self, on: bool) -> Result<(), HRESULT> {
+        let vt: &SettingsVtbl = self.0.vtbl();
+        // SAFETY: `self.0` is a live settings object.
+        check(unsafe { (vt.put_zoom_control_enabled)(self.0.as_ptr(), i32::from(on)) })
+    }
+
+    /// Turns the browser accelerator keys on or off. Off means WebView2 does not act on keys such
+    /// as Ctrl+P (print), Ctrl+F (find), F5 (reload) and F12; the page still gets the key events.
+    /// Fails with `E_NOINTERFACE` on a runtime without `ICoreWebView2Settings3`.
+    pub fn set_browser_accelerator_keys_enabled(&self, on: bool) -> Result<(), HRESULT> {
+        let s3 = self.0.query(&IID_SETTINGS3)?;
+        let vt: &Settings3Vtbl = s3.vtbl();
+        // SAFETY: `s3` is a live ICoreWebView2Settings3 object.
+        check(unsafe { (vt.put_browser_accelerator_keys_enabled)(s3.as_ptr(), i32::from(on)) })
+    }
+
+    /// Turns pinch zoom on or off on touch screens. Fails with `E_NOINTERFACE` on a runtime without
+    /// `ICoreWebView2Settings5`.
+    pub fn set_pinch_zoom_enabled(&self, on: bool) -> Result<(), HRESULT> {
+        let s5 = self.0.query(&IID_SETTINGS5)?;
+        let vt: &Settings5Vtbl = s5.vtbl();
+        // SAFETY: `s5` is a live ICoreWebView2Settings5 object.
+        check(unsafe { (vt.put_pinch_zoom_enabled)(s5.as_ptr(), i32::from(on)) })
+    }
+
+    /// Turns swipe navigation (back and forward by swiping) on or off. Fails with `E_NOINTERFACE`
+    /// on a runtime without `ICoreWebView2Settings6`.
+    pub fn set_swipe_navigation_enabled(&self, on: bool) -> Result<(), HRESULT> {
+        let s6 = self.0.query(&IID_SETTINGS6)?;
+        let vt: &Settings6Vtbl = s6.vtbl();
+        // SAFETY: `s6` is a live ICoreWebView2Settings6 object.
+        check(unsafe { (vt.put_swipe_navigation_enabled)(s6.as_ptr(), i32::from(on)) })
+    }
 }
 
 impl Controller {
@@ -620,6 +736,16 @@ impl Controller {
         // SAFETY: `c2` is a live ICoreWebView2Controller2 object; `Color` is passed by value,
         // as the header declares.
         check(unsafe { (vt.put_default_background_color)(c2.as_ptr(), color) })
+    }
+
+    /// Lets files and content dragged in from outside the window enter the page. Off blocks a
+    /// drop, so a kiosk page cannot be handed a file. Fails with `E_NOINTERFACE` on a runtime
+    /// without `ICoreWebView2Controller4`.
+    pub fn set_allow_external_drop(&self, on: bool) -> Result<(), HRESULT> {
+        let c4 = self.0.query(&IID_CONTROLLER4)?;
+        let vt: &Controller4Vtbl = c4.vtbl();
+        // SAFETY: `c4` is a live ICoreWebView2Controller4 object.
+        check(unsafe { (vt.put_allow_external_drop)(c4.as_ptr(), i32::from(on)) })
     }
 }
 
@@ -1122,7 +1248,7 @@ mod header_tests {
     use std::path::PathBuf;
 
     /// (interface, header index, method name) for every slot we call.
-    const USED_SLOTS: [(&str, usize, &str); 37] = [
+    const USED_SLOTS: [(&str, usize, &str); 43] = [
         (
             "ICoreWebView2Environment",
             0,
@@ -1191,6 +1317,17 @@ mod header_tests {
         // ICoreWebView2Profile2 own methods: ClearBrowsingData (C slot 10), ClearBrowsingDataAll (12).
         ("ICoreWebView2Profile2", 0, "ClearBrowsingData"),
         ("ICoreWebView2Profile2", 2, "ClearBrowsingDataAll"),
+        // Kiosk page settings (own-method index in each interface's declaration).
+        ("ICoreWebView2Settings", 7, "put_IsStatusBarEnabled"),
+        ("ICoreWebView2Settings", 15, "put_IsZoomControlEnabled"),
+        (
+            "ICoreWebView2Settings3",
+            1,
+            "put_AreBrowserAcceleratorKeysEnabled",
+        ),
+        ("ICoreWebView2Settings5", 1, "put_IsPinchZoomEnabled"),
+        ("ICoreWebView2Settings6", 1, "put_IsSwipeNavigationEnabled"),
+        ("ICoreWebView2Controller4", 1, "put_AllowExternalDrop"),
     ];
 
     /// Method names of `iface`, in declaration order, from the header text.

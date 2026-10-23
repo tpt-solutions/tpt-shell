@@ -218,6 +218,20 @@ pub fn eval_window(id: WindowId, script: &str) -> Result<()> {
     })
 }
 
+/// Reloads the current page of window `id` from code on the UI thread. The dev reload uses it
+/// when a file of the app changes.
+///
+/// Support: Full on Windows.
+pub fn reload_window(id: WindowId) -> Result<()> {
+    WINDOWS.with(|w| {
+        let windows = w.borrow();
+        let entry = windows
+            .get(&id.0)
+            .ok_or(Error::UnknownWindow(id.0 as u64))?;
+        entry.web.reload().map_err(|hr| hr_error("Reload", hr))
+    })
+}
+
 /// Clears the browsing data of window `id`'s profile (cookies, cache, storage), from code on the
 /// UI thread. The profile is shared by every window of the environment. `on_done` runs on the UI
 /// thread when WebView2 finishes. A call that fails at once returns the error and does not run it.
@@ -375,6 +389,8 @@ pub struct WindowsBackend {
     quit_requested: bool,
     /// Applied to windows created after it is set.
     theme: Theme,
+    /// Kiosk restrictions for windows created after they are set. The default turns nothing off.
+    restrictions: PageRestrictions,
     // Declared before `_loader`, so it is released first; `Drop` takes it explicitly anyway.
     env: Option<Environment>,
     _loader: OfficialLoader,
@@ -439,6 +455,7 @@ impl WindowsBackend {
                     message_hwnd,
                     quit_requested: false,
                     theme: Theme::default(),
+                    restrictions: PageRestrictions::default(),
                     env: Some(env),
                     _loader: loader,
                     keystore_dir: None,
@@ -486,6 +503,17 @@ impl WindowsBackend {
         self.check_thread()?;
         theme.validate()?;
         self.theme = theme;
+        Ok(())
+    }
+
+    /// Sets the kiosk restrictions for windows created after this call. Existing windows keep
+    /// theirs. A window that cannot take a restriction is not created, so a kiosk never runs
+    /// without one it asked for.
+    ///
+    /// Support: Full on Windows.
+    pub fn set_page_restrictions(&mut self, restrictions: PageRestrictions) -> Result<()> {
+        self.check_thread()?;
+        self.restrictions = restrictions;
         Ok(())
     }
 
@@ -1327,7 +1355,7 @@ impl WindowsBackend {
         let web = controller
             .webview()
             .map_err(|hr| hr_error("get_CoreWebView2", hr))?;
-        let page = page_settings(!cfg!(debug_assertions));
+        let page = page_settings(!cfg!(debug_assertions), &self.restrictions);
         let settings = web.settings().map_err(|hr| hr_error("get_Settings", hr))?;
         settings
             .set_devtools_enabled(page.devtools)
@@ -1335,6 +1363,7 @@ impl WindowsBackend {
         settings
             .set_default_context_menus_enabled(page.context_menu)
             .map_err(|hr| hr_error("put_AreDefaultContextMenusEnabled", hr))?;
+        apply_restrictions(&settings, &controller, &self.restrictions)?;
         let host_document = Rc::new(RefCell::new(None::<String>));
         let page_handler = Rc::new(RefCell::new(None::<MessageHandler>));
         let for_page = page_handler.clone();
@@ -1388,6 +1417,10 @@ impl WindowsBackend {
         // The page runtime (`window.tpt`) goes in before any page script runs.
         web.add_document_start_script(SHIM_JS, |_| {})
             .map_err(|hr| hr_error("AddScriptToExecuteOnDocumentCreated", hr))?;
+        if self.restrictions.text_selection {
+            web.add_document_start_script(TEXT_SELECTION_OFF_JS, |_| {})
+                .map_err(|hr| hr_error("AddScriptToExecuteOnDocumentCreated", hr))?;
+        }
         let process_failed: Rc<RefCell<Option<ProcessFailedHandler>>> = Rc::new(RefCell::new(None));
         let for_failed = process_failed.clone();
         web.on_process_failed(move |_web, failure| {
@@ -1431,12 +1464,71 @@ struct PageSettings {
     context_menu: bool,
 }
 
-fn page_settings(release: bool) -> PageSettings {
+/// Kiosk features a page turns off. A `true` field disables the feature. The default turns
+/// nothing off. Applied to the windows created after `WindowsBackend::set_page_restrictions`.
+///
+/// Support: Full on Windows (each field is a WebView2 switch or a document-start script; see
+/// `apply_restrictions`). The Windows key-chord hook is separate, in `tpt-shell-kiosk`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PageRestrictions {
+    pub devtools: bool,
+    pub context_menu: bool,
+    pub zoom: bool,
+    /// Stops selecting text in the page. Text fields still take typing and selection.
+    pub text_selection: bool,
+    pub drag_drop: bool,
+    /// Turns off the browser accelerator keys, which include Ctrl+P (print).
+    pub print_shortcuts: bool,
+    /// Turns off the browser accelerator keys, which include F1 to F12 and their chords.
+    pub function_keys: bool,
+    pub swipe_gestures: bool,
+}
+
+/// Release builds turn the developer tools and the right-click menu off (spec §9). A restriction
+/// turns them off in debug builds too.
+fn page_settings(release: bool, restrictions: &PageRestrictions) -> PageSettings {
     PageSettings {
-        devtools: !release,
-        context_menu: !release,
+        devtools: !release && !restrictions.devtools,
+        context_menu: !release && !restrictions.context_menu,
     }
 }
+
+/// Applies the restrictions WebView2 takes as switches. Any failure is returned, and the window
+/// is not created.
+fn apply_restrictions(
+    settings: &crate::webview2::Settings,
+    controller: &Controller,
+    restrictions: &PageRestrictions,
+) -> Result<()> {
+    if restrictions.zoom {
+        settings
+            .set_zoom_control_enabled(false)
+            .map_err(|hr| hr_error("put_IsZoomControlEnabled", hr))?;
+        settings
+            .set_pinch_zoom_enabled(false)
+            .map_err(|hr| hr_error("put_IsPinchZoomEnabled", hr))?;
+    }
+    if restrictions.swipe_gestures {
+        settings
+            .set_swipe_navigation_enabled(false)
+            .map_err(|hr| hr_error("put_IsSwipeNavigationEnabled", hr))?;
+    }
+    if restrictions.print_shortcuts || restrictions.function_keys {
+        settings
+            .set_browser_accelerator_keys_enabled(false)
+            .map_err(|hr| hr_error("put_AreBrowserAcceleratorKeysEnabled", hr))?;
+    }
+    if restrictions.drag_drop {
+        controller
+            .set_allow_external_drop(false)
+            .map_err(|hr| hr_error("put_AllowExternalDrop", hr))?;
+    }
+    Ok(())
+}
+
+/// Turns off text selection in the page, except in text fields. It runs before the page's own
+/// scripts, when the page has no `<html>` element yet, so the style waits for one.
+const TEXT_SELECTION_OFF_JS: &str = "(function(){var css='html,body,*{-webkit-user-select:none!important;user-select:none!important}input,textarea{-webkit-user-select:text!important;user-select:text!important}';function add(){var s=document.createElement('style');s.textContent=css;(document.head||document.documentElement).appendChild(s);}if(document.documentElement){add();}else{new MutationObserver(function(_,o){if(document.documentElement){o.disconnect();add();}}).observe(document,{childList:true,subtree:true});}})();";
 
 /// Sets the window's outer size from logical units, using the window's current DPI.
 fn resize_logical(hwnd: HWND, size: LogicalSize) {
@@ -2178,6 +2270,56 @@ mod tests {
         }
 
         #[test]
+        fn kiosk_restrictions_reach_only_the_windows_created_after_them() {
+            let Some((mut b, dir, _serial)) = start("kiosk") else {
+                return;
+            };
+            // The title shows whether the page's text is selectable. Creating the window with
+            // every restriction on also shows that WebView2 accepted each switch: a switch it
+            // refused fails the creation, so the window never opens unrestricted.
+            const PAGE: &str = "<!doctype html><title>x</title><script>document.addEventListener('DOMContentLoaded', function () { document.title = getComputedStyle(document.body).userSelect; });</script>";
+            let before = b.create(&spec("plain")).expect("create before");
+            b.load_html(before, PAGE).expect("load_html");
+            let mut plain = String::new();
+            let got_plain = pump_until(Duration::from_secs(30), || {
+                plain = b.document_title(before).unwrap_or_default();
+                plain != "x" && !plain.is_empty()
+            });
+
+            b.set_page_restrictions(PageRestrictions {
+                devtools: true,
+                context_menu: true,
+                zoom: true,
+                text_selection: true,
+                drag_drop: true,
+                print_shortcuts: true,
+                function_keys: true,
+                swipe_gestures: true,
+            })
+            .expect("set restrictions");
+            let after = b
+                .create(&spec("locked"))
+                .expect("create with every restriction");
+            b.load_html(after, PAGE).expect("load_html");
+            let mut locked = String::new();
+            let got_locked = pump_until(Duration::from_secs(30), || {
+                locked = b.document_title(after).unwrap_or_default();
+                locked == "none"
+            });
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(got_plain, "the default window's text was not readable");
+            assert_ne!(
+                plain, "none",
+                "a window before the restrictions was restricted"
+            );
+            assert!(
+                got_locked,
+                "expected the text to be unselectable, got {locked:?}"
+            );
+        }
+
+        #[test]
         fn accessibility_signals_and_the_page_runtime_reach_the_page() {
             let Some((mut b, dir, _serial)) = start("signals") else {
                 return;
@@ -2418,15 +2560,16 @@ document.title = 'ready';
 
         #[test]
         fn release_builds_turn_devtools_and_the_context_menu_off() {
+            let none = PageRestrictions::default();
             assert_eq!(
-                page_settings(true),
+                page_settings(true, &none),
                 PageSettings {
                     devtools: false,
                     context_menu: false
                 }
             );
             assert_eq!(
-                page_settings(false),
+                page_settings(false, &none),
                 PageSettings {
                     devtools: true,
                     context_menu: true
