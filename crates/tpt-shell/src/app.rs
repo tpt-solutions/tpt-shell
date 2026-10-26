@@ -502,7 +502,7 @@ impl App {
 
     /// Loads the app's recording into the overlay's timeline, when the app set one. A file that
     /// cannot be read stops the app with TS0307, named in the message.
-    #[cfg(feature = "devtools")]
+    #[cfg(all(windows, feature = "devtools"))]
     fn load_devtools_recording(&self, shell: &devtools::Shell) -> Result<()> {
         let Some((path, mode)) = &self.devtools_recording else {
             return Ok(());
@@ -513,7 +513,7 @@ impl App {
             .map_err(|message| Error::Backend(format!("TS0307: {message}")))
     }
 
-    #[cfg(not(feature = "devtools"))]
+    #[cfg(all(windows, not(feature = "devtools")))]
     fn load_devtools_recording(&self, _shell: &devtools::Shell) -> Result<()> {
         Ok(())
     }
