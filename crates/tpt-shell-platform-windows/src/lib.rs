@@ -35,6 +35,8 @@ pub mod loader;
 #[cfg(windows)]
 pub mod local_time;
 #[cfg(windows)]
+pub mod native_tree;
+#[cfg(windows)]
 pub mod placement;
 #[cfg(windows)]
 pub mod profile;
@@ -50,8 +52,6 @@ pub mod single_instance;
 pub mod startup;
 #[cfg(windows)]
 pub mod tray;
-#[cfg(windows)]
-pub mod native_tree;
 #[cfg(windows)]
 pub mod uia;
 #[cfg(windows)]

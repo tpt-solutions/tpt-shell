@@ -71,7 +71,9 @@ impl Recording {
     pub fn call(&self, request: &str, run: impl FnOnce() -> String) -> String {
         let (id, cmd, args) = parse_request(request);
         let start = self.now();
-        self.write(start, |rec, t| capture::ipc_request(rec, t, id, &cmd, &args));
+        self.write(start, |rec, t| {
+            capture::ipc_request(rec, t, id, &cmd, &args)
+        });
         let reply = run();
         let end = self.now();
         let duration = end.saturating_sub(start);

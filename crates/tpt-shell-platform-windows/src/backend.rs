@@ -3026,11 +3026,8 @@ mod surface_tests {
             return;
         };
         let id = b.create(&spec("main")).expect("create");
-        b.load_html(
-            id,
-            "<!doctype html><title>ready</title><p>hello</p>",
-        )
-        .expect("load_html");
+        b.load_html(id, "<!doctype html><title>ready</title><p>hello</p>")
+            .expect("load_html");
         let mut title = String::new();
         let ready = pump_until(Duration::from_secs(30), || {
             title = b.document_title(id).unwrap_or_default();

@@ -26,7 +26,7 @@ It does not use wry, tao, winit, Tauri or any other windowing or webview crate. 
 
 ## Quickstart
 
-On Windows, the hello example opens one window that shows one embedded page. It needs the path to `WebView2Loader.dll`:
+On Windows, the hello example opens one window that shows one embedded page. It takes the path to `WebView2Loader.dll` as its argument. Take the x64 copy from the WebView2 SDK package (`build/native/x64/`):
 
 ```sh
 cargo run -p tpt-shell --example hello -- <path to WebView2Loader.dll>
@@ -42,12 +42,23 @@ const PAGE: &str = "<!doctype html><title>hello</title><h1>hello from tpt-shell<
 fn main() -> tpt_shell::Result<()> {
     App::new()
         .name("hello")
-        .loader("WebView2Loader.dll")
         .asset("index.html", "text/html", PAGE)
         .window(Window::new("main").title("hello"))
         .run()
 }
 ```
+
+`App::loader(path)` sets the loader's path. It is optional: without it, the app looks for `WebView2Loader.dll` beside the program.
+
+The `tpt-shell` CLI makes and runs projects. Install it from a checkout, then create and run an app:
+
+```sh
+cargo install --path crates/tpt-shell-cli
+tpt-shell new rust my-app
+tpt-shell run my-app
+```
+
+Copy `WebView2Loader.dll` beside the built program first. The [quickstart](docs/src/quickstart.md) covers the steps in full, including `tpt-shell dev` for previewing a project's pages in a browser.
 
 ## Build
 
@@ -57,7 +68,7 @@ cargo test --workspace
 cargo deny check
 ```
 
-Requires a stable Rust toolchain. No Node.js is needed.
+Requires Rust 1.90 or later. `cargo deny` needs the `cargo-deny` tool installed. No Node.js is needed to build.
 
 ## Licence
 

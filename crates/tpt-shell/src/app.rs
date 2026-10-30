@@ -926,9 +926,9 @@ impl App {
         // The window the agent reads pages from: the first one the app creates. It is filled in
         // when that window exists, which is after the agent session is built.
         #[cfg(feature = "agent")]
-        let agent_window = Rc::new(std::cell::Cell::new(None::<
-            tpt_shell_platform_windows::backend::WindowId,
-        >));
+        let agent_window = Rc::new(std::cell::Cell::new(
+            None::<tpt_shell_platform_windows::backend::WindowId>,
+        ));
         // The agent, when its manifest profile enables it. It writes to the same audit log.
         #[cfg(feature = "agent")]
         let agent_tick = match self.agent_config.take() {
