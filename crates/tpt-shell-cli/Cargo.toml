@@ -11,6 +11,9 @@ authors.workspace = true
 publish.workspace = true
 repository = "https://github.com/tpt-solutions/tpt-shell"
 rust-version.workspace = true
+readme = "README.md"
+keywords = ["webview", "cli", "manifest", "audit", "scaffold"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "tpt-shell"
