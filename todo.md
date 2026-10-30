@@ -62,7 +62,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ### Dependency policy
 - [x] Write `deny.toml`: licences allow-list, advisories, bans, sources
 - [x] Verify candidate crate licences with cargo-deny: serde, serde_json, sha2, ed25519-dalek (BSD-3-Clause), zstd, thiserror, clap, notify (CC0-1.0), tiny_http, windows-sys, objc2, libloading (ISC)
-- [ ] For each non-MIT candidate: add deny.toml justification, or choose a hand-rolled fallback (e.g. own file polling instead of `notify`)
+- [x] For each non-MIT candidate: add deny.toml justification, or choose a hand-rolled fallback (e.g. own file polling instead of `notify`) (`notify` is CC0-1.0 and is not in Cargo.lock; the `dev` watcher polls, per docs/src/competitive-scan.md. The other non-MIT candidates are MIT or carry a justified exception in deny.toml, 2026-10-31)
 - [x] Confirm transitive dependency licences for every accepted crate (including "AND" expressions): `cargo deny check` passes on the current graph (2026-10-21)
 - [x] Confirm no Apache-2.0-only crate in the graph (graph is empty today)
 - [x] Done check: `cargo deny check` passes on the empty workspace (and still passes on the current workspace, 2026-10-21)
@@ -526,7 +526,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] Ed25519 checkpoints every N entries or T seconds (both intervals in `tpt-shell-audit`; the time check runs when an entry is written, so a quiet log checkpoints with its next entry. The key still comes from the caller; the keystore item below covers that)
 - [ ] Keystore: DPAPI, Keychain, Secret Service (DPAPI on Windows: `tpt-shell-platform-windows::keystore` encrypts each secret for the current user and stores one file per name; tested. Keychain and Secret Service are not done, and the audit checkpoint key does not use the keystore yet)
 - [x] HSM hook for key supply
-- [ ] External anchor hook: file on other volume, syslog, HTTP
+- [x] External anchor hook: file on other volume, syslog, HTTP (`FileAnchor` and `SyslogAnchor` are built and tested in `tpt-shell-audit::anchor`; `cargo test -p tpt-shell-audit` passes 48 tests on 2026-10-31. HTTP is deliberately not built, since it would open a socket and the no-sockets rule forbids that)
 - [x] Rotation and size limits
 - [x] Export: JSON Lines, CSV (`tpt-shell audit export --format csv|jsonl`; both verify the chain first, and the CSV leaves out parameters and escapes formula-like cells)
 - [x] `tpt-shell audit verify | export | view` (`verify --key <public-key-file>` checks checkpoint signatures; without a key it says they were not checked)
