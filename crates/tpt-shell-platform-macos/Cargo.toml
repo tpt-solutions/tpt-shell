@@ -11,6 +11,7 @@ authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+readme = "README.md"
 keywords = ["macos", "appkit", "wkwebview", "webview", "objc"]
 categories = ["gui", "os::macos-apis"]
 

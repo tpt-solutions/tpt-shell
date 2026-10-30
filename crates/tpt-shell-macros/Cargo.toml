@@ -11,6 +11,7 @@ authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+readme = "README.md"
 keywords = ["proc-macro", "embed", "codegen", "commands", "ipc"]
 categories = ["development-tools::procedural-macro-helpers"]
 

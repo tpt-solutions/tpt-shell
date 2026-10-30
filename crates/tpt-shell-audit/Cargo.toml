@@ -11,6 +11,7 @@ authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+readme = "README.md"
 keywords = ["audit", "hash-chain", "ed25519", "tamper-evident", "log"]
 categories = ["cryptography", "development-tools"]
 

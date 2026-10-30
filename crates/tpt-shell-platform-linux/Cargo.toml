@@ -11,6 +11,7 @@ authors.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 repository.workspace = true
+readme = "README.md"
 keywords = ["gtk", "webkit", "linux", "webview", "dlopen"]
 categories = ["gui", "os::unix-apis"]
 
