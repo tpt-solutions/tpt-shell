@@ -700,7 +700,6 @@ version = "0.0.0"
 dependencies = [
  "serde_json",
  "tpt-shell-core",
- "tpt-shell-replay",
 ]
 
 [[package]]
