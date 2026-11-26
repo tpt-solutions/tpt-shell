@@ -177,6 +177,12 @@ fn collect(dir: &Path, depth: usize, files: &mut Vec<(PathBuf, u64, u128)>) {
         };
         let path = entry.path();
         if kind.is_dir() {
+            // Build output and VCS or editor folders are not pages, and would fill MAX_FILES.
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == "target" || name.starts_with('.') {
+                continue;
+            }
             collect(&path, depth + 1, files);
         } else if kind.is_file() {
             let Ok(meta) = entry.metadata() else {
@@ -275,6 +281,18 @@ mod tests {
 
         fs::remove_file(dir.join("new.css")).unwrap();
         assert!(watch.changed(), "a removed file is a change");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn build_output_and_hidden_folders_do_not_count_as_pages() {
+        let dir = scratch("skip");
+        let before = fingerprint(&dir);
+        fs::create_dir_all(dir.join("target/debug")).unwrap();
+        fs::write(dir.join("target/debug/app.exe"), b"x").unwrap();
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        fs::write(dir.join(".git/HEAD"), b"ref").unwrap();
+        assert_eq!(fingerprint(&dir), before, "target/ and .git/ are skipped");
         let _ = fs::remove_dir_all(&dir);
     }
 }

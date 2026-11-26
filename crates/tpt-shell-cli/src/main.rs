@@ -1273,8 +1273,12 @@ fn new_rust(dir: &Path, checkout: Option<&Path>) -> Result<(), String> {
     write(&dir.join("index.html"), &render(RUST_PAGE))?;
     write(&dir.join("tpt-shell.toml"), &render(RUST_MANIFEST))?;
     println!(
-        "created {} (run with: cargo run, from inside it)",
+        "created {} (run with: tpt-shell run <dir>, or cargo run from inside it)",
         dir.display()
+    );
+    #[cfg(windows)]
+    println!(
+        "note: `cargo run` needs WebView2Loader.dll beside the program; `tpt-shell run` copies the vendored copy there"
     );
     Ok(())
 }
@@ -1469,9 +1473,15 @@ fn run_project(dir: &Path, devtools: bool) -> Result<ExitCode, String> {
         ));
     }
     place_loader(dir, devtools)?;
-    let status = std::process::Command::new("cargo")
-        .args(run_cargo_args(devtools))
-        .current_dir(dir)
+    let mut command = std::process::Command::new("cargo");
+    command.args(run_cargo_args(devtools)).current_dir(dir);
+    // A project with an index.html at its root serves its pages from that folder in a debug
+    // build, and its windows reload when a file changes (dev_reload in the facade). Release
+    // builds ignore the variable.
+    if dir.join("index.html").is_file() {
+        command.env("TPT_DEV_DIR", dir);
+    }
+    let status = command
         .status()
         .map_err(|e| format!("cannot run cargo: {e}"))?;
     Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
