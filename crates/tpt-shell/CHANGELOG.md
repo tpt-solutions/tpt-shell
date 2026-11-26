@@ -5,6 +5,9 @@ All notable changes to `tpt-shell` are recorded here. The format follows [Keep a
 ## [Unreleased]
 
 ### Added
+- `tpt_shell::viewport` and `UiHandle::viewport_frame`: sends one RGBA8 frame to a window's page as the event `viewport.frame`, for a `<canvas>` to draw. The payload is JSON (`width`, `height`, `format: "rgba8"`, base64 `data`). A buffer that is not `width * height * 4` bytes, or an empty frame, is refused.
+- `UiHandle::viewport_frame_named`: the same frame with a binding `name`, so a page with several canvases draws each frame into the right one.
+- `examples/viewport`, which streams an animated gradient into a page canvas. The page's script and style are assets, because the page policy blocks inline code.
 - Facade crate with the `App`, `Window`, `Scope` and command types, and re-exports of the core, IPC, capability, audit, profile and macro crates.
 - Windows: `App::new().loader(...).asset(...).window(...).grant(...).command(...).run()` opens a window, serves its pages from the app origin, and runs capability-checked commands. A grant that needs consent asks in a native dialog, and the default answer is No.
 - Windows: `App::audit(path, policy)` writes each command call from a page to a hash-chained audit log. `App::manifest_audit(manifest, log)` does the same from the `[audit]` section of the manifest.
@@ -22,3 +25,4 @@ All notable changes to `tpt-shell` are recorded here. The format follows [Keep a
 
 ### Changed
 - MSRV is Rust 1.90, set in the workspace manifest.
+- The README quickstart no longer calls `App::loader`, which is optional on Windows.

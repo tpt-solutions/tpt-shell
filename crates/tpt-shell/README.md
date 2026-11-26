@@ -30,17 +30,24 @@ const PAGE: &str = "<!doctype html><title>hello</title><h1>hello from tpt-shell<
 fn main() -> tpt_shell::Result<()> {
     App::new()
         .name("hello")
-        .loader("WebView2Loader.dll")
         .asset("index.html", "text/html", PAGE)
         .window(Window::new("main").title("hello"))
         .run()
 }
 ```
 
-The `loader` call takes the path to `WebView2Loader.dll`. The `hello` example in this repository runs the same code:
+The `hello` example in this repository runs the same code. It takes the path to the x64 `WebView2Loader.dll` from the WebView2 SDK package (`build/native/x64/`) as its argument:
 
 ```sh
 cargo run -p tpt-shell --example hello -- <path to WebView2Loader.dll>
+```
+
+`App::loader(path)` sets the loader's path. It is optional: without it, the app looks for `WebView2Loader.dll` beside the program.
+
+The `viewport` example draws frames from Rust into a `<canvas>` on the page, to show how a renderer's output reaches a page:
+
+```sh
+cargo run -p tpt-shell --example viewport -- <path to WebView2Loader.dll>
 ```
 
 ## Main types

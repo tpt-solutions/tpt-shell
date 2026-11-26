@@ -55,7 +55,6 @@ use tpt_shell::{App, Window};
 
 App::new()
     .name("my-app")
-    .loader("WebView2Loader.dll")
     .window(Window::new("main").title("My app"))
     .run()?;
 ```

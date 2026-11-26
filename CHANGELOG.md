@@ -6,11 +6,14 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 
 ### Changed
 - Contributions are accepted as issues only. Pull requests are not taken.
+- Quickstart: the hello example takes the x64 `WebView2Loader.dll` as its argument. `App::loader` is optional, and without it the app looks for the DLL beside the program. The CLI section shows `tpt-shell new`, `run` and `dev`.
+- Build: the README asks for Rust 1.90 or later, and for `cargo-deny` to run `cargo deny check`.
 
 ### Removed
 - `CODE_OF_CONDUCT.md`.
 
 ### Added
+- Viewport frames: `UiHandle::viewport_frame` and `viewport_frame_named` send an RGBA8 frame to a page's `<canvas>`, with an example (`tpt-shell` `examples/viewport`).
 - Repository skeleton: Cargo workspace, empty facade crate `tpt-shell`.
 - Dual licence: MIT and Apache-2.0 (TPT Solutions).
 - Licence and advisory policy in `deny.toml`.
