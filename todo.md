@@ -367,7 +367,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Windows mapping: WebView2 profile name / user data folder
 - [ ] macOS mapping: data-store identifier (14+), non-persistent otherwise
 - [ ] Linux mapping: WebsiteDataManager base dirs / ephemeral
-- [ ] `tpt.caps` reports profile capability level
+- [ ] `tpt.caps` reports profile capability level (Windows: the backend sets `window.tptProfileLevel` before the runtime runs, and `tpt.caps.profile` reports it; the runtime's 25 Node tests pass, run as explicit files. macOS and Linux do not set the level yet)
 - [ ] Wipe on close, wipe on idle (an ephemeral session is wiped when the app stops, through its guard; the idle wipe and wipe on window close are not wired, because WebView2 holds the files while a window is open)
 - [x] Secure erase (best-effort) with documented SSD/journaling limits (`wipe_dir` overwrites file contents before removal; the limits are in its doc comment)
 - [x] Quotas (`usage` and `enforce_quota`; not yet applied to a live WebView2 profile)
@@ -477,7 +477,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Own perceptual comparer with region masks and per-region tolerance (`tpt-shell-test::visual`: raw RGBA input, YIQ-weighted distance, ignore and tolerance regions; PNG decoding and the CLI are not built)
 - [ ] `tpt-shell visual compare` merging artifacts from three CI jobs
 - [x] HTML report
-- [ ] Threshold failures (the comparer reports pass or fail against `max_changed_fraction`; no CLI or CI job fails on it yet)
+- [ ] Threshold failures (the comparer reports pass or fail against `max_changed_fraction`. The CLI part is done: `tpt-shell visual compare` exits 1 when a comparison fails, tested in `visual_cmd`. Still open: the CI job does not run `visual compare` yet; `ci.yml` only uploads the three OS artifacts, so no CI job fails on it)
 - [ ] WebView2 channels (stable/beta/canary) support on Windows
 - [x] Decide: visual baseline store implementation (O5): Git LFS in the repo
 
@@ -550,7 +550,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] MCP server over localhost HTTP with token
 - [ ] Tools generated from agent-flagged commands plus UI tools (tools are passed in explicitly; there is no agent flag on commands and no UI tools yet; the page actions exist as scripts but are not offered as tools, because the session would have to run on the UI thread with the window)
 - [ ] Resources: semantic tree and audit tail (the snapshot exists; it is not yet an MCP resource, and the audit tail is not exposed)
-- [ ] Prompt-injection hygiene: untrusted markers, allowlist navigation (page text in a snapshot is wrapped in `<untrusted>` markers by `render`; that is a convention the model must follow, not a guarantee. Tool results are not yet marked, and navigation is not restricted for agents)
+- [ ] Prompt-injection hygiene: untrusted markers, allowlist navigation (page text in a snapshot is wrapped in `<untrusted>` markers by `render`; that is a convention the model must follow, not a guarantee. Tool results and resource text are marked by the session (`mark_untrusted`, tested in `tpt-shell-agent`); navigation is not restricted for agents yet, so the item stays open)
 - [ ] All agent actions audited and recordable to replay (every call is logged in the session; nothing writes it to the audit file or replay yet)
 - [ ] Policy tests: forbidden actions, rate limits, redaction, kill switch (forbidden actions, rate limits, confirmation, kill switch and session length are tested; redaction is tested on a real page through `tpt-shell-agent::page` and the live agent test, not yet through the policy layer)
 - [ ] Fuzz and security tests on control channel (R7)
@@ -634,7 +634,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] VS Code extension: inline error codes
 - [ ] Reusable GitHub Actions: build matrix, test, visual compare, compliance gate, release
 - [x] Migration shims: finalise `tpt.compat.tauri` (tested subset; see docs/src/migration/tauri.md)
-- [ ] `tpt-shell add` for kiosk, devices, audit, agent
+- [ ] `tpt-shell add` for kiosk, devices, audit, agent (`tpt-shell add <feature>` writes each manifest section, checked before it is written: `add.rs`, tested. The feature crates the sections configure are not wired, so this stays open)
 
 ### rustvac (ยง20)
 - [ ] rustvac-gui rewritten as HTML UI on tpt-shell
@@ -661,7 +661,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [x] `tpt-shell new --template <name>` for the Rust templates (`pos`, `kiosk`, `audit-app`, `agent-demo`, `appfront-dom`), not only `vanilla` and `typescript` (`pos` built here; the others copy the same way but are not built)
 - [x] `tpt-shell init` adds tpt-shell to an existing crate
 - [x] `tpt-shell run`: build and launch in one command
-- [ ] WebView2Loader.dll: locate or embed it so `App::loader(path)` is optional and the quickstart has no manual download step (done: `App::loader` is optional now, and the app finds `WebView2Loader.dll` beside the program. Not done: embedding it, which needs a decision on redistributing Microsoft's file, and a clean-machine run)
+- [ ] WebView2Loader.dll: locate or embed it so `App::loader(path)` is optional and the quickstart has no manual download step (done: `App::loader` is optional now, and the app finds `WebView2Loader.dll` beside the program. The DLL is vendored at `redist/win-x64/` under BSD-3-Clause, with its licence and notice files, re-checked 2026-11-27 against the NuGet package. `tpt-shell run` builds the project and copies the vendored DLL beside the program (`place_loader` in `tpt-shell-cli`, Windows only; the vendored copy is found from this checkout, and the copy has not been seen run end to end). Not done: `tpt-shell new` and the release archives do not copy it yet, so the manual step remains there, and a clean-machine run is not done)
 - [ ] `tpt-shell dev`: reload the page in the window on change (note: the premise was out of date. Served pages already reload in a browser tab on change. The shell window loads `app://` assets, not the dev server, so it does not reload; that needs the window to load the dev server URL in dev mode)
 - [x] `tpt-shell dev`: a mock `window.tpt` so a page works in a plain browser tab (`js/runtime/tpt-shell-mock.js`, served and injected by `dev`; checked in Node and against the live server)
 - [x] `tpt-shell doctor`: check the loader DLL, the project manifest and the Linux GTK/WebKit libraries; print a fix hint per failure from `tpt-shell-errors`; optional `--fix` (done: loader DLL location (warning), project manifest with its registry hint, Linux libraries. `doctor --fix` installs cargo-deny with `cargo install --locked` when it is missing; the install branch is not run here, because cargo-deny is installed on this machine. The loader DLL has no safe automatic fix yet: it waits on the redistribution decision in the item above. The WebView2 runtime and licence failures print a hint inline, not from the registry)
@@ -716,7 +716,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [ ] R6 device differences: real-device matrix current
 - [ ] R7 control channels: gated, tokenised, fuzzed
 - [ ] R8 replay limits: documented
-- [ ] R9 competitive claims: README audited against evidence
+- [x] R9 competitive claims: README audited against evidence (2026-11-27: a search of the README files and docs for "first", "only" and "unique" found no uniqueness claim; `docs/src/competitive-scan.md` says none of the eight differentiators is confirmed as unique and none is claimed)
 - [ ] R10 kiosk lock-down: recipes and wording reviewed
 
 ### Release engineering

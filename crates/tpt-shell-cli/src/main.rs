@@ -250,7 +250,7 @@ fn kiosk_init(dir: &Path, key: &Path, program: Option<&Path>) -> Result<ExitCode
                 .and_then(|n| n.to_str())
                 .unwrap_or("kiosk")
                 .to_string();
-            install_service(&name, program)?;
+            let _ = install_service(&name, program)?;
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -1468,12 +1468,61 @@ fn run_project(dir: &Path, devtools: bool) -> Result<ExitCode, String> {
             dir.display()
         ));
     }
+    place_loader(dir, devtools)?;
     let status = std::process::Command::new("cargo")
         .args(run_cargo_args(devtools))
         .current_dir(dir)
         .status()
         .map_err(|e| format!("cannot run cargo: {e}"))?;
     Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+}
+
+/// The WebView2 loader vendored in this checkout (`redist/win-x64`), when the CLI was built
+/// from a checkout that has it. `None` for a CLI installed from elsewhere.
+#[cfg(windows)]
+fn vendored_loader() -> Option<PathBuf> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("redist")
+        .join("win-x64")
+        .join("WebView2Loader.dll");
+    path.is_file().then_some(path)
+}
+
+/// Builds the project and copies the vendored `WebView2Loader.dll` beside the program, so
+/// `tpt-shell run` needs no manual download step. A DLL already beside the program is left
+/// alone, and when there is no vendored copy the run continues with the manual step still
+/// needed (the window then reports the missing loader).
+#[cfg(windows)]
+fn place_loader(dir: &Path, devtools: bool) -> Result<(), String> {
+    let Some(source) = vendored_loader() else {
+        return Ok(());
+    };
+    let mut build = vec!["build"];
+    if devtools {
+        build.extend(["--features", "tpt-shell/devtools"]);
+    }
+    let status = std::process::Command::new("cargo")
+        .args(&build)
+        .current_dir(dir)
+        .status()
+        .map_err(|e| format!("cannot run cargo: {e}"))?;
+    if !status.success() {
+        return Err("cargo build failed; the loader was not copied".into());
+    }
+    let target = dir.join("target").join("debug");
+    let dest = target.join("WebView2Loader.dll");
+    if !dest.is_file() {
+        fs::copy(&source, &dest)
+            .map_err(|e| format!("cannot copy the loader to {}: {e}", dest.display()))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn place_loader(_dir: &Path, _devtools: bool) -> Result<(), String> {
+    Ok(())
 }
 
 /// A crate name that `cargo new` would accept: lowercase ASCII, starting with a letter.
@@ -1590,6 +1639,14 @@ mod rust_template_tests {
         );
         assert!(new_from_template("nope", &root.join("x"), None).is_err());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_vendored_loader_is_found_from_this_checkout() {
+        let path = vendored_loader().expect("redist/win-x64/WebView2Loader.dll is in the checkout");
+        assert_eq!(path.file_name().unwrap(), "WebView2Loader.dll");
+        assert!(path.metadata().unwrap().len() > 0);
     }
 
     #[test]
