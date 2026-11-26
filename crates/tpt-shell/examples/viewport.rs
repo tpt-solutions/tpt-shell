@@ -19,28 +19,45 @@ use tpt_shell::{App, Window};
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 240;
 
+// The page's script and CSS are separate assets. The shell's policy (`script-src 'self'`,
+// `style-src 'self'`) blocks inline <script> and <style>, so inline code would not run.
 const PAGE: &str = r#"<!doctype html>
 <meta charset="utf-8">
 <title>viewport</title>
-<style>
-  html, body { margin: 0; height: 100%; background: #101820; }
-  canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
-</style>
+<link rel="stylesheet" href="viewport.css">
 <canvas id="view"></canvas>
-<script>
-  const canvas = document.getElementById('view');
-  const ctx = canvas.getContext('2d');
+<div id="status">starting</div>
+<script src="viewport.js"></script>
+"#;
+
+const STYLE: &str = r#"html, body { margin: 0; height: 100%; background: #101820; }
+canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+#status { position: fixed; left: 8px; top: 8px; padding: 4px 8px; color: #fff;
+  background: rgba(0, 0, 0, 0.6); font: 14px sans-serif; }
+"#;
+
+const SCRIPT: &str = r#"(function () {
+  var canvas = document.getElementById('view');
+  var ctx = canvas.getContext('2d');
+  var status = document.getElementById('status');
+  var frames = 0;
   window.tpt.on('viewport.frame', function (frame) {
-    if (canvas.width !== frame.width || canvas.height !== frame.height) {
-      canvas.width = frame.width;
-      canvas.height = frame.height;
+    try {
+      if (canvas.width !== frame.width || canvas.height !== frame.height) {
+        canvas.width = frame.width;
+        canvas.height = frame.height;
+      }
+      var binary = atob(frame.data);
+      var pixels = new Uint8ClampedArray(binary.length);
+      for (var i = 0; i < binary.length; i++) pixels[i] = binary.charCodeAt(i);
+      ctx.putImageData(new ImageData(pixels, frame.width, frame.height), 0, 0);
+      frames += 1;
+      status.textContent = 'frames: ' + frames;
+    } catch (err) {
+      status.textContent = 'error: ' + err;
     }
-    const binary = atob(frame.data);
-    const pixels = new Uint8ClampedArray(binary.length);
-    for (let i = 0; i < binary.length; i++) pixels[i] = binary.charCodeAt(i);
-    ctx.putImageData(new ImageData(pixels, frame.width, frame.height), 0, 0);
   });
-</script>
+})();
 "#;
 
 /// One RGBA8 frame: a horizontal and vertical gradient whose blue channel moves with `t`.
@@ -68,6 +85,8 @@ fn main() -> tpt_shell::Result<()> {
         .name("viewport")
         .loader(loader)
         .asset("index.html", "text/html", PAGE)
+        .asset("viewport.css", "text/css", STYLE)
+        .asset("viewport.js", "text/javascript", SCRIPT)
         .window(
             Window::new("main")
                 .title("viewport")
