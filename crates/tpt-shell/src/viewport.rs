@@ -23,6 +23,16 @@ pub const FRAME_FORMAT: &str = "rgba8";
 /// Builds the event data for one frame. Fails if the pixel buffer is not exactly
 /// `width * height * 4` bytes, or the frame is empty.
 pub fn frame_data(width: u32, height: u32, rgba: &[u8]) -> Result<Value> {
+    frame_payload(None, width, height, rgba)
+}
+
+/// Like [`frame_data`], with a binding `name` in the payload, so a page with several
+/// viewports can draw each frame into the right canvas.
+pub fn frame_data_named(name: &str, width: u32, height: u32, rgba: &[u8]) -> Result<Value> {
+    frame_payload(Some(name), width, height, rgba)
+}
+
+fn frame_payload(name: Option<&str>, width: u32, height: u32, rgba: &[u8]) -> Result<Value> {
     if width == 0 || height == 0 {
         return Err(Error::Backend(
             "viewport frame must not be empty".to_string(),
@@ -37,12 +47,16 @@ pub fn frame_data(width: u32, height: u32, rgba: &[u8]) -> Result<Value> {
             rgba.len()
         )));
     }
-    Ok(json!({
+    let mut payload = json!({
         "width": width,
         "height": height,
         "format": FRAME_FORMAT,
         "data": base64_encode(rgba),
-    }))
+    });
+    if let Some(name) = name {
+        payload["name"] = json!(name);
+    }
+    Ok(payload)
 }
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -95,6 +109,13 @@ mod tests {
         assert_eq!(data["format"], FRAME_FORMAT);
         // Base64 of the eight pixel bytes FF 00 00 FF 00 00 FF FF.
         assert_eq!(data["data"], "/wAA/wAA//8=");
+    }
+
+    #[test]
+    fn a_named_frame_carries_its_binding_name() {
+        let data = frame_data_named("scene", 1, 1, &[0, 0, 0, 255]).unwrap();
+        assert_eq!(data["name"], "scene");
+        assert!(frame_data(1, 1, &[0, 0, 0, 255]).unwrap().get("name").is_none());
     }
 
     #[test]

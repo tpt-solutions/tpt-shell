@@ -64,6 +64,22 @@ impl UiHandle {
         self.emit(window, crate::viewport::FRAME_EVENT, data)
     }
 
+    /// Like [`UiHandle::viewport_frame`], with the binding `name` in the event, so a page with
+    /// several viewports draws each frame into the canvas that has that `data-viewport` name.
+    ///
+    /// Support: Full on Windows.
+    pub fn viewport_frame_named(
+        &self,
+        window: &str,
+        name: &str,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> Result<()> {
+        let data = crate::viewport::frame_data_named(name, width, height, rgba)?;
+        self.emit(window, crate::viewport::FRAME_EVENT, data)
+    }
+
     /// Runs `script` in the page of `window` on the UI thread, without waiting for it. Internal
     /// use only: the script runs with the page's own rights, so only the app's own code calls it.
     ///
