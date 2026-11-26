@@ -54,6 +54,16 @@ impl UiHandle {
         self.post(move || post_window_message(id, &message))
     }
 
+    /// Sends one rendered frame to the page of `window` as the event `viewport.frame`, for a
+    /// `<canvas>` to draw. `rgba` is `width * height * 4` bytes, row-major RGBA8 from the top
+    /// row. See the `viewport` module for the payload.
+    ///
+    /// Support: Full on Windows.
+    pub fn viewport_frame(&self, window: &str, width: u32, height: u32, rgba: &[u8]) -> Result<()> {
+        let data = crate::viewport::frame_data(width, height, rgba)?;
+        self.emit(window, crate::viewport::FRAME_EVENT, data)
+    }
+
     /// Runs `script` in the page of `window` on the UI thread, without waiting for it. Internal
     /// use only: the script runs with the page's own rights, so only the app's own code calls it.
     ///

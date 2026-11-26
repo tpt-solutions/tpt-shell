@@ -35,6 +35,7 @@ mod ui;
 ///
 /// Support: Full.
 pub mod device_scope;
+pub mod viewport;
 
 /// Support: Partial. Records a running app's IPC calls, window closes and asset loads on Windows
 /// only; resize, focus and page input are not recorded.
