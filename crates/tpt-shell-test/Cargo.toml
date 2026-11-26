@@ -18,9 +18,9 @@ categories = ["development-tools::testing"]
 [features]
 # Enables the test driver and its control channel. Off in normal builds, so no channel code
 # is compiled into a shipped app (spec §10.6, R7).
-test-driver = []
+test-driver = ["dep:tpt-shell-replay"]
 
 [dependencies]
 serde_json = "1"
 tpt-shell-core = { path = "../tpt-shell-core", version = "0.0.0" }
-tpt-shell-replay = { path = "../tpt-shell-replay", version = "0.0.0" }
+tpt-shell-replay = { path = "../tpt-shell-replay", version = "0.0.0", optional = true }

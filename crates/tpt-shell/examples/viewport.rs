@@ -11,16 +11,26 @@
 //!
 //! usage: cargo run -p tpt-shell --example viewport -- <path to WebView2Loader.dll>
 
+// The demo runs on Windows only. Elsewhere `main` returns an error, so the items it does not
+// use would warn.
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
+
+#[cfg(windows)]
 use std::thread;
+#[cfg(windows)]
 use std::time::Duration;
 
+#[cfg(windows)]
 use tpt_shell::{App, Window};
 
+#[cfg(windows)]
 const WIDTH: u32 = 320;
+#[cfg(windows)]
 const HEIGHT: u32 = 240;
 
 // The page's script and CSS are separate assets. The shell's policy (`script-src 'self'`,
 // `style-src 'self'`) blocks inline <script> and <style>, so inline code would not run.
+#[cfg(windows)]
 const PAGE: &str = r#"<!doctype html>
 <meta charset="utf-8">
 <title>viewport</title>
@@ -30,12 +40,14 @@ const PAGE: &str = r#"<!doctype html>
 <script src="viewport.js"></script>
 "#;
 
+#[cfg(windows)]
 const STYLE: &str = r#"html, body { margin: 0; height: 100%; background: #101820; }
 canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
 #status { position: fixed; left: 8px; top: 8px; padding: 4px 8px; color: #fff;
   background: rgba(0, 0, 0, 0.6); font: 14px sans-serif; }
 "#;
 
+#[cfg(windows)]
 const SCRIPT: &str = r#"(function () {
   var canvas = document.getElementById('view');
   var ctx = canvas.getContext('2d');
@@ -61,6 +73,7 @@ const SCRIPT: &str = r#"(function () {
 "#;
 
 /// One RGBA8 frame: a horizontal and vertical gradient whose blue channel moves with `t`.
+#[cfg(windows)]
 fn gradient(t: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity((WIDTH * HEIGHT * 4) as usize);
     let blue = (t * 4 % 256) as u8;
@@ -75,6 +88,7 @@ fn gradient(t: u32) -> Vec<u8> {
     out
 }
 
+#[cfg(windows)]
 fn main() -> tpt_shell::Result<()> {
     let loader = std::env::args()
         .nth(1)
@@ -108,4 +122,11 @@ fn main() -> tpt_shell::Result<()> {
     });
 
     running.run()
+}
+
+#[cfg(not(windows))]
+fn main() -> tpt_shell::Result<()> {
+    Err(tpt_shell::Error::Unsupported {
+        feature: "the viewport example",
+    })
 }

@@ -115,7 +115,10 @@ mod tests {
     fn a_named_frame_carries_its_binding_name() {
         let data = frame_data_named("scene", 1, 1, &[0, 0, 0, 255]).unwrap();
         assert_eq!(data["name"], "scene");
-        assert!(frame_data(1, 1, &[0, 0, 0, 255]).unwrap().get("name").is_none());
+        assert!(frame_data(1, 1, &[0, 0, 0, 255])
+            .unwrap()
+            .get("name")
+            .is_none());
     }
 
     #[test]

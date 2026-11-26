@@ -101,7 +101,7 @@ pub fn init(dir: &Path, key_path: &Path) -> Result<PathBuf, String> {
     fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     fs::write(&config_path, STARTER_CONFIG)
         .map_err(|e| format!("cannot write {}: {e}", config_path.display()))?;
-    sign(&config_path, key_path)?;
+    let _ = sign(&config_path, key_path)?;
     Ok(config_path)
 }
 

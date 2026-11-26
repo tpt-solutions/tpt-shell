@@ -15,11 +15,17 @@ These are provided by the operating system or the user and are not redistributed
 tpt-shell unless the pinned-runtime build option is used (spec §10.8).
 
 - WebView2Loader.dll (Windows, x64 and arm64), from the Microsoft.Web.WebView2 NuGet
-  package, version 1.0.4312-prerelease (checked 2026-10-20). Licence: BSD-3-Clause, text
-  reproduced below. SHA-256 of the x64 file: 909828eb2922694b156ae367751466722fe148a1b151245bbc8a80a24dc32645. Shipped with the app; this is the
-  OfficialLoader strategy (spec §6.1, decision O1). The package's NOTICE.txt also lists
-  third-party components bundled in that package; check them before shipping any file
-  from it other than the loader.
+  package, version 1.0.4312-prerelease (re-checked 2026-11-27 against the NuGet package:
+  the DLL hash and licence text match). Licence: BSD-3-Clause, text reproduced below.
+  Vendored at `redist/win-x64/WebView2Loader.dll`, with its licence text in
+  `redist/win-x64/LICENSE-WebView2Loader.txt` and the package notice in
+  `redist/win-x64/NOTICE-WebView2.txt`. SHA-256 of the x64 file:
+  909828eb2922694b156ae367751466722fe148a1b151245bbc8a80a24dc32645. Redistribution in binary
+  form is permitted under BSD-3-Clause when the copyright notice and licence text go with it.
+  The licence may not be used to endorse products. This is the OfficialLoader strategy (spec
+  §6.1, decision O1). The package's NOTICE.txt lists third-party components bundled in the
+  NuGet package (ANTLR and others), not in the loader; check them before shipping any other
+  file from the package.
 - Microsoft WebView2 Runtime (Windows). Not redistributed by default. Licence: Microsoft
   Edge WebView2 Runtime EULA. Covers the runtime only when the pinned-runtime option
   (spec §10.8) is used; that path needs a legal review first.

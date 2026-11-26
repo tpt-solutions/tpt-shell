@@ -131,7 +131,7 @@ mod tests {
     fn add_refuses_a_second_section_and_unknown_features() {
         let path = scratch("twice");
         fs::write(&path, BASE).expect("write");
-        add("kiosk", &path).expect("first");
+        let _ = add("kiosk", &path).expect("first");
         assert!(add("kiosk", &path).is_err());
         assert!(add("printers", &path).is_err());
         let _ = fs::remove_dir_all(path.parent().expect("dir"));
