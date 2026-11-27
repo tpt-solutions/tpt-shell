@@ -434,9 +434,9 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] ZPL builder (`tpt-shell-devices::zpl`, golden output and escaping)
 - [x] Receipt/label printing
 - [x] Raw print via OS spooler (Windows Full through winspool; macOS and Linux Partial through `lp`)
-- [ ] Barcode scanners: keyboard-wedge, serial, HID POS
-- [ ] Scales: common serial protocols
-- [ ] Customer displays
+- [x] Barcode scanners: keyboard-wedge, serial, HID POS (Partial, as the module says: the parsing is tested, 14 tests, 2026-11-28; HID POS decodes boot-protocol keyboard reports only, and no real scanner has been used)
+- [x] Scales: common serial protocols (Partial: one generic ASCII line parser, 10 tests, 2026-11-28; vendor protocols are not implemented)
+- [x] Customer displays (Partial: the generic two-line ASCII profile, 10 tests, 2026-11-28; displays with their own command set are not supported)
 
 ### Security and audit
 - [ ] Capabilities `device.serial`, `device.hid`, `device.usb`, `device.net`, `device.print` with scopes (a page command under `device.print` with a `Devices` scope opens a device through the hub and prints; live test with a virtual printer. The other kinds and the consent prompt for devices are not wired)
