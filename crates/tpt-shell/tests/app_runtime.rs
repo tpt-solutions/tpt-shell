@@ -658,3 +658,79 @@ fn a_kiosk_app_builds_with_its_page_failure_and_idle_hooks() {
     drop(running);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A page starts a job through a granted command. The reply comes back first, and then the job's
+/// result event, which the host delivers to the window that started the job.
+const JOB_INDEX: &str = r#"<!doctype html><title>jobs</title><script src="job.js"></script>"#;
+
+const JOB_JS: &str = r#"
+    window.chrome.webview.addEventListener('message', function (e) {
+      document.title = (document.title === 'jobs' ? '' : document.title + ' | ') + e.data;
+    });
+    window.chrome.webview.postMessage('{"v":1,"id":7,"cmd":"start_job","args":{}}');
+"#;
+
+#[test]
+fn a_job_result_reaches_the_window_that_started_the_job() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use tpt_shell::Router;
+    use tpt_shell_ipc::jobs::{start_shared, Jobs};
+
+    let Some((loader, _serial)) = runtime_test_loader() else {
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("tpt-app-job-{}", std::process::id()));
+    let app = App::new()
+        .name("app-job-test")
+        .loader(loader)
+        .data_dir(&dir)
+        .asset("index.html", "text/html", JOB_INDEX)
+        .asset("job.js", "text/javascript", JOB_JS)
+        .window(Window::new("main").title("job-test").size(640.0, 480.0))
+        .grant(Grant {
+            capability: "job.run".into(),
+            window: "main".into(),
+            origin: "https://tpt-app.localhost".into(),
+            scope: Scope::Unrestricted,
+            consent: false,
+        })
+        .register(|router: &mut Router| {
+            // The router's job runner is shared by its job commands. A start answers with the id.
+            let jobs: Rc<RefCell<Jobs>> = router.jobs();
+            router.register_guarded(
+                "start_job",
+                "job.run",
+                |_| Target::None,
+                move |_| {
+                    start_shared(&jobs, |ctx| {
+                        ctx.progress(1, 1);
+                        Ok(serde_json::json!({ "answer": 42 }))
+                    })
+                },
+            );
+        });
+
+    let running = app.build().expect("the app should start");
+    let id = running.window("main").expect("the main window");
+    let mut title = String::new();
+    let got = pump_until(Duration::from_secs(30), || {
+        title = running.backend().document_title(id).unwrap_or_default();
+        title.contains("job.result")
+    });
+    drop(running);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        got,
+        "the job result never reached the page; title was {title:?}"
+    );
+    assert!(
+        title.contains(r#""answer":42"#),
+        "the result carries its data: {title}"
+    );
+    assert!(
+        title.contains(r#""id":7"#),
+        "the reply to the start call came first: {title}"
+    );
+}

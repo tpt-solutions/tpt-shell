@@ -52,6 +52,9 @@ use tpt_shell_platform_windows::webview2::default_user_data_dir;
 /// The page restrictions a kiosk config's lock-down asks for. Each flag maps to one WebView2
 /// switch or script (see `PageRestrictions`).
 #[cfg(windows)]
+/// How often the UI thread delivers queued job events to their windows.
+const JOB_EVENT_PERIOD: Duration = Duration::from_millis(20);
+
 fn page_restrictions(
     lockdown: &tpt_shell_kiosk::policy::Lockdown,
 ) -> tpt_shell_platform_windows::backend::PageRestrictions {
@@ -1166,6 +1169,29 @@ impl App {
             windows.push((window.name, id));
         }
         let window_ids: Vec<_> = windows.iter().map(|(_, id)| *id).collect();
+        // Job events reach the page that started the job. The router queues them; this tick drains
+        // the queue on the UI thread and posts each event to the window that owns its job. Without
+        // it a job's result never arrives, and the overlay's job table never sees a job end.
+        {
+            let job_router = router.clone();
+            let job_windows = windows.clone();
+            backend.every(JOB_EVENT_PERIOD, move || {
+                for (owner, message) in job_router.drain_job_events_by_window() {
+                    let target = job_windows
+                        .iter()
+                        .find(|(name, _)| *name == owner)
+                        .map(|(_, id)| *id);
+                    if let Some(id) = target {
+                        let text = message.to_string();
+                        if let Err(e) =
+                            tpt_shell_platform_windows::backend::post_window_message(id, &text)
+                        {
+                            eprintln!("tpt-shell: cannot send a job event: {e}");
+                        }
+                    }
+                }
+            })?;
+        }
         if let Some(root) = dev_root {
             // Checks the folder a few times a second on the UI thread, and reloads every window
             // once when it changed. Nothing is sent over a socket.

@@ -393,8 +393,25 @@ impl Jobs {
     ///
     /// Support: Full.
     pub fn drain(&mut self) -> Vec<JobEvent> {
+        self.drain_with_owner()
+            .into_iter()
+            .map(|(_, event)| event)
+            .collect()
+    }
+
+    /// Like [`Jobs::drain`], but each event comes with the window that started its job, so the
+    /// host can send the event to that window. The owner is read before the job is reaped, so it
+    /// is known for the terminal event too. A job with no window gets an empty owner.
+    ///
+    /// Support: Full.
+    pub fn drain_with_owner(&mut self) -> Vec<(String, JobEvent)> {
         let mut out = Vec::new();
         while let Ok(event) = self.events_rx.try_recv() {
+            let owner = self
+                .running
+                .get(&event.job())
+                .map(|job| job.owner.clone())
+                .unwrap_or_default();
             if let Some(job) = self.running.get_mut(&event.job()) {
                 match &event {
                     JobEvent::Progress { done, total, .. } => job.progress = Some((*done, *total)),
@@ -416,7 +433,7 @@ impl Jobs {
                     }
                 }
             }
-            out.push(event);
+            out.push((owner, event));
         }
         self.reap();
         out
@@ -721,6 +738,31 @@ mod tests {
         }
         let listed: Vec<JobId> = jobs.list().into_iter().map(|info| info.id).collect();
         assert_eq!(listed, ids[ids.len() - RECENT_LIMIT..].to_vec());
+    }
+
+    #[test]
+    fn each_job_event_carries_the_window_that_started_the_job() {
+        let mut jobs = Jobs::new(4);
+        jobs.set_owner("main");
+        let mine = jobs.start(|_| Ok(json!({ "from": "main" }))).unwrap();
+        jobs.set_owner("");
+        let unowned = jobs.start(|_| Ok(json!({}))).unwrap();
+
+        let mut seen: Vec<(String, JobEvent)> = Vec::new();
+        for _ in 0..1000 {
+            seen.extend(jobs.drain_with_owner());
+            if seen.iter().filter(|(_, e)| e.is_terminal()).count() == 2 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let owner_of = |id: JobId| {
+            seen.iter()
+                .find(|(_, e)| e.job() == id && e.is_terminal())
+                .map(|(owner, _)| owner.clone())
+        };
+        assert_eq!(owner_of(mine).as_deref(), Some("main"));
+        assert_eq!(owner_of(unowned).as_deref(), Some(""));
     }
 
     #[test]

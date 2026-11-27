@@ -293,6 +293,23 @@ impl Router {
         }
     }
 
+    /// Like [`Router::drain_job_events`], but each event comes with the window that started its
+    /// job. The host sends each envelope to the page of that window. An event whose job had no
+    /// window has an empty name, and no window matches it.
+    ///
+    /// Support: Full.
+    pub fn drain_job_events_by_window(&self) -> Vec<(String, Value)> {
+        match &self.jobs {
+            Some(jobs) => jobs
+                .borrow_mut()
+                .drain_with_owner()
+                .into_iter()
+                .map(|(owner, event)| (owner, event.to_envelope()))
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
     /// Handles one raw message from the page and returns the response text to send back.
     /// Malformed messages get an error response with a null id; they are never dispatched.
     ///
