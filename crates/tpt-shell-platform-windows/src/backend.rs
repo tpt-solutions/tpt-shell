@@ -749,6 +749,15 @@ impl WindowsBackend {
     }
 
     /// Makes Ctrl+Shift+`key` in page `id` post `message` to the shell, on every load of the page.
+    /// Adds a script that runs at the start of every document the window loads, from its next
+    /// navigation on, before the page's own scripts. Used for the recording's input listener.
+    ///
+    /// Support: Full on Windows.
+    pub fn add_start_script(&mut self, id: WindowId, script: &str) -> Result<()> {
+        self.with_web(id, |w| w.add_document_start_script(script, |_| {}))?
+            .map_err(|hr| hr_error("AddScriptToExecuteOnDocumentCreated", hr))
+    }
+
     /// The message arrives in the window's message handler like any page message. `key` must be a
     /// letter, and `message` may only use letters, digits, `_` and `.`. The script is added at
     /// document start, so it is in place before the page's own scripts run.

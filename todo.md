@@ -491,7 +491,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Devtools a11y quick check
 
 ### Record/replay (tpt-shell-replay)
-- [ ] Recorder: IPC calls with args/results/timing, DOM input events with stable paths, window events, protocol loads
+- [ ] Recorder: IPC calls with args/results/timing, DOM input events with stable paths, window events, protocol loads (partial, 2026-11-28: IPC calls, window closes and protocol loads were already recorded. Page input is now too: a listener the app adds before each window's first page reports clicks, key presses and input changes with element paths, and passwords are redacted. Unit-tested. The listener has passed a syntax check but has not run in WebView2, because a recording is written only when the app quits, and nothing in the test harness quits it yet. Not recorded: window resize and focus)
 - [x] Virtualised Rust `Clock`/`Rng` in record/replay mode
 - [x] In-page shim for Date.now, performance.now, Math.random, timers (record/replay only)
 - [x] `.tptreplay` format: zstd JSON Lines + assets + version (zstd-compressed recordings and SHA-256 checked assets are done; version 2 files without the hash still read)

@@ -1192,6 +1192,13 @@ impl App {
                             return None;
                         }
                     }
+                    // A page input record from the recording's listener is not a command: it is
+                    // recorded and dropped here, so the router never sees it.
+                    if let Some(recording) = &recording_for_page {
+                        if recording.page_input(text) {
+                            return None;
+                        }
+                    }
                     let mut prompt = NativeConsent::for_window(id);
                     if let Some(idle) = &idle {
                         idle.borrow_mut().touch(Instant::now());
@@ -1257,6 +1264,10 @@ impl App {
             )?;
             if overlay.is_some() {
                 devtools::add_hotkey(&mut backend, id)?;
+            }
+            // A recording reports the page's input, so its listener is in place before the first page.
+            if recording.is_some() {
+                backend.add_start_script(id, crate::record::INPUT_JS)?;
             }
             session::go(&panes, id, &format!("{APP_ORIGIN}/{}", window.page))?;
             windows.push((window.name, id));

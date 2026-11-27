@@ -8,8 +8,9 @@
 //! when the event loop ends. A recording never changes what the app does: a call that cannot be
 //! recorded is logged, and the call still runs.
 //!
-//! Not recorded yet: window resize and focus, because the backend reports no such events, and page
-//! input, because the input shim is not injected into a running window.
+//! Page input (clicks, key presses and input changes, with element paths) is recorded through a
+//! listener the app adds to each window before its first page. Not recorded yet: window resize and
+//! focus, because the backend reports no such events.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -17,15 +18,15 @@ use std::time::Duration;
 
 use serde_json::Value;
 use tpt_shell_core::{Clock, SystemClock};
-use tpt_shell_replay::capture::{self, IpcFailure, WindowEvent};
+use tpt_shell_replay::capture::{self, Input, IpcFailure, PathStep, WindowEvent};
 use tpt_shell_replay::{Header, Recorder};
 
 /// One run's recording: the recorder, the clock its times come from, and the file it is written to
 /// when [`Recording::finish`] is called.
 ///
-/// Support: Partial. A running app records on Windows only, and only IPC calls, window closes and
-/// protocol loads: resize, focus and page input are not recorded. The recording logic is unit
-/// tested.
+/// Support: Partial. A running app records on Windows only, and records IPC calls, window closes,
+/// protocol loads and page input. Resize and focus are not recorded. The recording logic is unit
+/// tested; the page listener has passed a syntax check but has not run in WebView2 yet.
 pub struct Recording {
     path: PathBuf,
     clock: Box<dyn Clock>,
@@ -157,6 +158,100 @@ impl Recording {
 
 /// The envelope's id, command and arguments. A request that does not parse has id 0, the command
 /// `(unparsed)` and no arguments.
+/// The message command a page script uses to report an input event.
+pub const INPUT_CMD: &str = "tpt.record.input";
+
+/// The longest element path an input record may carry. A deeper path is dropped with its event.
+const MAX_PATH_STEPS: usize = 64;
+
+/// The page script that reports input to the host while a recording runs. It sends one message
+/// per click, key press and input change, with the element's path: the role and name of each
+/// ancestor and the child index. A key typed into a password field is sent as `[redacted]`.
+pub const INPUT_JS: &str = r#"(function () {
+  function role(el) { return el.getAttribute('role') || el.tagName.toLowerCase(); }
+  function label(el) {
+    return el.getAttribute('aria-label') || (el.textContent || '').trim().slice(0, 40);
+  }
+  function path(el) {
+    var steps = [];
+    while (el && el.nodeType === 1 && el !== document.documentElement) {
+      var parent = el.parentElement;
+      var index = parent ? Array.prototype.indexOf.call(parent.children, el) : 0;
+      steps.unshift({ index: index, role: role(el), name: label(el) });
+      el = parent;
+    }
+    return steps;
+  }
+  function send(args) {
+    window.chrome.webview.postMessage(JSON.stringify({ v: 1, id: 0, cmd: 'tpt.record.input', args: args }));
+  }
+  window.addEventListener('click', function (e) {
+    send({ kind: 'click', path: path(e.target), x: e.clientX, y: e.clientY });
+  }, true);
+  window.addEventListener('keydown', function (e) {
+    var secret = e.target && e.target.type === 'password';
+    send({ kind: 'key', path: path(e.target), key: secret ? '[redacted]' : e.key });
+  }, true);
+  window.addEventListener('input', function (e) {
+    var target = e.target;
+    send({ kind: 'input', path: path(target), value_length: String(target.value || '').length });
+  }, true);
+})();"#;
+
+/// The input event a page message describes, or `None` when the arguments are not one.
+fn input_from_args(args: &Value) -> Option<Input> {
+    let steps = args["path"].as_array()?;
+    if steps.len() > MAX_PATH_STEPS {
+        return None;
+    }
+    let path = steps
+        .iter()
+        .map(|s| {
+            Some(PathStep {
+                index: u32::try_from(s["index"].as_u64()?).ok()?,
+                role: s["role"].as_str()?.to_string(),
+                name: s["name"].as_str().unwrap_or("").to_string(),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    match args["kind"].as_str()? {
+        "click" => Some(Input::Click {
+            path,
+            x: args["x"].as_f64()?.round() as i64,
+            y: args["y"].as_f64()?.round() as i64,
+        }),
+        "key" => Some(Input::Key {
+            path,
+            key: args["key"].as_str()?.to_string(),
+        }),
+        "input" => Some(Input::Input {
+            path,
+            value_length: args["value_length"].as_u64()?,
+        }),
+        _ => None,
+    }
+}
+
+impl Recording {
+    /// Records an input event the page script reported, if `text` is one. Returns whether it was,
+    /// so the host keeps it away from the router. A malformed input record is dropped, and still
+    /// counts as one, since it is the page's message and not a command.
+    ///
+    /// Support: Full.
+    pub fn page_input(&self, text: &str) -> bool {
+        let Ok(message) = serde_json::from_str::<Value>(text) else {
+            return false;
+        };
+        if message["cmd"].as_str() != Some(INPUT_CMD) {
+            return false;
+        }
+        if let Some(input) = input_from_args(&message["args"]) {
+            self.write(self.now(), |rec, t| capture::input(rec, t, &input));
+        }
+        true
+    }
+}
+
 fn parse_request(request: &str) -> (u64, String, Value) {
     match serde_json::from_str::<Value>(request) {
         Ok(value) => (
@@ -332,5 +427,117 @@ mod tests {
         let replay = tpt_shell_replay::read_compressed(&bytes, Mode::Strict).unwrap();
         assert!(replay.events.is_empty());
         let _ = std::fs::remove_file(&path);
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+    use serde_json::json;
+    use tpt_shell_replay::Mode;
+
+    fn temp(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "tpt-record-input-{}-{name}.tptreplay",
+            std::process::id()
+        ))
+    }
+
+    /// Records the messages, finishes the file, and reads back the input events it holds.
+    fn recorded(name: &str, messages: &[Value]) -> (Vec<Value>, Vec<bool>) {
+        let path = temp(name);
+        let recording = Recording::new(&path, "demo");
+        let consumed: Vec<bool> = messages
+            .iter()
+            .map(|m| recording.page_input(&m.to_string()))
+            .collect();
+        recording.finish().expect("finish");
+        let bytes = std::fs::read(&path).expect("read");
+        let _ = std::fs::remove_file(&path);
+        let replay = tpt_shell_replay::read_compressed(&bytes, Mode::Lenient).expect("read back");
+        let events = replay
+            .events
+            .into_iter()
+            .filter(|e| e.kind == "input")
+            .map(|e| e.data)
+            .collect();
+        (events, consumed)
+    }
+
+    fn message(args: Value) -> Value {
+        json!({ "v": 1, "id": 0, "cmd": INPUT_CMD, "args": args })
+    }
+
+    #[test]
+    fn each_kind_of_page_input_is_recorded_with_its_path() {
+        let path = json!([{ "index": 1, "role": "button", "name": "Save" }]);
+        let (events, consumed) = recorded(
+            "kinds",
+            &[
+                message(json!({ "kind": "click", "path": path, "x": 10.4, "y": 20.6 })),
+                message(json!({ "kind": "key", "path": path, "key": "Enter" })),
+                message(json!({ "kind": "input", "path": path, "value_length": 3 })),
+            ],
+        );
+        assert_eq!(consumed, [true, true, true]);
+        assert_eq!(events.len(), 3, "{events:?}");
+        assert_eq!(events[0]["path"][0]["name"], json!("Save"));
+        assert!(events.iter().any(|e| e["key"] == json!("Enter")));
+        assert!(events.iter().any(|e| e["value_length"] == json!(3)));
+        assert!(events
+            .iter()
+            .any(|e| e["x"] == json!(10) && e["y"] == json!(21)));
+    }
+
+    #[test]
+    fn a_redacted_key_is_recorded_as_redacted() {
+        let (events, _) = recorded(
+            "redacted",
+            &[message(json!({
+                "kind": "key",
+                "path": [{ "index": 0, "role": "input", "name": "" }],
+                "key": "[redacted]",
+            }))],
+        );
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["key"], json!("[redacted]"));
+    }
+
+    #[test]
+    fn a_malformed_input_is_consumed_but_not_recorded() {
+        let (events, consumed) = recorded(
+            "malformed",
+            &[
+                message(json!({ "kind": "click", "path": [], "x": "left", "y": 1 })),
+                message(json!({ "kind": "wheel", "path": [] })),
+            ],
+        );
+        assert_eq!(consumed, [true, true]);
+        assert!(events.is_empty(), "{events:?}");
+    }
+
+    #[test]
+    fn a_path_deeper_than_the_limit_is_dropped() {
+        let deep: Vec<Value> = (0..=MAX_PATH_STEPS)
+            .map(|i| json!({ "index": 0, "role": "div", "name": format!("{i}") }))
+            .collect();
+        let (events, _) = recorded(
+            "deep",
+            &[message(json!({ "kind": "key", "path": deep, "key": "a" }))],
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn other_messages_are_not_input_and_go_on_to_the_router() {
+        let (events, consumed) = recorded(
+            "other",
+            &[
+                json!({ "v": 1, "id": 4, "cmd": "read", "args": {} }),
+                json!("not json"),
+            ],
+        );
+        assert_eq!(consumed, [false, false]);
+        assert!(events.is_empty());
     }
 }
