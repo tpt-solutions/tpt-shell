@@ -15,7 +15,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] No telemetry, anywhere
 - [ ] No README claim says "first" or "only" without evidence in docs/competitive-scan.md
 - [ ] Every error has a stable `TS####` code, explanation and fix hint
-- [ ] Every source file carries an SPDX header `MIT OR Apache-2.0` and TPT Solutions copyright
+- [ ] Every source file carries an SPDX header `MIT OR Apache-2.0` and TPT Solutions copyright (checked 2026-11-27 for .rs, .sh, .py, .yml, .js and .ts under crates, conformance, tools, js and fixtures, and for the root Cargo.toml and deny.toml; the CI job now covers the same set. Not covered on purpose: generated templates, which a user copies into their own project, and `release.yml`, which cargo-dist regenerates)
 
 ## Crate index (crate â†’ milestones that touch it)
 
@@ -237,7 +237,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] Dev server (hand-rolled HTTP or licence-clean crate) (`tpt-shell dev` serves GET and HEAD on 127.0.0.1 only, refuses paths that leave the directory, and has tests with a real socket; the server answers one request at a time)
 - [x] `build` (release build; compliance outputs added in M10)
 - [x] `doctor` (WebView2 version, toolchain, licence policy): the licence policy checks the deny.toml allow list against cargo metadata, read-only
-- [ ] `contract gen | check | diff` (breaking-change detection: `tpt-shell contract diff <old> <new>` and `contract check <new> --baseline <old>` are done, in `tpt-shell-ipc::contract_diff`; they flag removed commands and fields, new required fields, capability changes, tighter limits, removed enum values and type changes. `gen` is not built: the contract is made inside the app by `commands![]`, and no app entry point writes it out yet)
+- [x] `contract gen | check | diff` (breaking-change detection: `tpt-shell contract diff <old> <new>` and `contract check <new> --baseline <old>` are done, in `tpt-shell-ipc::contract_diff`; they flag removed commands and fields, new required fields, capability changes, tighter limits, removed enum values and type changes. `gen` writes `commands.ts` from a contract file; the app writes that file with `--tpt-write-contract`, see M11b)
 - [x] `manifest check | explain` (`manifest check` done; `explain` is `tpt-shell explain`, see below)
 - [x] `explain <code>`
 - [x] Error code registry `TS####` with explanations and fix hints (`tpt-shell-errors`)
@@ -500,7 +500,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Fuzz target: replay reader
 - [ ] Player with strict and lenient modes, hidden window for CI (the strict and lenient readers exist; there is no player window)
 - [x] Divergence reports (`tpt-shell-replay::divergence`, first difference by kind and data)
-- [ ] `tpt-shell replay`
+- [x] `tpt-shell replay` (`replay_cmd::replay` takes `--strict` or `--lenient`; its unit tests play a consistent recording clean and refuse a divergent one)
 - [x] `tpt-shell report` bug-report bundle with redaction hooks
 - [x] Documented determinism limits (R8) (limits are in `docs/replay-format.md`; the R8 review is not done)
 
@@ -564,7 +564,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ### tpt-shell-compliance
 - [x] CycloneDX 1.5 SBOM (`sbom.cdx.json`): `tpt-shell-compliance`, written by `tpt-shell compliance`; valid against the published 1.5 schema (`tools/validate-sbom.sh`)
 - [x] SPDX 2.3 SBOM (`sbom.spdx.json`): same command; valid against the published 2.3 schema (`tools/validate-sbom.sh`)
-- [ ] `licenses.html` and embedding at `app://__tpt/licenses`
+- [ ] `licenses.html` and embedding at `app://__tpt/licenses` (`compliance` writes `licenses.html`, and the facade builds it into the asset map at `__tpt/licenses` unless the app serves its own file there. Not done: no test loads the page from a running window)
 - [x] `THIRD_PARTY_NOTICES` generation
 - [x] `attestation.json` (rustc, lockfile hash, output digests, policy result, git commit, build flags, reproducibility settings incl. SOURCE_DATE_EPOCH)
 - [x] Optional detached Ed25519 signatures
@@ -578,20 +578,20 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] macOS/Linux minimum versions recorded; `doctor` checks them; limit documented
 - [x] Test: shell opens no sockets by default
 - [x] `tpt-shell vendor`
-- [ ] `tpt-shell docs --offline`
+- [x] `tpt-shell docs --offline` (checked 2026-11-27 on Windows: 25 pages, no network resources, no placeholders, zip written. The docs preprocessor's `python3` is shimmed on Windows; see tools/docs-offline.sh)
 - [x] Reproducible-build guidance and flags (`--locked`, path remapping, `SOURCE_DATE_EPOCH`)
-- [ ] Reproducibility test: two builds of same commit produce identical artifacts, or diff explained
+- [ ] Reproducibility test: two builds of same commit produce identical artifacts, or diff explained (run 2026-11-27: the compliance outputs are identical; the binary differs in 20 bytes, the CodeView PDB GUID and the PE timestamp derived from it. The cause is explained in packaging/repro/REPRODUCIBLE.md. Left open: the owner decides whether to drop the PDB record from release builds, and the check exits 1 until then)
 - [x] Procurement pack template (questionnaire, data-flow diagram, SBOM, licence summary, audit/kiosk explainer)
 
 ### Bundling and signing
 - [x] Decide (O2): external installer tool, not our own writer. The specific tool is chosen when bundle work starts
-- [ ] `bundle` Windows: portable folder, zip, installer
+- [ ] `bundle` Windows: portable folder, zip, installer (`tools/bundle-windows.sh` builds the portable folder and zip, with the loader's licence and notice, and the SHA-256 list: verified 2026-11-27. Not done: the installer, since Inno Setup (ISCC) is not on this machine, and the script has not run on a clean machine)
 - [ ] `bundle` macOS: .app and .dmg
 - [ ] `bundle` Linux: tar.gz, .deb, .rpm, AppImage
 - [ ] `sign`: Windows code signing hooks
 - [ ] `sign`: macOS notarisation
 - [ ] `sign`: minisign for archives
-- [ ] `doctor` checks signing tools
+- [x] `doctor` checks signing tools (checked 2026-11-27: `tpt-shell doctor` prints signtool, minisign and the optional macOS, Inno Setup and Linux packaging tools, each with a fix hint when missing)
 - [ ] Done: SBOMs validate; bad dependency fails build; reproducibility shown or explained
 
 ---
@@ -601,7 +601,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ### Templates
 - [x] Templates: vanilla, typescript, appfront-dom, kiosk, pos, agent-demo, audit-app (all generate and build here; not run, needs a desktop)
 - [ ] Any extra front-end templates per decision (O3)
-- [ ] CI: generate, build, smoke-test every template
+- [ ] CI: generate, build, smoke-test every template (`tools/template-build.sh` generates, checks and builds every template and example, and the `template-build` CI job runs it: run 2026-11-27 on Windows, exit 0. Not done: a smoke run of the generated apps, which needs a desktop, and the job has not run on GitHub)
 
 ### Examples
 - [x] kiosk (builds; not run)
@@ -671,7 +671,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 ### Distribution
 - [x] Release workflow (`.github/workflows/release.yml`) using the existing cargo-dist config (generated by `dist generate` with cargo-dist 0.32.0, config pinned to that version; `dist plan` passes; the CLI crate has `dist = true` and a repository URL. Not run on GitHub: it fires only on a version tag, and no tag exists)
 - [ ] Publish-ready crate metadata (`publish = false` and version `0.0.0` today) (every crate has a description, keywords, categories, a `readme` field, a `README.md` and a `CHANGELOG.md`, plus the workspace licence and repository. Still open: `publish` stays `false` until M12 per O4, and the crate READMEs and changelogs are not yet checked against a release)
-- [ ] npm package for `js/runtime` and the generated TypeScript client
+- [ ] npm package for `js/runtime` and the generated TypeScript client (`js/package.json` builds: `npm pack --dry-run` lists 6 files, 5.0 kB, and `npm test` passes 40 tests. The package is `private: true` and nothing is published; the generated TypeScript client is not in it yet)
 - [ ] Deploy the mdBook docs to GitHub Pages
 - [ ] Publish the VS Code extension
 
