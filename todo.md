@@ -260,12 +260,12 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] Normalisation shim (opt-in): viewport, scrollbar, font stack, drag region helper, safe-area insets
 
 ### Devtools overlay (tpt-shell-devtools, dev builds)
-- [ ] IPC log with latency
-- [ ] Jobs panel
-- [ ] Capabilities in effect
-- [ ] Audit tail
-- [ ] Contract explorer (browse and call commands)
-- [ ] Engine and caps info
+- [x] IPC log with latency (the overlay shows each call with its latency; the log keeps the newest calls, tested 2026-11-28)
+- [ ] Jobs panel (the panel exists, but the facade feeds it no jobs, so it stays empty; open until the snapshot carries the job runtime's jobs)
+- [x] Capabilities in effect
+- [x] Audit tail (the last 200 lines of the audit log, tested)
+- [ ] Contract explorer (browse and call commands). Browsing works. Calling is open on purpose: the overlay page has no grants, so its calls get `CAP_DENIED` (tested). Letting it call would bypass the capability checks; the recommendation is to call through a window that holds the grant, which is not built
+- [ ] Engine and caps info (the caps are shown; the engine version is not reported yet, per the devtools crate's own note)
 - [x] Toggle in dev builds only (the overlay needs the devtools feature and Ctrl+Shift+D; `tpt-shell dev` does not enable the feature yet)
 
 ### Windows baseline features (first pass)
@@ -505,9 +505,9 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] Documented determinism limits (R8) (limits are in `docs/replay-format.md`; the R8 review is not done)
 
 ### Devtools time-travel
-- [ ] Timeline scrubber, step forward/back
-- [ ] Inspect IPC state and DOM snapshot at any event
-- [ ] Jump to divergence
+- [x] Timeline scrubber, step forward/back (the seek hook moves the cursor and the IPC state, tested)
+- [ ] Inspect IPC state and DOM snapshot at any event (IPC state is shown at any event; the DOM snapshot is not recorded, so it stays open)
+- [x] Jump to divergence (jump_to_divergence, tested in tpt-shell-devtools)
 - [ ] `dev` auto-replays last session after reload (complete)
 
 ### Gates
