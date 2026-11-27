@@ -34,6 +34,8 @@ pub mod loader;
 /// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod probe;
 /// Support: Partial. Not run on macOS/Linux here; compile-checked.
+pub mod scheme_response;
+/// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod single_instance;
 /// Support: Full for the rules (parsing, paths, permissions). Tested on every platform.
 pub mod webkit_context;

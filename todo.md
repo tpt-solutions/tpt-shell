@@ -219,7 +219,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 
 ### Security defaults (ยง9)
 - [ ] Only `app://` loaded; remote navigation blocked unless allowlisted per window (Windows enforces `[[windows]] allow_navigation` for top-level and frame navigations, with `https://` prefix matching at a host boundary, tested; the manifest value is parsed but no runtime reads it yet, since the shell does not create windows from the manifest; macOS and Linux not done)
-- [x] Strict CSP injected on `app://` responses (Windows: every response from the virtual origin carries `PAGE_CSP`, no inline script or style, verified by a runtime test; the origin is `https://tpt-app.localhost`, see the DEVIATION note above; macOS and Linux not done)
+- [x] Strict CSP injected on `app://` responses (Windows: every response from the virtual origin carries `PAGE_CSP`, no inline script or style, verified by a runtime test; the origin is `https://tpt-app.localhost`, see the DEVIATION note above. Linux: 2026-11-28, both GTK adapters send `PAGE_CSP` through the WebKit response API; compile-checked, not run. macOS not done)
 - [ ] Devtools, context menu, view-source disabled in release (devtools and the default context menu are off in release builds on Windows, verified against WebView2 settings; view-source is not checked separately, and macOS and Linux are not done)
 - [ ] Release-build CSP override needs an audited manifest flag
 - [x] Mock backend generated from contract (basic)
@@ -265,7 +265,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Capabilities in effect
 - [x] Audit tail (the last 200 lines of the audit log, tested)
 - [ ] Contract explorer (browse and call commands). Browsing works. Calling is open on purpose: the overlay page has no grants, so its calls get `CAP_DENIED` (tested). Letting it call would bypass the capability checks; the recommendation is to call through a window that holds the grant, which is not built
-- [ ] Engine and caps info (the caps are shown; the engine version is not reported yet, per the devtools crate's own note)
+- [x] Engine and caps info (the caps are shown. 2026-11-28: the Engine panel shows the WebView2 runtime version, which the app reads from the loader when the overlay is made (`Shell::with_engine_version`, unit-tested in the facade). The value is not checked on screen)
 - [x] Toggle in dev builds only (the overlay needs the devtools feature and Ctrl+Shift+D; `tpt-shell dev` does not enable the feature yet)
 
 ### Windows baseline features (first pass)
@@ -334,7 +334,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] GTK main loop and EventLoopProxy (GTK4 is a `GMainLoop` with a `g_idle_add` proxy; `a_posted_task_runs_on_the_main_loop` passes in all four CI legs)
 - [ ] Window features: bounds, title, fullscreen, frameless, always-on-top, transparency (GTK4 has no bounds or always-on-top API, so they return `Unsupported` by design; transparency needs a compositor)
 - [ ] WebKitUserContentManager messages and scripts (GTK4 written, CI-only test)
-- [ ] `webkit_web_context_register_uri_scheme` for `app://` (GTK4 written, CI-only test)
+- [ ] `webkit_web_context_register_uri_scheme` for `app://` (GTK4 written, CI-only test. 2026-11-28: both GTK3 and GTK4 now answer `app://` through the WebKit response API, so each page gets a real status, its content type and the page CSP header (`crates/tpt-shell-platform-linux/src/scheme_response.rs`, bound at run time, with the older calls as the fallback). Compile-checked for Linux and clippy clean; not run, so the item stays open until the CI legs pass)
 - [ ] Navigation policy and crash signals (GTK4 written: `web-process-terminated` reloads up to five times; CI-only test)
 - [x] `webkit_web_view_get_snapshot` (GTK4 encodes a `GdkTexture` to PNG; `page_messages_assets_and_snapshot_through_the_selected_adapter` passes in all four CI legs)
 - [ ] GtkFileChooser dialogs (GTK4 uses `GtkFileDialog`, 4.10+; on 4.6 only file dialogs return `Unsupported`; only the validation is tested)
@@ -491,7 +491,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Devtools a11y quick check 2026-11-28: the overlay has an Accessibility panel. Pressing Ctrl+Shift+D asks the page for its collected data, runs the `tpt-shell-test` rules on it, and shows the findings (`tpt-shell-devtools::a11y`, tested: findings, JSON and bad data; the facade's reply parser and stored report, tested). Not checked on screen: the overlay's rendering of the panel.
 
 ### Record/replay (tpt-shell-replay)
-- [x] Recorder: IPC calls with args/results/timing, DOM input events with stable paths, window events, protocol loads (partial, 2026-11-28: IPC calls, window closes and protocol loads were already recorded. Page input is now too: a listener the app adds before each window's first page reports clicks, key presses and input changes with element paths, and passwords are redacted. Unit-tested. The listener runs in WebView2: `tests/record_input.rs` lets the page dispatch a click, an input change and a key press, quits the app with `UiHandle::quit`, and checks the recording holds all three. Not recorded: window resize and focus)
+- [x] Recorder: IPC calls with args/results/timing, DOM input events with stable paths, window events, protocol loads (partial, 2026-11-28: IPC calls, window closes and protocol loads were already recorded. Page input is now too: a listener the app adds before each window's first page reports clicks, key presses and input changes with element paths, and passwords are redacted. Unit-tested. The listener runs in WebView2: `tests/record_input.rs` lets the page dispatch a click, an input change and a key press, quits the app with `UiHandle::quit`, and checks the recording holds all three. 2026-11-28: the listener also reports window focus and resize, and every input record now goes through one queue, so they keep the order the events happened in; the WebView2 test still asserts only the click, input and key, and the focus and resize records are not yet checked)
 - [x] Virtualised Rust `Clock`/`Rng` in record/replay mode
 - [x] In-page shim for Date.now, performance.now, Math.random, timers (record/replay only)
 - [x] `.tptreplay` format: zstd JSON Lines + assets + version (zstd-compressed recordings and SHA-256 checked assets are done; version 2 files without the hash still read)

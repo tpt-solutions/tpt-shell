@@ -233,32 +233,47 @@ pub const INPUT_JS: &str = r#"(function () {
   function send(args) {
     window.chrome.webview.postMessage(JSON.stringify({ v: 1, id: 0, cmd: 'tpt.record.input', args: args }));
   }
-  // A click or input record carries the page's HTML after the event's effects (the next tick), so
-  // the time-travel view can show the page as the event left it.
+  // Every input record goes through one queue, flushed in a timeout, so the records keep the order
+  // the events happened in. A click or input record carries the page's HTML after the events of the
+  // same task (the flush), so the time-travel view can show the page as those events left it.
+  var queue = [];
+  var scheduled = false;
   function dom() {
     var html = document.documentElement.outerHTML;
     return html.length <= 262144 ? html : null;
   }
+  function flush() {
+    scheduled = false;
+    queue.splice(0).forEach(function (item) {
+      if (item.withDom) item.args.dom = dom();
+      send(item.args);
+    });
+  }
+  function enqueue(args, withDom) {
+    queue.push({ args: args, withDom: withDom });
+    if (!scheduled) {
+      scheduled = true;
+      setTimeout(flush, 0);
+    }
+  }
   window.addEventListener('click', function (e) {
-    var args = { kind: 'click', path: path(e.target), x: e.clientX, y: e.clientY };
-    setTimeout(function () { args.dom = dom(); send(args); }, 0);
+    enqueue({ kind: 'click', path: path(e.target), x: e.clientX, y: e.clientY }, true);
   }, true);
   window.addEventListener('keydown', function (e) {
     var secret = e.target && e.target.type === 'password';
-    send({ kind: 'key', path: path(e.target), key: secret ? '[redacted]' : e.key });
+    enqueue({ kind: 'key', path: path(e.target), key: secret ? '[redacted]' : e.key }, false);
   }, true);
   window.addEventListener('input', function (e) {
     var target = e.target;
-    var args = { kind: 'input', path: path(target), value_length: String(target.value || '').length };
-    setTimeout(function () { args.dom = dom(); send(args); }, 0);
+    enqueue({ kind: 'input', path: path(target), value_length: String(target.value || '').length }, true);
   }, true);
   // Window focus and size: these listeners are not capturing, so only the window's own events
   // reach them, not the focus of an element inside the page.
   window.addEventListener('focus', function () {
-    send({ kind: 'window-focus' });
+    enqueue({ kind: 'window-focus' }, false);
   });
   window.addEventListener('resize', function () {
-    send({ kind: 'window-resize', width: window.innerWidth, height: window.innerHeight });
+    enqueue({ kind: 'window-resize', width: window.innerWidth, height: window.innerHeight }, false);
   });
 })();"#;
 

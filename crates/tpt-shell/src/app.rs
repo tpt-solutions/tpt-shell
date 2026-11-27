@@ -170,6 +170,7 @@ pub struct App {
     name: String,
     loader: Option<PathBuf>,
     /// The WebView2 release channel the app asks for. `None` takes the default search.
+    #[cfg(windows)]
     channel: Option<tpt_shell_platform_windows::channel::Channel>,
     data_dir: Option<PathBuf>,
     /// The blob store limit, when the app sets one (see `blob_limit`).
@@ -468,6 +469,7 @@ impl App {
     ///
     /// Support: Partial. Built and tested on Windows where the channel is installed; the other
     /// channels are checked only for the refusal on the development machine.
+    #[cfg(windows)]
     pub fn webview2_channel(
         mut self,
         channel: tpt_shell_platform_windows::channel::Channel,
@@ -983,11 +985,17 @@ impl App {
         // The developer overlay's state (debug builds only). It reads the grants and the contract,
         // so it is made before the grants are moved into the engine.
         let devtools_shell = match tpt_shell_devtools::enabled().then(|| {
+            // The runtime version is read once here, for the Engine panel. A loader that cannot
+            // say leaves the panel without a version, as before.
+            let engine_version = tpt_shell_platform_windows::loader::OfficialLoader::load(&loader)
+                .and_then(|official| official.runtime_version())
+                .ok();
             devtools::Shell::new(
                 self.audit.as_ref().map(|(path, _)| path.clone()),
                 &self.grants,
                 self.contract.as_ref(),
             )
+            .with_engine_version(engine_version)
         }) {
             Some(shell) => {
                 self.load_devtools_recording(&shell)?;

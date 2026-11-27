@@ -62,6 +62,9 @@ pub struct Shell {
     jobs: RefCell<Option<Rc<RefCell<tpt_shell_ipc::jobs::Jobs>>>>,
     /// The latest accessibility check of the page, once one has run.
     a11y: RefCell<Option<tpt_shell_devtools::a11y::Report>>,
+    /// The installed WebView2 runtime's version, when the app has read it (see
+    /// [`Shell::with_engine_version`]).
+    engine_version: Option<String>,
 }
 
 impl Shell {
@@ -103,7 +106,16 @@ impl Shell {
             timeline: RefCell::new(None),
             jobs: RefCell::new(None),
             a11y: RefCell::new(None),
+            engine_version: None,
         }
+    }
+
+    /// Sets the runtime version the Engine panel shows. The app passes what the WebView2 loader
+    /// reports, or `None` when the loader cannot say.
+    #[must_use]
+    pub fn with_engine_version(mut self, version: Option<String>) -> Self {
+        self.engine_version = version;
+        self
     }
 
     /// Keeps the result of an accessibility check for the overlay to show.
@@ -253,7 +265,7 @@ impl Inspect for Shell {
     fn engine(&self) -> Engine {
         Engine {
             name: "webview2".into(),
-            version: None,
+            version: self.engine_version.clone(),
             platform: "windows".into(),
         }
     }
@@ -386,6 +398,16 @@ mod tests {
             None
         );
         assert_eq!(a11y_reply("not json"), None);
+    }
+
+    #[test]
+    fn the_engine_panel_shows_the_runtime_version_the_app_reads() {
+        let shell = Shell::new(None, &[], None);
+        assert_eq!(shell.engine().version, None);
+        let shell = shell.with_engine_version(Some("155.0.4283.62".into()));
+        let engine = shell.engine();
+        assert_eq!(engine.name, "webview2");
+        assert_eq!(engine.version.as_deref(), Some("155.0.4283.62"));
     }
 
     #[test]

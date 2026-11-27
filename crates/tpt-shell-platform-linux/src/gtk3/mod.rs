@@ -667,8 +667,27 @@ unsafe extern "C" fn on_app_scheme(request: Obj, data: *mut c_void) {
     };
     // SAFETY: the request is answered exactly once below.
     unsafe {
-        match asset {
-            Some(asset) => {
+        match (&gtk.scheme, asset) {
+            // The response API: a real status, the content type and the page policy. A missing
+            // file is a 404 with an empty body, as the other backends answer it.
+            (Some(scheme), asset) => {
+                let (status, body, mime) = match asset {
+                    Some(asset) => (200, asset.body, asset.content_type),
+                    None => (404, Vec::new(), "text/plain".to_string()),
+                };
+                let len = body.len();
+                // The stream owns a copy that GLib frees.
+                let buffer = (f.g_malloc)(len.max(1));
+                std::ptr::copy_nonoverlapping(body.as_ptr(), buffer.cast::<u8>(), len);
+                let stream =
+                    (f.g_memory_input_stream_new_from_data)(buffer, len, f.g_free as *const c_void);
+                let mime =
+                    CString::new(mime).unwrap_or_else(|_| c"application/octet-stream".into());
+                scheme.finish(request, stream, len as i64, &mime, status, true);
+                (f.g_object_unref)(stream);
+            }
+            // The older calls, when the response API is missing.
+            (None, Some(asset)) => {
                 let len = asset.body.len();
                 // The stream owns a copy that GLib frees.
                 let buffer = (f.g_malloc)(len.max(1));
@@ -680,7 +699,7 @@ unsafe extern "C" fn on_app_scheme(request: Obj, data: *mut c_void) {
                 (f.webkit_uri_scheme_request_finish)(request, stream, len as i64, mime.as_ptr());
                 (f.g_object_unref)(stream);
             }
-            None => {
+            (None, None) => {
                 let domain = (f.g_quark_from_string)(c"tpt-shell".as_ptr());
                 let error = (f.g_error_new_literal)(domain, 404, c"not found".as_ptr());
                 (f.webkit_uri_scheme_request_finish_error)(request, error);

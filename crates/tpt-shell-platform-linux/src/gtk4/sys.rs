@@ -15,6 +15,7 @@ use std::ffi::{c_char, c_int, c_uint, c_ulong, c_void};
 use std::sync::OnceLock;
 
 use crate::loader::{LoadError, SharedLibrary};
+use crate::scheme_response::SchemeResponse;
 
 /// An opaque GObject-derived pointer, or any other handle returned by these libraries.
 ///
@@ -261,6 +262,9 @@ pub struct Gtk4 {
     /// `g_object_new`, which is variadic, so it is bound by hand: the table macro only makes
     /// fixed-argument prototypes.
     pub g_object_new: unsafe extern "C" fn(usize, *const c_char, ...) -> Obj,
+    /// The response API for `app://` answers (status, content type, page policy). `None` when
+    /// this WebKitGTK or libsoup lacks it; the adapter then answers with the older calls.
+    pub scheme: Option<SchemeResponse>,
     dialogs: Result<DialogFns, LoadError>,
 }
 
@@ -294,10 +298,12 @@ fn open_all() -> Result<Gtk4, LoadError> {
         libs.gobject
             .symbol::<unsafe extern "C" fn(usize, *const c_char, ...) -> Obj>("g_object_new")?
     };
+    let scheme = SchemeResponse::bind(&libs.webkit, &libs.gobject).ok();
     Ok(Gtk4 {
         libs,
         fns,
         g_object_new,
+        scheme,
         dialogs,
     })
 }
