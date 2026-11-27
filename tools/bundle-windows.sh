@@ -10,6 +10,7 @@
 #   <App>-<version>-windows-x64/
 #     <binary>.exe            the release binary (tpt-shell build)
 #     WebView2Loader.dll      the pinned loader (THIRD_PARTY_NOTICES, decision O1), if given
+#     LICENSE-WebView2Loader.txt, NOTICE-WebView2.txt   its licence and notice, beside the loader
 #     app/                    the front-end files
 #     runtime/                pinned WebView2 Fixed Version runtime, if given (tpt-shell runtime pin)
 #     compliance/             sbom.*.json, attestation.json, THIRD_PARTY_NOTICES, licenses.html
@@ -70,7 +71,20 @@ rm -rf "$stage"
 mkdir -p "$stage"
 
 cp "$binary" "$stage/$APP_BINARY.exe"
-[ -z "$loader" ] || cp "$loader" "$stage/WebView2Loader.dll"
+if [ -n "$loader" ]; then
+  cp "$loader" "$stage/WebView2Loader.dll"
+  # The loader is redistributed under its own licence (BSD-3-Clause), and that licence and the
+  # Microsoft notice must travel with the binary. They sit beside the vendored copy.
+  loader_dir="$(cd "$(dirname "$loader")" && pwd)"
+  for notice in LICENSE-WebView2Loader.txt NOTICE-WebView2.txt; do
+    if [ -f "$loader_dir/$notice" ]; then
+      cp "$loader_dir/$notice" "$stage/$notice"
+    else
+      echo "missing loader notice next to the DLL: $notice" >&2
+      exit 1
+    fi
+  done
+fi
 cp -R "$app_dir" "$stage/app"
 [ -z "$runtime" ] || cp -R "$runtime" "$stage/runtime"
 [ -z "$compliance" ] || cp -R "$compliance" "$stage/compliance"
