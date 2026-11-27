@@ -143,6 +143,28 @@ mod tests {
     /// its native tree, and reports the result. Skips when there is no desktop to create the window
     /// on. The window's own node is in the fixture, because the comparison reports a native node
     /// with no DOM counterpart.
+    /// Drains the calling thread's message queue so windows created on it are fully set up.
+    fn pump_pending_messages() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
+        };
+        let mut msg = MSG {
+            hwnd: null_mut(),
+            message: 0,
+            wParam: 0,
+            lParam: 0,
+            time: 0,
+            pt: windows_sys::Win32::Foundation::POINT { x: 0, y: 0 },
+        };
+        // SAFETY: `msg` is a valid, writable MSG; the queue is only read and dispatched here.
+        unsafe {
+            while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    }
+
     #[test]
     fn a_dom_fixture_of_a_popup_matches_its_native_tree() {
         use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -217,6 +239,10 @@ mod tests {
             )
         };
         assert!(!child.is_null(), "the button could not be created");
+
+        // Let the new windows process their creation messages before UI Automation looks at them;
+        // a window that has not pumped yet can make ElementFromHandle fail with E_FAIL.
+        pump_pending_messages();
 
         let mut tree = WindowsNativeTree::new();
         tree.add("popup", WindowId(window as isize));
