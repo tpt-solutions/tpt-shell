@@ -26,7 +26,7 @@ use tpt_shell_replay::{Header, Recorder};
 ///
 /// Support: Partial. A running app records on Windows only, and records IPC calls, window closes,
 /// protocol loads and page input. Resize and focus are not recorded. The recording logic is unit
-/// tested; the page listener has passed a syntax check but has not run in WebView2 yet.
+/// tested, and the page listener is checked end to end in WebView2 (tests/record_input.rs).
 pub struct Recording {
     path: PathBuf,
     clock: Box<dyn Clock>,

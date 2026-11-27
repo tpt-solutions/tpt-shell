@@ -15,7 +15,7 @@ use tpt_shell_core::backend::EventLoopProxy;
 use tpt_shell_core::{Error, Result};
 use tpt_shell_ipc::event;
 use tpt_shell_platform_windows::backend::{
-    eval_window, post_window_message, show_window, WinProxy, WindowId,
+    eval_window, post_window_message, request_quit, show_window, WinProxy, WindowId,
 };
 
 /// Sends work to the UI thread from any thread. Clone it freely. Obtain one with
@@ -34,6 +34,17 @@ impl UiHandle {
             proxy,
             windows: Arc::new(windows),
         }
+    }
+
+    /// Stops the app's event loop from another thread. The run then ends as if the last window had
+    /// closed: the recording is written and the windows are removed.
+    ///
+    /// Support: Full on Windows.
+    pub fn quit(&self) -> Result<()> {
+        self.post(|| {
+            request_quit();
+            Ok(())
+        })
     }
 
     /// Shows the window called `window` on the UI thread, if it is hidden.

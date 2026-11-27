@@ -411,6 +411,15 @@ pub fn eval_window_json(id: WindowId, script: &str, timeout: Duration) -> Result
     Ok(json)
 }
 
+/// Stops the event loop. It must run on the UI thread, which is where the backend's posted work
+/// runs; a handle on another thread posts a call here. The loop ends after the current message.
+///
+/// Support: Full on Windows.
+pub fn request_quit() {
+    // SAFETY: PostQuitMessage has no pointer arguments.
+    unsafe { PostQuitMessage(0) };
+}
+
 /// Captures a window's page as PNG bytes, pumping messages until WebView2 finishes the capture or
 /// `timeout` passes. Like [`eval_window_json`] it is a free function, so a timer on the UI thread
 /// can take a screenshot without a backend handle. The registry is borrowed only to start the
