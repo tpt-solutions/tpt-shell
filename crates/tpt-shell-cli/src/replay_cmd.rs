@@ -94,7 +94,7 @@ pub fn replay(args: &[&str]) -> Result<ExitCode, String> {
     };
     println!(
         "note: this checked the recording against the echo reference target. Running the app \
-         itself needs its platform window, which is not routed yet."
+         itself runs inside the app: App::replay_recording plays this recording through the app's own commands, with no window."
     );
     Ok(code)
 }

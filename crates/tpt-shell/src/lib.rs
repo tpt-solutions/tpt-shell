@@ -26,6 +26,7 @@ mod devtools;
 mod endpoints;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod licenses;
+mod replay_app;
 #[cfg(windows)]
 mod session;
 #[cfg(windows)]
