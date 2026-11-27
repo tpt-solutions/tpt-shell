@@ -716,7 +716,7 @@ mod tests {
         };
         assert!(!child.is_null(), "the button could not be created");
 
-        let rows = dump(window);
+        let rows = crate::com::retry_until_ready(|| dump(window));
         // SAFETY: the window is ours and is destroyed exactly once, here.
         unsafe { DestroyWindow(window) };
         let rows = rows.expect("the dump succeeds on a desktop");

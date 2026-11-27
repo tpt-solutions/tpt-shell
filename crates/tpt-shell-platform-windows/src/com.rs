@@ -146,3 +146,49 @@ pub unsafe fn take_co_string(p: *mut u16) -> String {
     CoTaskMemFree(p as *const c_void);
     s
 }
+
+/// Drains the calling thread's message queue. A window created on the thread is fully set up
+/// only after its creation messages are processed; UI Automation asked before that can fail with
+/// E_FAIL. The UI Automation and native tree tests call this before they read their windows.
+#[cfg(test)]
+pub(crate) fn pump_pending_messages() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
+    };
+    let mut msg = MSG {
+        hwnd: std::ptr::null_mut(),
+        message: 0,
+        wParam: 0,
+        lParam: 0,
+        time: 0,
+        pt: windows_sys::Win32::Foundation::POINT { x: 0, y: 0 },
+    };
+    // SAFETY: `msg` is a valid, writable MSG; the queue is only read and dispatched here.
+    unsafe {
+        while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+}
+
+/// Calls `attempt` until it succeeds, or until about a second has passed, and returns the last
+/// error then. Between attempts it pumps the thread's messages and waits 25 ms. UI Automation
+/// reports a window's element a short time after the window exists, so a read made right after
+/// creating it can fail with E_FAIL and succeed a moment later.
+#[cfg(test)]
+pub(crate) fn retry_until_ready<T, E>(mut attempt: impl FnMut() -> Result<T, E>) -> Result<T, E> {
+    const TRIES: u32 = 40;
+    let mut tries = 0;
+    loop {
+        match attempt() {
+            Ok(value) => return Ok(value),
+            Err(error) if tries >= TRIES => return Err(error),
+            Err(_) => {
+                tries += 1;
+                pump_pending_messages();
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        }
+    }
+}
