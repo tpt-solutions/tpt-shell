@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright (c) 2026 TPT Solutions
+
 // Asks the host for a large string, eight times in a row. Each reply starts the next request, and
 // the last reply reports the length, the last character and the count.
 var COUNT = 8;

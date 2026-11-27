@@ -346,7 +346,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Every Rust, TOML, shell, Python and YAML source has an SPDX header
+      - name: Every Rust, TOML, shell, Python, YAML, JavaScript and TypeScript source has an SPDX header
         run: |
           missing=0
           while IFS= read -r f; do
@@ -354,7 +354,7 @@ jobs:
               echo "missing SPDX header: $f"
               missing=1
             fi
-          done < <(find crates conformance tools \( -name '*.rs' -o -name 'Cargo.toml' -o -name '*.sh' -o -name '*.py' -o -name '*.yml' \) -not -path '*/target/*' | sort)
+          done < <(find crates conformance tools js fixtures \( -name '*.rs' -o -name 'Cargo.toml' -o -name '*.sh' -o -name '*.py' -o -name '*.yml' -o -name '*.js' -o -name '*.ts' \) -not -path '*/target/*' -not -path '*/node_modules/*' | sort)
           exit $missing
 
   msrv:

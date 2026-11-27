@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright (c) 2026 TPT Solutions
+
 // Tries to leave the app origin. The check then reads the origin and expects the app origin.
 setTimeout(function () {
   location.href = "https://example.com/";

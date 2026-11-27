@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright (c) 2026 TPT Solutions
+
 // Fetches the same blob eight times in a row, from the app's own blob URL, the way a page reads a
 // blob it was handed. Each read is split in two: the response (headers) and the body (the bytes).
 // The title reports the length, the last byte, the count, and the medians in milliseconds of the

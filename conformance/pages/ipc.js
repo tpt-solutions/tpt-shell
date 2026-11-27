@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright (c) 2026 TPT Solutions
+
 // Round trips: each reply to a ping starts the next ping, until the count is reached.
 var ROUNDS = 200;
 var seen = 0;
