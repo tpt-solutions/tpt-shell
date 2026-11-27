@@ -49,12 +49,13 @@ use tpt_shell_kiosk::recovery::CrashRecovery;
 #[cfg(windows)]
 use tpt_shell_platform_windows::webview2::default_user_data_dir;
 
+/// How often the UI thread delivers queued job events to their windows.
+#[cfg(windows)]
+const JOB_EVENT_PERIOD: Duration = Duration::from_millis(20);
+
 /// The page restrictions a kiosk config's lock-down asks for. Each flag maps to one WebView2
 /// switch or script (see `PageRestrictions`).
 #[cfg(windows)]
-/// How often the UI thread delivers queued job events to their windows.
-const JOB_EVENT_PERIOD: Duration = Duration::from_millis(20);
-
 fn page_restrictions(
     lockdown: &tpt_shell_kiosk::policy::Lockdown,
 ) -> tpt_shell_platform_windows::backend::PageRestrictions {
