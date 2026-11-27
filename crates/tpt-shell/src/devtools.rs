@@ -48,8 +48,9 @@ const ZSTD_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
 /// The shell state the overlay shows. The message handlers record into it, and the overlay reads
 /// it through [`Inspect`].
 ///
-/// Support: Partial. Jobs are not reported (the facade runs none). The capabilities are the
-/// app's grants: a grant without consent is shown as in effect.
+/// Support: Partial. The jobs are the router's job table, attached in debug builds; the engine
+/// version is not reported. The capabilities are the app's grants: a grant without consent is
+/// shown as in effect.
 pub struct Shell {
     ipc: RefCell<VecDeque<IpcEntry>>,
     audit_path: Option<PathBuf>,
@@ -57,6 +58,8 @@ pub struct Shell {
     contract: Vec<CommandInfo>,
     /// The recording the timeline steps through, when one is loaded.
     timeline: RefCell<Option<Model>>,
+    /// The job table of the app's router, once the app attaches it. Empty until then.
+    jobs: RefCell<Option<Rc<RefCell<tpt_shell_ipc::jobs::Jobs>>>>,
 }
 
 impl Shell {
@@ -96,7 +99,13 @@ impl Shell {
             capabilities,
             contract,
             timeline: RefCell::new(None),
+            jobs: RefCell::new(None),
         }
+    }
+
+    /// Gives the overlay the app router's job table, so its jobs panel can list the jobs.
+    pub fn attach_jobs(&self, jobs: Rc<RefCell<tpt_shell_ipc::jobs::Jobs>>) {
+        *self.jobs.borrow_mut() = Some(jobs);
     }
 
     /// Records one IPC call for the log, dropping the oldest when the log is full.
@@ -217,7 +226,23 @@ impl Inspect for Shell {
     }
 
     fn jobs(&self) -> Vec<Job> {
-        Vec::new()
+        let Some(table) = self.jobs.borrow().clone() else {
+            return Vec::new();
+        };
+        let table = table.borrow();
+        table
+            .list()
+            .into_iter()
+            .map(|info| Job {
+                id: info.id.0,
+                name: format!("job {}", info.id.0),
+                state: info.state.to_string(),
+                progress: info
+                    .progress
+                    .filter(|(_, total)| *total > 0)
+                    .map(|(done, total)| f64::from(done) / f64::from(total)),
+            })
+            .collect()
     }
 
     fn audit_jsonl(&self, max: usize) -> String {
@@ -386,6 +411,37 @@ mod tests {
             "the shell state is still there"
         );
         let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
+    }
+
+    #[test]
+    fn the_jobs_panel_lists_the_routers_jobs_once_attached() {
+        use tpt_shell_ipc::jobs::Jobs;
+        let shell = Shell::new(None, &[], None);
+        assert!(shell.jobs().is_empty(), "no table attached yet");
+
+        let table = Rc::new(RefCell::new(Jobs::new(4)));
+        shell.attach_jobs(table.clone());
+        let id = table
+            .borrow_mut()
+            .start(|ctx| {
+                ctx.progress(1, 4);
+                Ok(json!({}))
+            })
+            .unwrap();
+        // Drain until the job's terminal event has been seen.
+        for _ in 0..1000 {
+            let events = table.borrow_mut().drain();
+            if events.iter().any(|e| e.is_terminal()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let jobs = shell.jobs();
+        assert_eq!(jobs.len(), 1, "the finished job is listed: {jobs:?}");
+        assert_eq!(jobs[0].id, id.0);
+        assert_eq!(jobs[0].name, format!("job {}", id.0));
+        assert_eq!(jobs[0].state, "done");
+        assert_eq!(jobs[0].progress, Some(0.25));
     }
 
     #[test]

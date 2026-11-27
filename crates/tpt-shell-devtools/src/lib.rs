@@ -17,9 +17,9 @@
 //!   and never opens the overlay.
 //!
 //! Support: Full for the snapshot, the audit-line reader and the page, in debug builds on
-//! Windows. Partial: the jobs panel stays empty in the facade (it runs no jobs), and the engine
-//! version is not reported. Nothing here opens a socket or sends data anywhere; the page calls
-//! only `window.tpt.invoke` when a developer presses Call.
+//! Windows. Partial: the engine version is not reported. The jobs panel lists the app router's
+//! running jobs and the last finished ones, in debug builds. Nothing here opens a socket or sends
+//! data anywhere; the page calls only `window.tpt.invoke` when a developer presses Call.
 
 #![forbid(unsafe_code)]
 

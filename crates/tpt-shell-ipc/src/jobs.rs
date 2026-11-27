@@ -16,7 +16,7 @@
 //! stream closes when the job finishes or is cancelled.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -187,9 +187,30 @@ pub enum StartError {
     TooMany { limit: usize },
 }
 
+/// How many finished jobs [`Jobs::list`] keeps showing.
+pub const RECENT_LIMIT: usize = 20;
+
+/// One job as [`Jobs::list`] reports it.
+///
+/// Support: Full.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobInfo {
+    pub id: JobId,
+    /// The window that started the job. Empty when no window was calling.
+    pub owner: String,
+    /// `running`, `done`, `failed` or `cancelled`.
+    pub state: &'static str,
+    /// The latest `(done, total)` the job reported, if it reported any.
+    pub progress: Option<(u32, u32)>,
+}
+
 struct Running {
     cancel: Arc<AtomicBool>,
     finished: bool,
+    /// `running` until the terminal event, then `done`, `failed` or `cancelled`.
+    state: &'static str,
+    /// The latest progress the job reported, as `(done, total)`.
+    progress: Option<(u32, u32)>,
     /// The window that started the job. Empty when no window was calling.
     owner: String,
     /// The job's item stream, when it was started with one.
@@ -220,6 +241,8 @@ pub struct Jobs {
     limit: usize,
     next: u64,
     running: HashMap<JobId, Running>,
+    /// The most recent finished jobs, oldest first, so the overlay can show what just ended.
+    recent: VecDeque<JobInfo>,
     events_tx: Sender<JobEvent>,
     events_rx: Receiver<JobEvent>,
     /// The window whose call is running now. A job started meanwhile belongs to it.
@@ -236,6 +259,7 @@ impl Jobs {
             limit,
             next: 1,
             running: HashMap::new(),
+            recent: VecDeque::new(),
             events_tx,
             events_rx,
             owner: String::new(),
@@ -303,6 +327,8 @@ impl Jobs {
             Running {
                 cancel: cancel.clone(),
                 finished: false,
+                state: "running",
+                progress: None,
                 owner: self.owner.clone(),
                 stream: stream.clone(),
             },
@@ -369,9 +395,25 @@ impl Jobs {
     pub fn drain(&mut self) -> Vec<JobEvent> {
         let mut out = Vec::new();
         while let Ok(event) = self.events_rx.try_recv() {
-            if event.is_terminal() {
-                if let Some(job) = self.running.get_mut(&event.job()) {
+            if let Some(job) = self.running.get_mut(&event.job()) {
+                match &event {
+                    JobEvent::Progress { done, total, .. } => job.progress = Some((*done, *total)),
+                    JobEvent::Result { .. } => job.state = "done",
+                    JobEvent::Failed { .. } => job.state = "failed",
+                    JobEvent::Cancelled { .. } => job.state = "cancelled",
+                }
+                if event.is_terminal() {
                     job.finished = true;
+                    let info = JobInfo {
+                        id: event.job(),
+                        owner: job.owner.clone(),
+                        state: job.state,
+                        progress: job.progress,
+                    };
+                    self.recent.push_back(info);
+                    while self.recent.len() > RECENT_LIMIT {
+                        self.recent.pop_front();
+                    }
                 }
             }
             out.push(event);
@@ -385,6 +427,30 @@ impl Jobs {
     /// Support: Full.
     pub fn active(&self) -> usize {
         self.running.values().filter(|j| !j.finished).count()
+    }
+
+    /// What each job is doing, for the developer overlay: its state, its latest progress, and the
+    /// window that started it. Ordered by id. It lists the running jobs and the last
+    /// [`RECENT_LIMIT`] finished ones, so a job that just ended stays visible.
+    ///
+    /// Support: Full.
+    pub fn list(&self) -> Vec<JobInfo> {
+        let mut by_id: BTreeMap<u64, JobInfo> = BTreeMap::new();
+        for info in &self.recent {
+            by_id.insert(info.id.0, info.clone());
+        }
+        for (id, job) in &self.running {
+            by_id.insert(
+                id.0,
+                JobInfo {
+                    id: *id,
+                    owner: job.owner.clone(),
+                    state: job.state,
+                    progress: job.progress,
+                },
+            );
+        }
+        by_id.into_values().collect()
     }
 
     /// Takes the next item job `id` queued, if any. Taking an item does not return credit; only
@@ -613,6 +679,48 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn list_reports_each_jobs_state_and_latest_progress() {
+        let mut jobs = Jobs::new(4);
+        let id = jobs
+            .start(|ctx| {
+                ctx.progress(1, 2);
+                ctx.progress(2, 2);
+                Ok(json!({}))
+            })
+            .unwrap();
+        // Nothing is listed as anything but running until the events are drained.
+        let before = jobs.list();
+        assert_eq!(before.len(), 1);
+        assert_eq!(before[0].state, "running");
+        assert_eq!(before[0].progress, None);
+
+        collect_until(&mut jobs, |e| e.iter().any(JobEvent::is_terminal));
+        // The finished job is reaped from the table, but the list keeps it as recent history.
+        assert_eq!(jobs.active(), 0);
+        assert_eq!(
+            jobs.list(),
+            vec![JobInfo {
+                id,
+                owner: String::new(),
+                state: "done",
+                progress: Some((2, 2)),
+            }]
+        );
+    }
+
+    #[test]
+    fn the_listing_keeps_only_the_last_recent_finished_jobs() {
+        let mut jobs = Jobs::new(4);
+        let mut ids = Vec::new();
+        for _ in 0..(RECENT_LIMIT + 3) {
+            ids.push(jobs.start(|_| Ok(json!({}))).unwrap());
+            collect_until(&mut jobs, |e| e.iter().any(JobEvent::is_terminal));
+        }
+        let listed: Vec<JobId> = jobs.list().into_iter().map(|info| info.id).collect();
+        assert_eq!(listed, ids[ids.len() - RECENT_LIMIT..].to_vec());
     }
 
     #[test]

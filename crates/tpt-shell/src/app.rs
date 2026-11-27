@@ -887,6 +887,11 @@ impl App {
         for register in self.commands {
             register(&mut router);
         }
+        // The overlay lists the jobs of this router. Only the debug overlay asks for the table, so
+        // a release build creates none.
+        if let Some(shell) = &devtools_shell {
+            shell.attach_jobs(router.jobs());
+        }
         let router = Rc::new(router);
         let audit = match self.audit {
             Some((path, policy)) => {

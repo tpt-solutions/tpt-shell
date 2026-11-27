@@ -261,7 +261,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### Devtools overlay (tpt-shell-devtools, dev builds)
 - [x] IPC log with latency (the overlay shows each call with its latency; the log keeps the newest calls, tested 2026-11-28)
-- [ ] Jobs panel (the panel exists, but the facade feeds it no jobs, so it stays empty; open until the snapshot carries the job runtime's jobs)
+- [x] Jobs panel (lists the router's running jobs and the last 20 finished ones, with state, latest progress and owner; attached in debug builds only; tested in tpt-shell-ipc and in the facade, 2026-11-28)
 - [x] Capabilities in effect
 - [x] Audit tail (the last 200 lines of the audit log, tested)
 - [ ] Contract explorer (browse and call commands). Browsing works. Calling is open on purpose: the overlay page has no grants, so its calls get `CAP_DENIED` (tested). Letting it call would bypass the capability checks; the recommendation is to call through a window that holds the grant, which is not built
