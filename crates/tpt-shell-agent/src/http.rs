@@ -11,6 +11,9 @@
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -86,13 +89,31 @@ pub fn serve_http(
     Ok(())
 }
 
-fn handle(
-    stream: &mut TcpStream,
-    session: &mut Session,
-    token: &str,
-    start: Instant,
-    confirm: &mut dyn FnMut(&str, &Value) -> bool,
-) -> io::Result<()> {
+/// A refusal: the HTTP status and the short reason the body carries.
+type Refusal = (u16, &'static str);
+
+/// One request as the socket delivered it, before any check.
+struct Request {
+    method: String,
+    path: String,
+    headers: Vec<(String, String)>,
+    declared: Option<usize>,
+    body: Vec<u8>,
+}
+
+impl Request {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// Reads one request: the request line, the headers and, when it is small enough, the body. The
+/// body is read before any answer, so that a refused request still gets its response instead of
+/// a reset connection. An oversized header block is a refusal, not an error.
+fn read_request(stream: &mut TcpStream) -> io::Result<Result<Request, Refusal>> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut request_line = String::new();
     reader.read_line(&mut request_line)?;
@@ -107,7 +128,7 @@ fn handle(
         let read = reader.read_line(&mut line)?;
         header_bytes += read;
         if read == 0 || header_bytes > MAX_HEADER_BYTES {
-            return respond(stream, 431, "headers too large", None);
+            return Ok(Err((431, "headers too large")));
         }
         let line = line.trim_end();
         if line.is_empty() {
@@ -117,16 +138,10 @@ fn handle(
             headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
         }
     }
-    let header = |name: &str| {
-        headers
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v.as_str())
-    };
-
-    // The body is read before any answer, so that a refused request still gets its response
-    // instead of a reset connection.
-    let declared = header("content-length").and_then(|v| v.parse::<usize>().ok());
+    let declared = headers
+        .iter()
+        .find(|(n, _)| n == "content-length")
+        .and_then(|(_, v)| v.parse::<usize>().ok());
     let body = match declared {
         Some(length) if length <= MAX_BODY_BYTES => {
             let mut body = vec![0u8; length];
@@ -135,37 +150,168 @@ fn handle(
         }
         _ => Vec::new(),
     };
+    Ok(Ok(Request {
+        method,
+        path,
+        headers,
+        declared,
+        body,
+    }))
+}
 
+/// The checks a request must pass before the session sees it, in the order they are made: the
+/// token, the host, the path, the method, the length and the text. On success, the body text.
+fn check(request: &Request, token: &str) -> Result<String, Refusal> {
     let expected = format!("Bearer {token}");
-    let authorised = header("authorization").is_some_and(|v| same_secret(v, &expected));
+    let authorised = request
+        .header("authorization")
+        .is_some_and(|v| same_secret(v, &expected));
     if !authorised {
-        return respond(stream, 401, "missing or wrong token", None);
+        return Err((401, "missing or wrong token"));
     }
-    let host_ok = header("host").is_some_and(|h| {
+    let host_ok = request.header("host").is_some_and(|h| {
         let name = h.rsplit_once(':').map_or(h, |(name, _)| name);
         matches!(name, "127.0.0.1" | "localhost" | "[::1]")
     });
     if !host_ok {
-        return respond(stream, 403, "the host must be the loopback address", None);
+        return Err((403, "the host must be the loopback address"));
     }
-    if path != "/mcp" {
-        return respond(stream, 404, "not found", None);
+    if request.path != "/mcp" {
+        return Err((404, "not found"));
     }
-    if method != "POST" {
-        return respond(stream, 405, "use POST", None);
+    if request.method != "POST" {
+        return Err((405, "use POST"));
     }
-    let Some(length) = declared else {
-        return respond(stream, 411, "a Content-Length is needed", None);
+    let Some(length) = request.declared else {
+        return Err((411, "a Content-Length is needed"));
     };
     if length > MAX_BODY_BYTES {
-        return respond(stream, 413, "the request is too large", None);
+        return Err((413, "the request is too large"));
     }
-    let Ok(text) = String::from_utf8(body) else {
-        return respond(stream, 400, "the body is not UTF-8", None);
+    String::from_utf8(request.body.clone()).map_err(|_| (400, "the body is not UTF-8"))
+}
+
+fn handle(
+    stream: &mut TcpStream,
+    session: &mut Session,
+    token: &str,
+    start: Instant,
+    confirm: &mut dyn FnMut(&str, &Value) -> bool,
+) -> io::Result<()> {
+    let request = match read_request(stream)? {
+        Ok(request) => request,
+        Err((status, message)) => return respond(stream, status, message, None),
+    };
+    let text = match check(&request, token) {
+        Ok(text) => text,
+        Err((status, message)) => return respond(stream, status, message, None),
     };
     match session.handle_line(&text, start.elapsed(), confirm) {
         Some(reply) => respond(stream, 200, "", Some(&reply)),
         None => respond(stream, 202, "", None),
+    }
+}
+
+/// How many connections may be open at once. A connection past this gets 503 at once.
+pub const MAX_CONNECTIONS: usize = 8;
+
+/// How long a connection waits for the UI thread to answer its request.
+const ANSWER_WAIT: Duration = Duration::from_secs(10);
+
+/// A request that passed the checks, waiting for the session on the UI thread.
+struct Pending {
+    body: String,
+    reply: mpsc::SyncSender<Option<String>>,
+}
+
+/// The UI-thread end of the HTTP transport. The session is not `Send`, so the sockets are served
+/// on background threads and only checked requests come here. Call [`Bridge::answer_pending`]
+/// from the UI thread's tick.
+///
+/// Support: Full.
+pub struct Bridge {
+    pending: mpsc::Receiver<Pending>,
+}
+
+impl Bridge {
+    /// Answers every request that is waiting. Returns how many were answered. A request that gets
+    /// no answer within the wait is refused by its connection with 503.
+    ///
+    /// Support: Full.
+    pub fn answer_pending(
+        &self,
+        session: &mut Session,
+        start: Instant,
+        confirm: &mut dyn FnMut(&str, &Value) -> bool,
+    ) -> usize {
+        let mut answered = 0;
+        while let Ok(pending) = self.pending.try_recv() {
+            let reply = session.handle_line(&pending.body, start.elapsed(), confirm);
+            // The connection may have given up; a reply nobody reads is dropped.
+            let _ = pending.reply.send(reply);
+            answered += 1;
+        }
+        answered
+    }
+}
+
+/// Starts accepting connections on `listener` on a background thread, and returns the bridge the
+/// UI thread answers from. The token is checked here, so a short one is refused before any socket
+/// is served.
+///
+/// Support: Full.
+pub fn spawn_bridge(listener: TcpListener, token: &str) -> Result<Bridge, String> {
+    check_token(token)?;
+    let token = token.to_string();
+    let (tx, rx) = mpsc::channel::<Pending>();
+    let open = Arc::new(AtomicUsize::new(0));
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            if open.load(Ordering::SeqCst) >= MAX_CONNECTIONS {
+                let _ = respond(&mut stream, 503, "too many connections", None);
+                continue;
+            }
+            open.fetch_add(1, Ordering::SeqCst);
+            let (tx, token, open) = (tx.clone(), token.clone(), open.clone());
+            thread::spawn(move || {
+                let _ = serve_connection(stream, &token, &tx);
+                open.fetch_sub(1, Ordering::SeqCst);
+            });
+        }
+    });
+    Ok(Bridge { pending: rx })
+}
+
+/// Serves one connection: checks the request here, then waits for the UI thread's answer.
+fn serve_connection(
+    mut stream: TcpStream,
+    token: &str,
+    tx: &mpsc::Sender<Pending>,
+) -> io::Result<()> {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let request = match read_request(&mut stream)? {
+        Ok(request) => request,
+        Err((status, message)) => return respond(&mut stream, status, message, None),
+    };
+    let text = match check(&request, token) {
+        Ok(text) => text,
+        Err((status, message)) => return respond(&mut stream, status, message, None),
+    };
+    let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+    if tx
+        .send(Pending {
+            body: text,
+            reply: reply_tx,
+        })
+        .is_err()
+    {
+        return respond(&mut stream, 503, "the app is not running", None);
+    }
+    match reply_rx.recv_timeout(ANSWER_WAIT) {
+        Ok(Some(reply)) => respond(&mut stream, 200, "", Some(&reply)),
+        Ok(None) => respond(&mut stream, 202, "", None),
+        Err(_) => respond(&mut stream, 503, "the app did not answer in time", None),
     }
 }
 
@@ -196,6 +342,7 @@ fn respond(
         411 => "Length Required",
         413 => "Payload Too Large",
         431 => "Request Header Fields Too Large",
+        503 => "Service Unavailable",
         _ => "Error",
     };
     let www = if status == 401 {
@@ -313,6 +460,45 @@ mod tests {
         let mut ask = with_dialog(&mut deny);
         serve_http(&mut s, &listener, TOKEN, Instant::now(), &mut ask, Some(1)).unwrap();
         assert!(client.join().unwrap().starts_with("HTTP/1.1 403"));
+    }
+
+    #[test]
+    fn the_bridge_answers_on_the_ui_thread_and_refuses_bad_requests_without_it() {
+        let listener = bind_loopback(0, TOKEN).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let bridge = spawn_bridge(listener, TOKEN).unwrap();
+        let body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ping","arguments":{}}}"#;
+        let client = thread::spawn(move || {
+            let ok = request(addr, &post(TOKEN, body));
+            let wrong = request(addr, &post("x".repeat(32).as_str(), body));
+            (ok, wrong)
+        });
+        let mut s = session();
+        let mut deny = DenyAll;
+        let mut ask = with_dialog(&mut deny);
+        // The UI thread answers the waiting request until the client has both replies.
+        for _ in 0..1000 {
+            bridge.answer_pending(&mut s, Instant::now(), &mut ask);
+            if client.is_finished() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        let (ok, wrong) = client.join().unwrap();
+        assert!(ok.starts_with("HTTP/1.1 200 OK"), "{ok}");
+        assert!(ok.contains("\"isError\":false"), "{ok}");
+        assert!(wrong.starts_with("HTTP/1.1 401"), "{wrong}");
+        assert_eq!(
+            s.log.len(),
+            1,
+            "only the authorised call reached the session"
+        );
+    }
+
+    #[test]
+    fn a_bridge_refuses_a_short_token_before_serving_anything() {
+        let listener = bind_loopback(0, TOKEN).unwrap();
+        assert!(spawn_bridge(listener, "short").is_err());
     }
 
     #[test]

@@ -177,7 +177,26 @@ pub(crate) fn contract_tools(
 /// Starts reading agent lines from stdin and returns the tick that answers them on the UI thread.
 /// The tick runs every [`TICK`]. Confirmation is always refused here: no native dialog is wired
 /// to the agent yet, so a command the profile marks for confirmation does not run.
-pub(crate) fn stdio_tick(mut session: Session) -> impl FnMut() + 'static {
+#[cfg(not(feature = "mcp-http"))]
+pub(crate) fn stdio_tick(session: Session) -> impl FnMut() + 'static {
+    stdio_and_http_tick(session, ())
+}
+
+/// Like the stdio tick, and also answers the MCP requests the HTTP bridge has queued. Both
+/// transports share the one session, which only the UI thread touches.
+#[cfg(feature = "mcp-http")]
+pub(crate) fn stdio_tick(
+    session: Session,
+    http: Option<tpt_shell_agent::http::Bridge>,
+) -> impl FnMut() + 'static {
+    stdio_and_http_tick(session, http)
+}
+
+/// The shared tick. `http` is the bridge when the HTTP transport is on; `()` otherwise.
+fn stdio_and_http_tick<H: HttpAnswers + 'static>(
+    mut session: Session,
+    http: H,
+) -> impl FnMut() + 'static {
     let (tx, rx) = mpsc::channel::<String>();
     std::thread::spawn(move || {
         for line in std::io::stdin().lock().lines() {
@@ -196,6 +215,36 @@ pub(crate) fn stdio_tick(mut session: Session) -> impl FnMut() + 'static {
                 let _ = writeln!(out, "{reply}");
                 let _ = out.flush();
             }
+        }
+        http.answer(&mut session, start, &mut refuse);
+    }
+}
+
+/// Answers queued HTTP requests on the UI thread. Implemented by the bridge, and by `()` for an
+/// app without the HTTP transport.
+trait HttpAnswers {
+    fn answer(
+        &self,
+        session: &mut Session,
+        start: Instant,
+        confirm: &mut dyn FnMut(&str, &Value) -> bool,
+    );
+}
+
+impl HttpAnswers for () {
+    fn answer(&self, _: &mut Session, _: Instant, _: &mut dyn FnMut(&str, &Value) -> bool) {}
+}
+
+#[cfg(feature = "mcp-http")]
+impl HttpAnswers for Option<tpt_shell_agent::http::Bridge> {
+    fn answer(
+        &self,
+        session: &mut Session,
+        start: Instant,
+        confirm: &mut dyn FnMut(&str, &Value) -> bool,
+    ) {
+        if let Some(bridge) = self {
+            bridge.answer_pending(session, start, confirm);
         }
     }
 }

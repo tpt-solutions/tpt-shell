@@ -49,6 +49,21 @@ use tpt_shell_kiosk::recovery::CrashRecovery;
 #[cfg(windows)]
 use tpt_shell_platform_windows::webview2::default_user_data_dir;
 
+/// The origin the grants of a replayed app were made for. Replay runs on Windows for now, where
+/// the app origin is the WebView2 one.
+#[cfg(windows)]
+fn replay_origin() -> Result<&'static str> {
+    Ok(tpt_shell_platform_windows::webview2::APP_ORIGIN)
+}
+
+/// Replay has no app origin on this platform yet.
+#[cfg(not(windows))]
+fn replay_origin() -> Result<&'static str> {
+    Err(Error::Backend(
+        "replaying a recording runs on Windows for now".into(),
+    ))
+}
+
 /// How often the UI thread delivers queued job events to their windows.
 #[cfg(windows)]
 const JOB_EVENT_PERIOD: Duration = Duration::from_millis(20);
@@ -185,6 +200,9 @@ pub struct App {
     /// The tools the app offers an agent (feature `agent`).
     #[cfg(feature = "agent")]
     agent_tools: Vec<tpt_shell_agent::AgentTool>,
+    /// The port the MCP HTTP transport serves on (features `agent` and `mcp-http`).
+    #[cfg(all(feature = "agent", feature = "mcp-http"))]
+    agent_http: Option<u16>,
     /// The health endpoint's address and the longest heartbeat age it accepts (feature `health-endpoint`).
     #[cfg(feature = "health-endpoint")]
     health: Option<(std::net::SocketAddr, Duration)>,
@@ -643,6 +661,38 @@ impl App {
         self
     }
 
+    /// Replays a recording of this app's commands with no window, and returns how the answers
+    /// compare with it (spec 10.5). Each recorded request runs through the app's own router as the
+    /// first window, with that window's grants. In `Mode::Strict` a changed answer is an error; in
+    /// `Mode::Lenient` it is reported in the outcome. Timing is not compared. Consumes the app, so
+    /// nothing starts: no window or WebView2 is created.
+    pub fn replay_recording(
+        self,
+        path: &Path,
+        mode: tpt_shell_replay::Mode,
+    ) -> Result<tpt_shell_replay::player::Outcome> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| Error::Backend(format!("cannot read {}: {e}", path.display())))?;
+        let replay =
+            tpt_shell_replay::read(&text, mode).map_err(|e| Error::Backend(e.to_string()))?;
+        let origin = replay_origin()?;
+        let window = self
+            .windows
+            .first()
+            .map(|w| w.name.clone())
+            .unwrap_or_else(|| "main".into());
+        let mut engine = tpt_shell_capabilities::Engine::new();
+        for grant in self.grants {
+            engine.add_grant(grant).map_err(|e| Error::Backend(e.0))?;
+        }
+        let mut router = Router::new();
+        for register in self.commands {
+            register(&mut router);
+        }
+        crate::replay_app::play(router, engine, &window, origin, &replay, mode)
+            .map_err(Error::Backend)
+    }
+
     /// Sets the command contract, the JSON description of the app's commands that the CLI reads.
     /// Build it with `commands![...]` from the `#[command]` functions (see [`CommandContract`]).
     pub fn contract(mut self, contract: tpt_shell_ipc::contract::Contract) -> Self {
@@ -702,6 +752,16 @@ impl App {
             args,
             handler: Box::new(handler),
         });
+        self
+    }
+
+    /// Serves the agent over MCP on 127.0.0.1 at `port` (features `agent` and `mcp-http`). The
+    /// bearer token comes from the `TPT_MCP_TOKEN` environment variable when the app starts, and it
+    /// must be at least 32 characters, so it is never written into the app or the manifest. The
+    /// agent runs only when an agent profile is enabled (see [`App::agent`]).
+    #[cfg(all(feature = "agent", feature = "mcp-http"))]
+    pub fn agent_http(mut self, port: u16) -> Self {
+        self.agent_http = Some(port);
         self
     }
 
@@ -958,9 +1018,33 @@ impl App {
                     page_script: Some(agent_page_script(agent_window.clone())),
                     resource_script: Some(agent_page_script(agent_window.clone())),
                 };
-                crate::agent::session(setup, audit.clone())
-                    .map_err(Error::Backend)?
-                    .map(crate::agent::stdio_tick)
+                // The MCP HTTP transport, when the app asked for it. The token is read here, so it
+                // is never part of the app or the manifest.
+                #[cfg(feature = "mcp-http")]
+                let http = match self.agent_http.take() {
+                    Some(port) => {
+                        let token = std::env::var("TPT_MCP_TOKEN").map_err(|_| {
+                            Error::Backend(
+                                "TS0111: set TPT_MCP_TOKEN to a token of at least 32 characters to serve MCP over HTTP"
+                                    .into(),
+                            )
+                        })?;
+                        let listener = tpt_shell_agent::http::bind_loopback(port, &token)
+                            .map_err(Error::Backend)?;
+                        Some(
+                            tpt_shell_agent::http::spawn_bridge(listener, &token)
+                                .map_err(Error::Backend)?,
+                        )
+                    }
+                    None => None,
+                };
+                let agent_session =
+                    crate::agent::session(setup, audit.clone()).map_err(Error::Backend)?;
+                #[cfg(feature = "mcp-http")]
+                let tick = agent_session.map(|session| crate::agent::stdio_tick(session, http));
+                #[cfg(not(feature = "mcp-http"))]
+                let tick = agent_session.map(crate::agent::stdio_tick);
+                tick
             }
             None => None,
         };

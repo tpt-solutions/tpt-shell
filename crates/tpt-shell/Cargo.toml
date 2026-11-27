@@ -35,6 +35,9 @@ serde_json = "1"
 default = []
 # The agent surface: MCP over stdio for the app, enabled by an enabled [agent] profile (spec 10.4).
 agent = ["dep:tpt-shell-agent"]
+# MCP over localhost HTTP with a bearer token, on top of the agent (spec 10.4). Opens a socket, so
+# it is off by default; the token comes from the TPT_MCP_TOKEN environment variable.
+mcp-http = ["agent", "tpt-shell-agent/mcp-http"]
 # Local admin endpoint on 127.0.0.1, token protected. Off by default (spec 10.1).
 admin-endpoint = ["tpt-shell-kiosk/admin-endpoint"]
 # Local HTTP health endpoint on 127.0.0.1. Off by default (spec 10.1).
