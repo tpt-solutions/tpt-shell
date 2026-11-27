@@ -474,8 +474,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Fuzz and security tests on control channel (R7)
 
 ### Visual diff
-- [x] Own perceptual comparer with region masks and per-region tolerance (`tpt-shell-test::visual`: raw RGBA input, YIQ-weighted distance, ignore and tolerance regions; PNG decoding and the CLI are not built)
-- [ ] `tpt-shell visual compare` merging artifacts from three CI jobs
+- [x] Own perceptual comparer with region masks and per-region tolerance (`tpt-shell-test::visual`: raw RGBA input, YIQ-weighted distance, ignore and tolerance regions; PNG decoding is built in `tpt-shell-test::png`, and the CLI compares screenshots through it)
+- [ ] `tpt-shell visual compare` merging artifacts from three CI jobs (the CLI takes any number of directories, with the first as the baseline, and writes one HTML report, tested in `visual_cmd`. Not done: the CI job does not run it, because the screenshots come from the test driver, which is not built)
 - [x] HTML report
 - [ ] Threshold failures (the comparer reports pass or fail against `max_changed_fraction`. The CLI part is done: `tpt-shell visual compare` exits 1 when a comparison fails, tested in `visual_cmd`. Still open: the CI job does not run `visual compare` yet; `ci.yml` only uploads the three OS artifacts, so no CI job fails on it)
 - [ ] WebView2 channels (stable/beta/canary) support on Windows
