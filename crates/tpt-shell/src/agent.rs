@@ -16,12 +16,14 @@ use serde_json::Value;
 use tpt_shell_agent::catalog::{
     tools_from_catalog, CommandCatalog, CommandDescriptor, Dispatch, Runner,
 };
+use tpt_shell_agent::page;
 use tpt_shell_agent::profile::AgentConfig;
 use tpt_shell_agent::record::{RecordedAction, Recorder};
 use tpt_shell_agent::resources::PageTree;
 use tpt_shell_agent::{wait_for_tool, AgentTool, Outcome as AgentOutcome, Session};
 use tpt_shell_audit::{AuditLog, Entry, Outcome};
 use tpt_shell_ipc::contract::Contract;
+use tpt_shell_ipc::schema::{Field, Schema};
 use tpt_shell_ipc::{Limits, Router};
 
 use crate::agent_snapshot::{snapshot_source, PageScript};
@@ -113,6 +115,110 @@ pub(crate) fn session(
         session = session.with_resources(Box::new(PageTree::new(snapshot_source(script))));
     }
     Ok(Some(session))
+}
+
+/// The arguments of an action on one snapshot element: its reference number.
+const REF_ARGS: &[Field] = &[Field {
+    name: "ref",
+    schema: Schema::Int {
+        min: 1,
+        max: u32::MAX as i64,
+    },
+}];
+
+/// The arguments of typing into one element: its reference number and the text.
+const TYPE_ARGS: &[Field] = &[
+    Field {
+        name: "ref",
+        schema: Schema::Int {
+            min: 1,
+            max: u32::MAX as i64,
+        },
+    },
+    Field {
+        name: "text",
+        schema: Schema::Str {
+            max_len: 2000,
+            chars: None,
+        },
+    },
+];
+
+/// The reference an action names. A reference is one from the latest snapshot; the page refuses a
+/// stale one.
+fn reference_of(args: &Value) -> Result<u32, String> {
+    args["ref"]
+        .as_u64()
+        .and_then(|v| u32::try_from(v).ok())
+        .ok_or_else(|| "ref must be a reference number from the page snapshot".to_string())
+}
+
+/// One tool that performs an action on a snapshot element. The page runs the action, and its
+/// answer is the tool's result, or its error.
+fn action_tool(
+    command: &str,
+    description: &str,
+    args: Schema,
+    script: PageScript,
+    build: fn(&Value) -> Result<page::Action, String>,
+) -> AgentTool {
+    let mut script = script;
+    AgentTool {
+        command: command.into(),
+        description: description.into(),
+        args,
+        handler: Box::new(move |args: &Value| {
+            let action = build(args)?;
+            let json = script(&page::action_script(&action))?
+                .ok_or_else(|| "the page gave no result for the action".to_string())?;
+            page::parse_action_result(&json)
+        }),
+    }
+}
+
+/// The page actions an agent may use as tools: `click`, `type_text` and `read`. Each tool gets its
+/// own page script from `make_script`. The session offers only the ones the profile names, so a
+/// profile that does not list them gets none of them.
+pub(crate) fn page_action_tools(make_script: impl Fn() -> PageScript) -> Vec<AgentTool> {
+    vec![
+        action_tool(
+            "click",
+            "Click an element of the page, by its reference from the page snapshot.",
+            Schema::Struct(REF_ARGS),
+            make_script(),
+            |args| {
+                Ok(page::Action::Click {
+                    ref_id: reference_of(args)?,
+                })
+            },
+        ),
+        action_tool(
+            "type_text",
+            "Type text into an element of the page, by its reference from the page snapshot.",
+            Schema::Struct(TYPE_ARGS),
+            make_script(),
+            |args| {
+                Ok(page::Action::Type {
+                    ref_id: reference_of(args)?,
+                    text: args["text"]
+                        .as_str()
+                        .ok_or_else(|| "text is needed".to_string())?
+                        .to_string(),
+                })
+            },
+        ),
+        action_tool(
+            "read",
+            "Read the text of an element of the page, by its reference from the page snapshot.",
+            Schema::Struct(REF_ARGS),
+            make_script(),
+            |args| {
+                Ok(page::Action::Read {
+                    ref_id: reference_of(args)?,
+                })
+            },
+        ),
+    ]
 }
 
 /// The app's contract, read as the agent's catalog: one descriptor per command, flagged by the
@@ -289,6 +395,42 @@ mod tests {
     fn page_with_save() -> PageScript {
         let page = r#"{"title":"t","path":"https://tpt-app.localhost/","truncated":false,"tree":[{"ref":7,"role":"button","name":"Save","bounds":{"x":0,"y":0,"w":1,"h":1}}]}"#;
         Box::new(move |_| Ok(Some(page.to_string())))
+    }
+
+    #[test]
+    fn the_page_action_tools_send_their_action_to_the_page_and_return_its_answer() {
+        let sent: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let mut tools = page_action_tools(|| {
+            let sent = sent.clone();
+            Box::new(move |script: &str| {
+                sent.borrow_mut().push(script.to_string());
+                Ok(Some(r#"{"ok":true,"data":"done"}"#.to_string()))
+            })
+        });
+        let names: Vec<&str> = tools.iter().map(|t| t.command.as_str()).collect();
+        assert_eq!(names, ["click", "type_text", "read"]);
+        assert_eq!(
+            (tools[0].handler)(&serde_json::json!({ "ref": 3 })),
+            Ok(serde_json::json!("done"))
+        );
+        assert_eq!(
+            (tools[1].handler)(&serde_json::json!({ "ref": 3, "text": "hi" })),
+            Ok(serde_json::json!("done"))
+        );
+        // A call without a reference never reaches the page.
+        assert!((tools[0].handler)(&serde_json::json!({})).is_err());
+        let scripts = sent.borrow();
+        assert_eq!(
+            scripts.len(),
+            2,
+            "only the two valid calls reached the page"
+        );
+        assert!(
+            scripts[0].contains(r#"{"op":"click","ref":3}"#),
+            "{}",
+            scripts[0]
+        );
+        assert!(scripts[1].contains(r#""op":"type""#), "{}", scripts[1]);
     }
 
     #[test]

@@ -1011,6 +1011,10 @@ impl App {
                         router.clone(),
                     ));
                 }
+                // The page actions an agent may use (click, type_text, read), which the profile allows.
+                tools.extend(crate::agent::page_action_tools(|| {
+                    agent_page_script(agent_window.clone())
+                }));
                 let setup = crate::agent::AgentSetup {
                     config,
                     profile,
