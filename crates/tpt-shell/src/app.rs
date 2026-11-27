@@ -68,6 +68,10 @@ fn replay_origin() -> Result<&'static str> {
 #[cfg(windows)]
 const JOB_EVENT_PERIOD: Duration = Duration::from_millis(20);
 
+/// How often the UI thread answers the test driver's requests.
+#[cfg(all(windows, feature = "test-driver"))]
+const TEST_PERIOD: Duration = Duration::from_millis(20);
+
 /// The page restrictions a kiosk config's lock-down asks for. Each flag maps to one WebView2
 /// switch or script (see `PageRestrictions`).
 #[cfg(windows)]
@@ -1258,6 +1262,18 @@ impl App {
             windows.push((window.name, id));
         }
         let window_ids: Vec<_> = windows.iter().map(|(_, id)| *id).collect();
+        // The test driver's requests are answered here, on the UI thread, from the first window. Only
+        // a run with TPT_TEST_RUN set opens the channel.
+        #[cfg(all(windows, feature = "test-driver"))]
+        if let Some(mut channel) = crate::test_host::open_channel()? {
+            let mut host = crate::test_host::WindowHost::new(
+                agent_window.clone(),
+                agent_page_script(agent_window.clone()),
+            );
+            backend.every(TEST_PERIOD, move || {
+                crate::test_host::serve_pending(&mut channel, &mut host)
+            })?;
+        }
         // Job events reach the page that started the job. The router queues them; this tick drains
         // the queue on the UI thread and posts each event to the window that owns its job. Without
         // it a job's result never arrives, and the overlay's job table never sees a job end.

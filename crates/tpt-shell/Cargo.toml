@@ -29,6 +29,7 @@ tpt-shell-replay = { path = "../tpt-shell-replay", version = "0.0.0" }
 tpt-shell-profiles = { path = "../tpt-shell-profiles", version = "0.0.0" }
 tpt-shell-compliance = { path = "../tpt-shell-compliance", version = "0.0.0" }
 tpt-shell-agent = { path = "../tpt-shell-agent", version = "0.0.0", optional = true }
+tpt-shell-test = { path = "../tpt-shell-test", version = "0.0.0", optional = true }
 serde_json = "1"
 
 [features]
@@ -38,6 +39,9 @@ agent = ["dep:tpt-shell-agent"]
 # MCP over localhost HTTP with a bearer token, on top of the agent (spec 10.4). Opens a socket, so
 # it is off by default; the token comes from the TPT_MCP_TOKEN environment variable.
 mcp-http = ["agent", "tpt-shell-agent/mcp-http"]
+# The test driver (spec 10.6): a run directory the test host writes requests into, answered on the
+# UI thread from the first window. Off by default; the app must also be started with TPT_TEST_RUN.
+test-driver = ["agent", "dep:tpt-shell-test", "tpt-shell-test/test-driver"]
 # Local admin endpoint on 127.0.0.1, token protected. Off by default (spec 10.1).
 admin-endpoint = ["tpt-shell-kiosk/admin-endpoint"]
 # Local HTTP health endpoint on 127.0.0.1. Off by default (spec 10.1).

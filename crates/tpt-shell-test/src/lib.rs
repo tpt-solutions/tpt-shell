@@ -26,6 +26,7 @@ pub mod channel;
 /// Support: Full. Built only with the test-driver feature, which is off in normal builds.
 #[cfg(feature = "test-driver")]
 pub mod driver;
+
 mod inflate;
 /// Support: Partial. The default native tree dump returns Unsupported. The Windows, macOS and Linux
 /// overrides are routed to the platform agents.
@@ -33,6 +34,8 @@ pub mod native;
 /// Support: Partial. Adam7 interlaced files are refused, and tRNS colour keys on grey and RGB
 /// images are ignored.
 pub mod png;
+#[cfg(feature = "test-driver")]
+pub mod runner;
 /// Support: Partial. The HTML report lists results and has no side-by-side or diff images yet.
 pub mod screens;
 /// Support: Full.

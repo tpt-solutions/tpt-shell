@@ -466,9 +466,9 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### Test driver (tpt-shell-test)
 - [x] Cargo feature `test-driver`, per-run token, local IPC (file-based channel, no socket or pipe, per the no-sockets rule)
-- [ ] Rust API: `find(role().name())`, click, type_text, press, screenshot, dom_snapshot, a11y_tree, eval (test builds only), wait_for
+- [ ] Rust API: `find(role().name())`, click, type_text, press, screenshot, dom_snapshot, a11y_tree, eval (test builds only), wait_for (partial, 2026-11-28, Windows. The app side answers the driver on the UI thread: `tpt_shell_test::runner` maps each request onto a host, and the facade's host (`test-driver` feature, `TPT_TEST_RUN` names the run directory) runs the page scripts and the capture. Tested: find, wait_for, click and screenshot, end to end on WebView2 in `tests/test_driver.rs`; type_text, press, dom and eval are answered and unit-tested against a fake host only, and a11y_tree answers from the page's snapshot, not the native tree, which is still routed to the platform crates)
 - [x] Expectations with automatic retry
-- [ ] Screenshots: CapturePreview, takeSnapshot, get_snapshot
+- [ ] Screenshots: CapturePreview, takeSnapshot, get_snapshot (Windows done: `capture_window_png` takes the page with `Page.captureScreenshot` through the DevTools protocol, and the end-to-end test checks the result is a PNG. CapturePreview never completed on the test runtime, so it is not used. macOS takeSnapshot and Linux get_snapshot are not done)
 - [ ] `tpt-shell test` with artifact collection
 - [ ] Integration with virtual devices and replay
 - [ ] Fuzz and security tests on control channel (R7)

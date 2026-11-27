@@ -29,6 +29,8 @@ mod licenses;
 mod replay_app;
 #[cfg(windows)]
 mod session;
+#[cfg(all(windows, feature = "test-driver"))]
+mod test_host;
 #[cfg(windows)]
 mod ui;
 

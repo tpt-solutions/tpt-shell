@@ -852,6 +852,7 @@ dependencies = [
  "tpt-shell-platform-windows",
  "tpt-shell-profiles",
  "tpt-shell-replay",
+ "tpt-shell-test",
 ]
 
 [[package]]

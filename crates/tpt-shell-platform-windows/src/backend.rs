@@ -411,6 +411,40 @@ pub fn eval_window_json(id: WindowId, script: &str, timeout: Duration) -> Result
     Ok(json)
 }
 
+/// Captures a window's page as PNG bytes, pumping messages until WebView2 finishes the capture or
+/// `timeout` passes. Like [`eval_window_json`] it is a free function, so a timer on the UI thread
+/// can take a screenshot without a backend handle. The registry is borrowed only to start the
+/// capture.
+///
+/// Support: Full on Windows. Used by the test driver's screenshot command.
+pub fn capture_window_png(id: WindowId, timeout: Duration) -> Result<Vec<u8>> {
+    let slot: EvalSlot = Rc::new(RefCell::new(None));
+    let done = slot.clone();
+    let started = WINDOWS
+        .with(|w| {
+            w.borrow().get(&id.0).map(|entry| {
+                entry.web.call_devtools_protocol_json(
+                    "Page.captureScreenshot",
+                    r#"{"format":"png"}"#,
+                    move |hr, json| *done.borrow_mut() = Some((hr, json)),
+                )
+            })
+        })
+        .ok_or(Error::UnknownWindow(id.0 as u64))?;
+    started.map_err(|hr| hr_error("Page.captureScreenshot", hr))?;
+    if !pump_until(timeout, || slot.borrow().is_some()) {
+        return Err(Error::Backend("the capture did not finish in time".into()));
+    }
+    let (hr, json) = slot.borrow_mut().take().expect("set by the callback");
+    if hr < 0 {
+        return Err(hr_error("Page.captureScreenshot", hr));
+    }
+    let json = json.ok_or_else(|| Error::Backend("the capture returned no data".into()))?;
+    let data = json_string_field(&json, "data")
+        .ok_or_else(|| Error::Backend("the capture has no data field".into()))?;
+    base64_decode(data).ok_or_else(|| Error::Backend("the capture data is not base64".into()))
+}
+
 fn hr_error(what: &str, hr: HRESULT) -> Error {
     Error::Backend(format!("{what} failed (HRESULT 0x{hr:08X})"))
 }
@@ -1748,8 +1782,13 @@ unsafe extern "system" fn wnd_proc(
             // Clone the callback out of the table first, so a tick may start or stop timers.
             let tick = TIMERS.with(|t| t.borrow().ticks.get(&wparam).cloned());
             if let Some(tick) = tick {
-                // A panic must not unwind across this extern function.
-                let _ = catch_unwind(AssertUnwindSafe(|| (tick.borrow_mut())()));
+                // A tick can pump messages itself (a page script waits for WebView2), which can
+                // deliver this same timer again. That nested call finds the tick busy and is
+                // skipped; the next period runs it again.
+                if let Ok(mut run) = tick.try_borrow_mut() {
+                    // A panic must not unwind across this extern function.
+                    let _ = catch_unwind(AssertUnwindSafe(&mut *run));
+                }
             }
             0
         }
