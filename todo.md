@@ -455,8 +455,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ### Docs, tags, CLI
 - [ ] Per-OS support tags (Windows Full, Linux Full, macOS Partial for reserved USB classes)
 - [ ] `tpt-shell add devices`
-- [ ] `devices-sim` example
-- [ ] `pos` template (preview)
+- [x] `devices-sim` example (examples/devices-sim builds in tools/template-build.sh, 2026-11-28; it is not run)
+- [x] `pos` template (preview) (generates with `tpt-shell new --template pos` and builds in release, 2026-11-28; the generated app is not run)
 - [ ] Real-device matrix: one serial adapter, one HID scanner, one ESC/POS printer
 - [ ] Done: virtual-device round-trip tests pass on all three OSes; real-device matrix documented
 
