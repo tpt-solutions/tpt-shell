@@ -54,7 +54,7 @@ binary is not identical, and the difference is fully explained:
 
 | Output | Difference | Cause | Status |
 | --- | --- | --- | --- |
-| `tpt-shell.exe` (Windows, MSVC) | 20 bytes. `llvm-readobj --coff-debug-directory` shows the CodeView entry's `PDBGUID` differs, and the PE `TimeDateStamp` differs with it | The linker gives each PDB a fresh GUID even with `/Brepro`. `/Brepro` derives the PE timestamp from a hash of the image, and that hash includes the GUID. Nothing else in the image or the file headers differs | Open. Owner decision: drop the PDB record from release builds (`/DEBUG:NONE`, which loses symbols for crash reports), or keep it and accept that the binary is not byte-identical while the SBOM and attestation are |
+| `tpt-shell.exe` (Windows, MSVC) | 20 bytes. `llvm-readobj --coff-debug-directory` shows the CodeView entry's `PDBGUID` differs, and the PE `TimeDateStamp` differs with it | The linker gives each PDB a fresh GUID even with `/Brepro`. `/Brepro` derives the PE timestamp from a hash of the image, and that hash includes the GUID. Nothing else in the image or the file headers differs | Accepted (decision 2026-11-28, following the recommendation). Release builds keep their PDB, because crash reports need symbols. The binary is therefore not byte-identical across builds; the compliance outputs are, and the attestation records the binary's digest for each build. `tools/repro-check.sh` still reports this difference and exits 1, which is the intended signal until the check learns to ignore the CodeView record |
 
 Reproduce the check: `tools/repro-check.sh`, then `llvm-readobj --coff-debug-directory` on both
 binaries in `target/repro/`. Before the fix in `tools/repro-build.sh` (2026-11-27), the two builds

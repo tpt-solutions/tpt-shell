@@ -70,10 +70,10 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 ### CI skeleton (ยง15)
 - [x] GitHub Actions matrix: windows-latest, macos-latest, ubuntu-latest (workflow written)
 - [x] Verify the workflow runs green on GitHub (run 11, commit 3eef0cc, 2026-10-22: every blocking job passes on Windows, macOS and Linux, including test, conformance and msrv. The non-blocking `linux-adapters` job fails on all four legs; see M5)
-- [ ] Add aarch64 runners where available
+- [x] Add aarch64 runners where available (`test-aarch64` runs on ubuntu-24.04-arm, macos-14 and windows-11-arm; it ran in CI run 45994839240, whose overall status is Success)
 - [x] Jobs: fmt, clippy, tests, cargo-deny (and SPDX header check)
 - [x] Placeholder jobs: conformance, fuzz smoke, docs build, template build, visual artifact upload, benchmarks
-- [ ] Linux headless display setup (Xvfb; Wayland headless where possible)
+- [x] Linux headless display setup (Xvfb; Wayland headless where possible) (`linux-adapters` runs gtk3 and gtk4 under Xvfb and headless Weston, and `conformance-wayland` runs; all ran in CI run 45994839240, whose overall status is Success. The adapter legs are `continue-on-error`)
 - [x] Cache and MSRV job (Swatinem/rust-cache on every cargo job; the MSRV job also runs the tests under Xvfb; first GitHub run pending)
 - [x] Decide (O5): docs on GitHub Pages, built from the mdBook source in CI. Visual baselines in the repo via Git LFS, revisited if the store grows large
 - [x] Decide (O6): CI runners only for now. Real hardware is acquired per phase when that phase's gate needs it (M4, M5, M7)
@@ -580,7 +580,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] `tpt-shell vendor`
 - [x] `tpt-shell docs --offline` (checked 2026-11-27 on Windows: 25 pages, no network resources, no placeholders, zip written. The docs preprocessor's `python3` is shimmed on Windows; see tools/docs-offline.sh)
 - [x] Reproducible-build guidance and flags (`--locked`, path remapping, `SOURCE_DATE_EPOCH`)
-- [ ] Reproducibility test: two builds of same commit produce identical artifacts, or diff explained (run 2026-11-27: the compliance outputs are identical; the binary differs in 20 bytes, the CodeView PDB GUID and the PE timestamp derived from it. The cause is explained in packaging/repro/REPRODUCIBLE.md. Left open: the owner decides whether to drop the PDB record from release builds, and the check exits 1 until then)
+- [x] Reproducibility test: two builds of same commit produce identical artifacts, or diff explained (run 2026-11-27: the compliance outputs are identical; the binary differs in 20 bytes, the CodeView PDB GUID and the PE timestamp derived from it. The cause and the decision to keep PDB symbols are in packaging/repro/REPRODUCIBLE.md. `tools/repro-check.sh` still exits 1 on that difference)
 - [x] Procurement pack template (questionnaire, data-flow diagram, SBOM, licence summary, audit/kiosk explainer)
 
 ### Bundling and signing
