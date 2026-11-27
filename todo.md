@@ -289,7 +289,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] `conformance/` harness and fixture pages
 - [ ] Checks: IPC round trip, large blobs, streams/backpressure, custom protocol, CSP, navigation policy, theme injection, snapshot, drag regions, DPI
 - [ ] Run on Windows first, establish baseline
-- [ ] Compatibility report generator (published artifact)
+- [x] Compatibility report generator (published artifact) (the `compat-report` job publishes it, run 46059331567; the macOS and Linux rows are all pending)
 
 ### macOS backend (tpt-shell-platform-macos)
 - [x] Decide: objc2 (named in spec ยง6.2 as an allowed low-level FFI crate). Its licence is checked with cargo-deny when M4 adds it
@@ -314,7 +314,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Support tags: macOS 12+ matrix, profile limits on 12โ€“13
 
 ### Parity
-- [x] Conformance green on macOS CI (run 11: the job passes; pending and skipped checks are listed in the compatibility report, so green means no failures, not full coverage)
+- [ ] Conformance green on macOS CI (the job passes, but every macOS check is pending: `run_suite` returns all-pending off Windows, so nothing has run against the macOS backend yet)
 - [ ] Unit and leak tests for ObjC wrappers
 - [ ] Sanitiser run on macOS FFI module
 - [ ] macOS notarisation notes in docs
@@ -350,10 +350,10 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] D-Bus client written without a non-compliant dependency, or licence-checked crate
 
 ### Parity
-- [x] Conformance green on Ubuntu CI (Xvfb, Wayland headless where possible) (run 46059331567: `conformance (ubuntu-latest)` passes on Xvfb; `conformance-wayland` also passes, but it is partial and `continue-on-error`)
+- [ ] Conformance green on Ubuntu CI (Xvfb, Wayland headless where possible) (the job passes, but every Linux check is still pending: `run_suite` in `conformance/tests/conformance.rs` returns all-pending off Windows, so green means nothing ran)
 - [x] Both GTK3/4 adapters covered in CI matrix (R4) (the `linux-adapters` job has four legs, gtk3 and gtk4 each under Xvfb and headless Weston; all four pass on run 46059331567. The job is still `continue-on-error`; removing that line is a decision still open)
 - [ ] aarch64 Linux build verified (the crate type-checks for `aarch64-unknown-linux-gnu`; no build or run; the `test-aarch64` CI job is skipped unless the `ENABLE_ARM_RUNNERS` variable is set)
-- [x] Compatibility report covers all three OSes (the `compat-report` job ran on run 46059331567 with the Windows, macOS and Ubuntu conformance results as inputs; the report's contents could not be read without GitHub auth)
+- [ ] Compatibility report covers all three OSes (the `compat-report` job ran on run 46059331567 with all three conformance results as inputs, but the macOS and Linux rows are all pending, so it has no real results for them yet)
 - [x] Decide: real Linux hardware needs (O6), per the O6 decision above
 - [ ] Done: Linux passes the conformance suite with parity (both adapters)
 
@@ -547,7 +547,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] Native confirmation dialogs for sensitive actions (Windows message box, default No, owned by the window when given; the facade wiring is open)
 - [x] Kill switch (hotkey and API) (Partial: Windows hotkey Ctrl+Alt+Shift+K through `KillHotkey`, which fails if another app holds the combination; the facade wiring is open)
 - [x] MCP server over stdio (`tpt-shell-agent::serve`: initialize, tools/list, tools/call; no resources yet)
-- [x] MCP server over localhost HTTP with token (the `mcp-http` feature. `tpt-shell-agent::http` reads each request on a background thread, checks the token, the host, the path and the method, and hands only checked requests to the UI thread, which answers through the same session as stdio. Connections are capped at 8, and an unanswered request gets 503 after 10 s. `App::agent_http(port)` binds 127.0.0.1 and reads the token from `TPT_MCP_TOKEN`, at least 32 characters. Tested: the protocol and every refusal, and the UI-thread bridge, with real sockets. Not run end to end in a running app with a client)
+- [x] MCP server over localhost HTTP with token (the `mcp-http` feature. `tpt-shell-agent::http` reads each request on a background thread, checks the token, the host, the path and the method, and hands only checked requests to the UI thread, which answers through the same session as stdio. Connections are capped at 8, and an unanswered request gets 503 after 10 s. `App::agent_http(port)` binds 127.0.0.1 and reads the token from `TPT_MCP_TOKEN`, at least 32 characters. Tested: the protocol and every refusal, and the UI-thread bridge, with real sockets. End to end in a running app (tests/agent_http.rs, WebView2, 2026-11-28): a socket client posts a tools/call, and the app answers it on its UI thread. Not tested with a real MCP client library)
 - [ ] Tools generated from agent-flagged commands plus UI tools (done: a command the contract flags `agent = true` and that needs no capability becomes a tool, through `contract_tools` in the facade, and runs as an open command through the router; a guarded command is not offered, because the agent holds no grants. Also done: the page actions `click`, `type_text` and `read` are tools, on snapshot references, with the profile deciding which are offered (2026-11-28, Windows, tested in the facade). Not done: agent-flagged commands that need a capability, which needs an agent-grant design first)
 - [ ] Resources: semantic tree and audit tail (done: the page tree is an MCP resource when a page script is set, on Windows. The audit tail is not offered on purpose: it holds the parameters of every call, so an agent should not read it by default; offering it needs a profile flag, which is not built)
 - [ ] Prompt-injection hygiene: untrusted markers, allowlist navigation (page text in a snapshot is wrapped in `<untrusted>` markers by `render`; that is a convention the model must follow, not a guarantee. Tool results and resource text are marked by the session (`mark_untrusted`, tested in `tpt-shell-agent`); navigation is not restricted for agents yet, so the item stays open)
