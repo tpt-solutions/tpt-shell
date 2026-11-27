@@ -7,9 +7,10 @@ measurement below says so. Budgets are from spec §13.
 
 | Item | Result | Budget |
 |---|---|---|
-| `examples/hello.exe`, release, MSVC | 706,048 bytes (690 KiB) | 4 MB stripped |
+| `examples/hello.exe`, release, MSVC, 2026-11-27 (`tools/run-benchmarks.sh`) | 1,715,200 bytes (1.64 MiB) | 4 MB stripped |
+| Earlier, 2026-10-22 (one build) | 706,048 bytes (690 KiB) | 4 MB stripped |
 
-The earlier figure, 398,336 bytes on 2026-10-21, predates the audit log and the blob store, which the facade now links. The growth is the audit crate's SHA-256 and Ed25519 code and the blob code. The hello example also gained single-instance support, which is small.
+On 2026-11-27 the same example measured 1,715,200 bytes, still well inside the budget. The growth since October is the agent surface (MCP over stdio and HTTP, contract tools, page actions), the job runtime and its event delivery, the replay player, and the devtools overlay, all linked into the facade. The earlier figure, 398,336 bytes on 2026-10-21, predates the audit log and the blob store, which the facade now links. The growth is the audit crate's SHA-256 and Ed25519 code and the blob code. The hello example also gained single-instance support, which is small.
 
 Method:
 
