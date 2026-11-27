@@ -48,12 +48,18 @@ release checklist.
 
 ## Known differences
 
-Nothing is known to differ yet: the check has not been run on CI. When it runs, record the result
-here and in procurement pack section 2.13. Anything that differs must be listed with its cause:
+Run on Windows, 2026-11-27, with `tools/repro-check.sh` (both builds from the same commit, one
+target directory each). The compliance outputs (SBOMs, attestation, notices) are identical. The
+binary is not identical, and the difference is fully explained:
 
 | Output | Difference | Cause | Status |
 | --- | --- | --- | --- |
-| [none recorded] | | | |
+| `tpt-shell.exe` (Windows, MSVC) | 20 bytes. `llvm-readobj --coff-debug-directory` shows the CodeView entry's `PDBGUID` differs, and the PE `TimeDateStamp` differs with it | The linker gives each PDB a fresh GUID even with `/Brepro`. `/Brepro` derives the PE timestamp from a hash of the image, and that hash includes the GUID. Nothing else in the image or the file headers differs | Open. Owner decision: drop the PDB record from release builds (`/DEBUG:NONE`, which loses symbols for crash reports), or keep it and accept that the binary is not byte-identical while the SBOM and attestation are |
+
+Reproduce the check: `tools/repro-check.sh`, then `llvm-readobj --coff-debug-directory` on both
+binaries in `target/repro/`. Before the fix in `tools/repro-build.sh` (2026-11-27), the two builds
+failed to start: `RUSTFLAGS` was split on the spaces in the checkout path `Open Source`, so the
+`--remap-path-prefix` arguments broke. The flags now go in `CARGO_ENCODED_RUSTFLAGS`.
 
 Likely sources to look at first if the check fails: the PE header (check that `/Brepro` was
 applied), a path that was not remapped (search the binary for the checkout path), a build script

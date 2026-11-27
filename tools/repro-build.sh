@@ -36,14 +36,27 @@ export CARGO_INCREMENTAL=0
 
 cargo_home="${CARGO_HOME:-$HOME/.cargo}"
 sysroot="$(rustc --print sysroot)"
-flags="${RUSTFLAGS:-}"
-flags="$flags --remap-path-prefix=$(native "$here")=/build/src"
-flags="$flags --remap-path-prefix=$(native "$cargo_home")=/build/cargo-home"
-flags="$flags --remap-path-prefix=$(native "$sysroot")=/build/rust"
-if rustc -vV | grep -q '^host: .*msvc'; then
-  flags="$flags -C link-arg=/Brepro"
+# The flags go in CARGO_ENCODED_RUSTFLAGS, which Cargo splits on the ASCII unit separator (0x1f).
+# RUSTFLAGS is split on spaces, so a checkout path such as "Open Source/tpt-shell" would break the
+# --remap-path-prefix argument in two. Any RUSTFLAGS the caller set is still honoured, split on
+# spaces as before.
+args=()
+if [ -n "${RUSTFLAGS:-}" ]; then
+  read -r -a existing <<< "$RUSTFLAGS"
+  args+=("${existing[@]}")
 fi
-export RUSTFLAGS="$flags"
+args+=("--remap-path-prefix=$(native "$here")=/build/src")
+args+=("--remap-path-prefix=$(native "$cargo_home")=/build/cargo-home")
+args+=("--remap-path-prefix=$(native "$sysroot")=/build/rust")
+if rustc -vV | grep -q '^host: .*msvc'; then
+  args+=("-C" "link-arg=/Brepro")
+fi
+encoded=""
+for arg in "${args[@]}"; do
+  encoded+="${encoded:+$'\x1f'}$arg"
+done
+unset RUSTFLAGS
+export CARGO_ENCODED_RUSTFLAGS="$encoded"
 
 cd "$here"
 export CARGO_TARGET_DIR="$target"
