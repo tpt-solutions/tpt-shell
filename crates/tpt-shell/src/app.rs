@@ -938,11 +938,21 @@ impl App {
         #[cfg(feature = "agent")]
         let agent_tick = match self.agent_config.take() {
             Some((config, profile)) => {
+                // The hand-written tools, then the ones the contract flags for the agent.
+                let mut tools = std::mem::take(&mut self.agent_tools);
+                if let Some(contract) = &self.contract {
+                    tools.extend(crate::agent::contract_tools(
+                        contract,
+                        &tools,
+                        router.clone(),
+                    ));
+                }
                 let setup = crate::agent::AgentSetup {
                     config,
                     profile,
-                    tools: std::mem::take(&mut self.agent_tools),
+                    tools,
                     page_script: Some(agent_page_script(agent_window.clone())),
+                    resource_script: Some(agent_page_script(agent_window.clone())),
                 };
                 crate::agent::session(setup, audit.clone())
                     .map_err(Error::Backend)?

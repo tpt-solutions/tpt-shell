@@ -13,10 +13,16 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use tpt_shell_agent::catalog::{
+    tools_from_catalog, CommandCatalog, CommandDescriptor, Dispatch, Runner,
+};
 use tpt_shell_agent::profile::AgentConfig;
 use tpt_shell_agent::record::{RecordedAction, Recorder};
+use tpt_shell_agent::resources::PageTree;
 use tpt_shell_agent::{wait_for_tool, AgentTool, Outcome as AgentOutcome, Session};
 use tpt_shell_audit::{AuditLog, Entry, Outcome};
+use tpt_shell_ipc::contract::Contract;
+use tpt_shell_ipc::{Limits, Router};
 
 use crate::agent_snapshot::{snapshot_source, PageScript};
 
@@ -32,6 +38,10 @@ pub(crate) struct AgentSetup {
     /// Runs the snapshot script in a window's page. When set, the session offers `wait_for`, if
     /// the profile allows it. The app sets it once the platform can run page scripts for it.
     pub(crate) page_script: Option<PageScript>,
+    /// Runs the snapshot script for the page-tree resource. A second script over the same window,
+    /// because each script is consumed by the tool it serves. When set, the session offers the page
+    /// tree as a resource. The audit tail is not offered: it holds the parameters of every call.
+    pub(crate) resource_script: Option<PageScript>,
 }
 
 /// Writes agent calls to the audit log the app's own commands use.
@@ -95,12 +105,73 @@ pub(crate) fn session(
         log,
         started: Instant::now(),
     };
-    Ok(Some(
-        Session::new(tools, profile.policy())
-            .with_commands(allowed)
-            .with_recorder(Box::new(recorder))
-            .with_actor(format!("agent:{}", profile.name)),
-    ))
+    let mut session = Session::new(tools, profile.policy())
+        .with_commands(allowed)
+        .with_recorder(Box::new(recorder))
+        .with_actor(format!("agent:{}", profile.name));
+    if let Some(script) = setup.resource_script {
+        session = session.with_resources(Box::new(PageTree::new(snapshot_source(script))));
+    }
+    Ok(Some(session))
+}
+
+/// The app's contract, read as the agent's catalog: one descriptor per command, flagged by the
+/// contract's `agent` flag.
+struct ContractCatalog<'a>(&'a Contract);
+
+impl CommandCatalog for ContractCatalog<'_> {
+    fn commands(&self) -> Vec<CommandDescriptor> {
+        self.0
+            .commands()
+            .map(|command| CommandDescriptor {
+                name: command.name.to_string(),
+                description: format!("Calls the app's `{}` command.", command.name),
+                args: command.args.clone(),
+                // The agent holds no grants, so a command that needs a capability is never offered
+                // to it. Only an unguarded command the contract flags is.
+                agent: command.capability.is_none()
+                    && self.0.flags(command.name).is_some_and(|f| f.agent),
+                // The contract has no confirmation flag, so no contract command asks first.
+                confirm: false,
+            })
+            .collect()
+    }
+}
+
+/// Runs an agent call through the app's router. The router's unauthorized entry point runs a
+/// command that declares no capability, and refuses one that needs a grant, so the agent runs the
+/// open commands and nothing else (fail closed). The reply's data is the result; a refused or
+/// failed call's message is what the agent sees.
+fn contract_runner(router: Rc<Router>) -> Runner {
+    Box::new(move |name: &str, args: &Value| {
+        let request = serde_json::json!({ "v": 1, "id": 0, "cmd": name, "args": args }).to_string();
+        let reply: Value =
+            serde_json::from_str(&router.handle(request.as_bytes(), &Limits::default()))
+                .map_err(|e| e.to_string())?;
+        if reply["ok"] == Value::Bool(true) {
+            Ok(reply["data"].clone())
+        } else {
+            Err(reply["error"]["message"]
+                .as_str()
+                .unwrap_or("the command failed")
+                .to_string())
+        }
+    })
+}
+
+/// The tools the app's contract adds for the agent, beside the ones the app listed by hand. A
+/// listed tool keeps its place: for a name both have, the hand-written tool wins.
+pub(crate) fn contract_tools(
+    contract: &Contract,
+    listed: &[AgentTool],
+    router: Rc<Router>,
+) -> Vec<AgentTool> {
+    let dispatch: Dispatch = Rc::new(RefCell::new(contract_runner(router)));
+    tools_from_catalog(&ContractCatalog(contract), None, dispatch)
+        .tools
+        .into_iter()
+        .filter(|tool| !listed.iter().any(|l| l.command == tool.command))
+        .collect()
 }
 
 /// Starts reading agent lines from stdin and returns the tick that answers them on the UI thread.
@@ -161,6 +232,7 @@ mod tests {
             profile: "assistant".into(),
             tools: vec![tool("set_volume"), tool("format_disk")],
             page_script: None,
+            resource_script: None,
         }
     }
 
@@ -168,6 +240,123 @@ mod tests {
     fn page_with_save() -> PageScript {
         let page = r#"{"title":"t","path":"https://tpt-app.localhost/","truncated":false,"tree":[{"ref":7,"role":"button","name":"Save","bounds":{"x":0,"y":0,"w":1,"h":1}}]}"#;
         Box::new(move |_| Ok(Some(page.to_string())))
+    }
+
+    #[test]
+    fn the_contract_flags_become_agent_tools_that_run_as_the_agent_window() {
+        use tpt_shell_ipc::contract::{Command, Flags, Kind};
+        use tpt_shell_ipc::schema::Schema;
+        use tpt_shell_ipc::Target;
+
+        let no_args = Schema::Struct(&[]);
+        let flagged = Flags {
+            ui: false,
+            agent: true,
+        };
+        let mut contract = Contract::new();
+        contract
+            .add_flagged(
+                Command {
+                    name: "echo",
+                    kind: Kind::Sync,
+                    capability: None,
+                    args: no_args.clone(),
+                },
+                flagged,
+            )
+            .expect("echo");
+        contract
+            .add_flagged(
+                Command {
+                    name: "wipe",
+                    kind: Kind::Sync,
+                    capability: Some("fs.write"),
+                    args: no_args.clone(),
+                },
+                flagged,
+            )
+            .expect("wipe");
+        contract
+            .add_flagged(
+                Command {
+                    name: "internal",
+                    kind: Kind::Sync,
+                    capability: None,
+                    args: no_args,
+                },
+                Flags {
+                    ui: false,
+                    agent: false,
+                },
+            )
+            .expect("internal");
+
+        let mut router = Router::new();
+        router.register("echo", |args| Ok(args.clone()));
+        router.register_guarded(
+            "wipe",
+            "fs.write",
+            |_| Target::None,
+            |_| Ok(serde_json::json!("wiped")),
+        );
+        let mut tools = contract_tools(&contract, &[], Rc::new(router));
+
+        // Only the unguarded, flagged commands become tools, in the contract's order.
+        let names: Vec<&str> = tools.iter().map(|t| t.command.as_str()).collect();
+        assert_eq!(names, ["echo"]);
+        // An unguarded command runs through the router and returns its data.
+        assert_eq!(
+            (tools[0].handler)(&serde_json::json!({ "x": 1 })),
+            Ok(serde_json::json!({ "x": 1 }))
+        );
+        // The guarded command is not offered at all, so a list-then-call cannot reach it.
+        assert_eq!(tools.len(), 1);
+    }
+
+    #[test]
+    fn the_page_tree_is_a_resource_only_when_a_page_script_is_given() {
+        let text = "[app]\nname = \"demo\"\n[agent]\nenabled = true\n\
+             [agent.profiles.assistant]\nactions = [\"invoke\"]\ncommands = [\"wait_for\"]\n";
+        let parsed = tpt_shell_manifest::parse(text).expect("manifest");
+        let section = parsed
+            .stubs
+            .iter()
+            .find(|(name, _)| name.as_str() == "agent")
+            .map(|(_, table)| table);
+        let config = tpt_shell_agent::profile::parse_agent_section(section).expect("section");
+        let build = |resource_script: Option<PageScript>| AgentSetup {
+            config: config.clone(),
+            profile: "assistant".into(),
+            tools: Vec::new(),
+            page_script: None,
+            resource_script,
+        };
+        let list = r#"{"jsonrpc":"2.0","id":1,"method":"resources/list"}"#;
+
+        let path = temp_log("resources");
+        let log = Rc::new(RefCell::new(
+            AuditLog::open(&path, tpt_shell_audit::Policy::default()).expect("log"),
+        ));
+        let mut without = session(build(None), Some(log.clone()))
+            .expect("session")
+            .expect("enabled");
+        let reply = without
+            .handle_line(list, Duration::ZERO, &mut |_, _| false)
+            .expect("a reply");
+        assert!(!reply.contains("page tree"), "{reply}");
+
+        let mut with = session(build(Some(Box::new(|_| Ok(None)))), Some(log))
+            .expect("session")
+            .expect("enabled");
+        let reply = with
+            .handle_line(list, Duration::ZERO, &mut |_, _| false)
+            .expect("a reply");
+        assert!(reply.contains("page tree"), "{reply}");
+        assert!(
+            !reply.contains("audit"),
+            "the audit tail is not offered: {reply}"
+        );
+        let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
     }
 
     #[test]
@@ -186,6 +375,7 @@ mod tests {
             profile: "assistant".into(),
             tools: Vec::new(),
             page_script: script,
+            resource_script: None,
         };
         let list = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
 
