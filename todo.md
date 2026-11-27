@@ -328,15 +328,15 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### Linux backend (tpt-shell-platform-linux)
 - [x] dlopen loader via `libloading` with clear missing-library errors (`tpt-shell-platform-linux::loader`, tested with missing libraries)
-- [ ] GTK3 + WebKit2GTK 4.1 adapter
-- [ ] GTK4 + WebKitGTK 6.0 adapter (`gtk4/` is written and type-checks for x86_64 and aarch64 Linux; no GTK call has run. It runs only in the non-blocking CI job `linux-adapters`; tick when those legs are green. The first symbols to check if a leg fails: `webkit_web_view_get_context` and the `gdk_clipboard_store_async` arguments)
+- [x] GTK3 + WebKit2GTK 4.1 adapter (both `linux-adapters` gtk3 legs pass in CI on run 46059331567, cc552ce; the adapter tests run per process and fail the job on any failure)
+- [x] GTK4 + WebKitGTK 6.0 adapter (`gtk4/`; both gtk4 legs, Xvfb and Wayland, pass in CI on run 46059331567, cc552ce)
 - [x] Runtime adapter selection and `doctor` check (GTK 4 preferred when both load; `TPT_GTK=3|4` forces one with no fallback and a typo is an error; with neither installed the error names both toolkits and the apt packages; `doctor` prints the report on Linux. The selection logic is tested on the host; the doctor output has not been seen on Linux)
-- [ ] GTK main loop and EventLoopProxy (GTK4 is a `GMainLoop` with a `g_idle_add` proxy; type-checked, tested in CI only)
+- [x] GTK main loop and EventLoopProxy (GTK4 is a `GMainLoop` with a `g_idle_add` proxy; `a_posted_task_runs_on_the_main_loop` passes in all four CI legs)
 - [ ] Window features: bounds, title, fullscreen, frameless, always-on-top, transparency (GTK4 has no bounds or always-on-top API, so they return `Unsupported` by design; transparency needs a compositor)
 - [ ] WebKitUserContentManager messages and scripts (GTK4 written, CI-only test)
 - [ ] `webkit_web_context_register_uri_scheme` for `app://` (GTK4 written, CI-only test)
 - [ ] Navigation policy and crash signals (GTK4 written: `web-process-terminated` reloads up to five times; CI-only test)
-- [ ] `webkit_web_view_get_snapshot` (GTK4 encodes a `GdkTexture` to PNG; CI-only test)
+- [x] `webkit_web_view_get_snapshot` (GTK4 encodes a `GdkTexture` to PNG; `page_messages_assets_and_snapshot_through_the_selected_adapter` passes in all four CI legs)
 - [ ] GtkFileChooser dialogs (GTK4 uses `GtkFileDialog`, 4.10+; on 4.6 only file dialogs return `Unsupported`; only the validation is tested)
 - [ ] Clipboard (GtkClipboard / GdkClipboard) (GdkClipboard is written; the X11 round trip is tested in CI only; Wayland read-back is not asserted)
 - [ ] Tray (StatusNotifier over D-Bus; GtkStatusIcon fallback)
@@ -350,10 +350,10 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] D-Bus client written without a non-compliant dependency, or licence-checked crate
 
 ### Parity
-- [ ] Conformance green on Ubuntu CI (Xvfb, Wayland headless where possible)
-- [ ] Both GTK3/4 adapters covered in CI matrix (R4) (the `linux-adapters` job has four legs, gtk3 and gtk4 each under Xvfb and headless Weston, with `continue-on-error`; tick when green and remove that line)
-- [ ] aarch64 Linux build verified (the crate type-checks for `aarch64-unknown-linux-gnu`; no build or run)
-- [ ] Compatibility report covers all three OSes
+- [x] Conformance green on Ubuntu CI (Xvfb, Wayland headless where possible) (run 46059331567: `conformance (ubuntu-latest)` passes on Xvfb; `conformance-wayland` also passes, but it is partial and `continue-on-error`)
+- [x] Both GTK3/4 adapters covered in CI matrix (R4) (the `linux-adapters` job has four legs, gtk3 and gtk4 each under Xvfb and headless Weston; all four pass on run 46059331567. The job is still `continue-on-error`; removing that line is a decision still open)
+- [ ] aarch64 Linux build verified (the crate type-checks for `aarch64-unknown-linux-gnu`; no build or run; the `test-aarch64` CI job is skipped unless the `ENABLE_ARM_RUNNERS` variable is set)
+- [x] Compatibility report covers all three OSes (the `compat-report` job ran on run 46059331567 with the Windows, macOS and Ubuntu conformance results as inputs; the report's contents could not be read without GitHub auth)
 - [x] Decide: real Linux hardware needs (O6), per the O6 decision above
 - [ ] Done: Linux passes the conformance suite with parity (both adapters)
 
@@ -366,7 +366,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Window-to-profile binding (`App::profile(ProfileKind::Named | Ephemeral)` chooses the folder the windows keep their data in; every window of an app shares that folder, so per-window profiles are not built)
 - [ ] Windows mapping: WebView2 profile name / user data folder
 - [ ] macOS mapping: data-store identifier (14+), non-persistent otherwise
-- [ ] Linux mapping: WebsiteDataManager base dirs / ephemeral
+- [x] Linux mapping: WebsiteDataManager base dirs / ephemeral (`a_data_directory_gives_persistent_storage_in_private_folders` and `no_directory_means_ephemeral_storage` pass in CI)
 - [ ] `tpt.caps` reports profile capability level (Windows: the backend sets `window.tptProfileLevel` before the runtime runs, and `tpt.caps.profile` reports it; the runtime's 25 Node tests pass, run as explicit files. macOS and Linux do not set the level yet)
 - [ ] Wipe on close, wipe on idle (an ephemeral session is wiped when the app stops, through its guard; the idle wipe and wipe on window close are not wired, because WebView2 holds the files while a window is open)
 - [x] Secure erase (best-effort) with documented SSD/journaling limits (`wipe_dir` overwrites file contents before removal; the limits are in its doc comment)
@@ -466,7 +466,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### Test driver (tpt-shell-test)
 - [x] Cargo feature `test-driver`, per-run token, local IPC (file-based channel, no socket or pipe, per the no-sockets rule)
-- [ ] Rust API: `find(role().name())`, click, type_text, press, screenshot, dom_snapshot, a11y_tree, eval (test builds only), wait_for (partial, 2026-11-28, Windows. The app side answers the driver on the UI thread: `tpt_shell_test::runner` maps each request onto a host, and the facade's host (`test-driver` feature, `TPT_TEST_RUN` names the run directory) runs the page scripts and the capture. Tested: find, wait_for, click and screenshot, end to end on WebView2 in `tests/test_driver.rs`; type_text, press, dom and eval are answered and unit-tested against a fake host only, and a11y_tree answers from the page's snapshot, not the native tree, which is still routed to the platform crates)
+- [ ] Rust API: `find(role().name())`, click, type_text, press, screenshot, dom_snapshot, a11y_tree, eval (test builds only), wait_for (partial, 2026-11-28, Windows. The app side answers the driver on the UI thread: `tpt_shell_test::runner` maps each request onto a host, and the facade's host (`test-driver` feature, `TPT_TEST_RUN` names the run directory) runs the page scripts and the capture. Tested end to end on WebView2 in `tests/test_driver.rs`: find, wait_for, click, type_text (read back with eval), press, dom and screenshot; a11y_tree answers from the page's snapshot, not the native tree, which is still routed to the platform crates)
 - [x] Expectations with automatic retry
 - [ ] Screenshots: CapturePreview, takeSnapshot, get_snapshot (Windows done: `capture_window_png` takes the page with `Page.captureScreenshot` through the DevTools protocol, and the end-to-end test checks the result is a PNG. CapturePreview never completed on the test runtime, so it is not used. macOS takeSnapshot and Linux get_snapshot are not done)
 - [ ] `tpt-shell test` with artifact collection
