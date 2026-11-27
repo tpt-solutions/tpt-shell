@@ -350,7 +350,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] D-Bus client written without a non-compliant dependency, or licence-checked crate
 
 ### Parity
-- [ ] Conformance green on Ubuntu CI (Xvfb, Wayland headless where possible) (the job passes, but every Linux check is still pending: `run_suite` in `conformance/tests/conformance.rs` returns all-pending off Windows, so green means nothing ran)
+- [ ] Conformance green on Ubuntu CI (Xvfb, Wayland headless where possible) (the Linux runner is written in `conformance/tests/conformance/linux.rs`: 5 checks run for real (IPC, custom protocol, CSP, navigation, snapshot), the blob check runs only its message half, and 4 are pending with reasons (streams, theme, dpi, drag regions). It type-checks for Linux; it has not run in CI yet, so this stays open until the Ubuntu job runs it green)
 - [x] Both GTK3/4 adapters covered in CI matrix (R4) (the `linux-adapters` job has four legs, gtk3 and gtk4 each under Xvfb and headless Weston; all four pass on run 46059331567. The job is still `continue-on-error`; removing that line is a decision still open)
 - [ ] aarch64 Linux build verified (the crate type-checks for `aarch64-unknown-linux-gnu`; no build or run; the `test-aarch64` CI job is skipped unless the `ENABLE_ARM_RUNNERS` variable is set)
 - [ ] Compatibility report covers all three OSes (the `compat-report` job ran on run 46059331567 with all three conformance results as inputs, but the macOS and Linux rows are all pending, so it has no real results for them yet)

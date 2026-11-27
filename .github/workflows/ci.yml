@@ -129,11 +129,22 @@ jobs:
             Where-Object { $_.FullName -match "x64" } | Select-Object -First 1
           if (-not $dll) { throw "WebView2Loader.dll (x64) is not in the package" }
           "TPT_WEBVIEW2_LOADER=$($dll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Install Xvfb (Linux)
+      - name: Install Xvfb and the GTK 4 runtime (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb xauth
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth libgtk-4-1 libwebkitgtk-6.0-4
       - name: Conformance (Linux, headless display)
         if: runner.os == 'Linux'
+        # TPT_LINUX_STRICT turns a missing display or toolkit into a failure, not a skip. The WebKit
+        # switches match the linux-adapters job: a CI runner has no GPU and may forbid the sandbox.
+        env:
+          TPT_LINUX_STRICT: "1"
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          GSK_RENDERER: cairo
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          NO_AT_BRIDGE: "1"
+          GTK_A11Y: none
         run: bash tools/headless-linux.sh xvfb cargo test --manifest-path conformance/Cargo.toml --test conformance -- --nocapture
       - name: Conformance
         if: runner.os != 'Linux'
