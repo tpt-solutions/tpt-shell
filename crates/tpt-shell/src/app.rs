@@ -207,6 +207,9 @@ pub struct App {
     /// The port the MCP HTTP transport serves on (features `agent` and `mcp-http`).
     #[cfg(all(feature = "agent", feature = "mcp-http"))]
     agent_http: Option<u16>,
+    /// The page input a replay performs, and its report (feature `agent`, Windows).
+    #[cfg(all(windows, feature = "agent"))]
+    page_replay: Option<crate::replay_page::Plan>,
     /// The health endpoint's address and the longest heartbeat age it accepts (feature `health-endpoint`).
     #[cfg(feature = "health-endpoint")]
     health: Option<(std::net::SocketAddr, Duration)>,
@@ -759,6 +762,24 @@ impl App {
         self
     }
 
+    /// Replays a recording's page input (clicks and key presses) into the app's first window, and
+    /// quits when it is done (features `agent` and Windows). Each step finds its element by the
+    /// recorded path in a fresh page snapshot. Returns one report line per step, and a line for
+    /// each input that cannot be replayed: typed text is recorded only by its length.
+    #[cfg(all(windows, feature = "agent"))]
+    pub fn replay_page_input(mut self, recording: &Path) -> Result<Vec<String>> {
+        let bytes = std::fs::read(recording)
+            .map_err(|e| Error::Backend(format!("cannot read {}: {e}", recording.display())))?;
+        let replay = tpt_shell_replay::read_compressed(&bytes, tpt_shell_replay::Mode::Lenient)
+            .map_err(|e| Error::Backend(e.to_string()))?;
+        let (steps, skipped) = crate::replay_page::plan(&replay);
+        let report = std::sync::Arc::new(std::sync::Mutex::new(skipped));
+        self.page_replay = Some((steps, report.clone()));
+        self.build()?.run()?;
+        let lines = report.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        Ok(lines)
+    }
+
     /// Serves the agent over MCP on 127.0.0.1 at `port` (features `agent` and `mcp-http`). The
     /// bearer token comes from the `TPT_MCP_TOKEN` environment variable when the app starts, and it
     /// must be at least 32 characters, so it is never written into the app or the manifest. The
@@ -1273,6 +1294,17 @@ impl App {
             windows.push((window.name, id));
         }
         let window_ids: Vec<_> = windows.iter().map(|(_, id)| *id).collect();
+        // A page-input replay steps through the recorded clicks and keys on the first window.
+        #[cfg(all(windows, feature = "agent"))]
+        if let Some((steps, report)) = self.page_replay.take() {
+            let id = windows.first().map(|(_, id)| *id);
+            let started = Instant::now();
+            let mut next = 0usize;
+            backend.every(crate::replay_page::PERIOD, move || match id {
+                Some(id) => crate::replay_page::tick(id, &steps, &mut next, started, &report),
+                None => tpt_shell_platform_windows::backend::request_quit(),
+            })?;
+        }
         // The test driver's requests are answered here, on the UI thread, from the first window. Only
         // a run with TPT_TEST_RUN set opens the channel.
         #[cfg(all(windows, feature = "test-driver"))]

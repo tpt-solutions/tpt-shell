@@ -27,6 +27,8 @@ mod endpoints;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod licenses;
 mod replay_app;
+#[cfg(all(windows, feature = "agent"))]
+mod replay_page;
 #[cfg(windows)]
 mod session;
 #[cfg(all(windows, feature = "test-driver"))]
