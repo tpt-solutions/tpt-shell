@@ -250,6 +250,14 @@ impl Recorder {
         self.out
     }
 
+    /// The recording so far, compressed, without ending it: the recorder keeps going. Used to save
+    /// a session while it is still running.
+    ///
+    /// Support: Full.
+    pub fn snapshot_compressed(&self) -> Vec<u8> {
+        zstd::encode_all(self.out.as_bytes(), 3).unwrap_or_default()
+    }
+
     /// The finished recording, compressed with zstd. [`read_compressed`] reads it back; the plain
     /// text from [`Recorder::finish`] still reads with [`read`].
     ///

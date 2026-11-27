@@ -22,6 +22,7 @@ mod replay_cmd;
 // Windows uses its own sign-in entry, so the macOS and Linux writers are unused there.
 #[cfg_attr(windows, allow(dead_code))]
 mod service;
+mod test_cmd;
 mod visual_cmd;
 use tpt_shell_errors::lookup;
 
@@ -53,6 +54,7 @@ const USAGE: &str = "usage:
   tpt-shell replay <file.tptreplay> [--strict | --lenient]
   tpt-shell report <out.json> [--replay <file>] [--log <file>]... [--audit <audit.jsonl>]
                               [--version <name>=<value>]... [--redact <text>]...
+  tpt-shell test collect <run-dir> <out-dir> [--test <name>]   gather a test run's artifacts
   tpt-shell visual compare <baseline-dir> <dir> [dir...] [--out <report.html>]
                               [--tolerance <0..1>] [--max-changed <0..1>]
   tpt-shell runtime pin <tpt-shell.toml> (--cab <file> | --url <https-url>) --out <dir>
@@ -163,6 +165,7 @@ fn run(args: &[&str]) -> Result<ExitCode, String> {
         ["replay", rest @ ..] => replay_cmd::replay(rest),
         ["report", rest @ ..] => replay_cmd::report(rest),
         ["visual", "compare", rest @ ..] => visual_cmd::compare(rest),
+        ["test", "collect", rest @ ..] => test_cmd::collect(rest),
         ["runtime", rest @ ..] => packaging::runtime(rest),
         ["vendor", rest @ ..] => packaging::vendor(rest),
         ["docs", rest @ ..] => packaging::docs(rest),

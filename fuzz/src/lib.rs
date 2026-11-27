@@ -14,7 +14,14 @@ use tpt_shell_ipc::schema::{validate, Field, Schema};
 use tpt_shell_ipc::Limits;
 
 /// The names of the targets, in the order the driver lists them.
-pub const TARGETS: [&str; 5] = ["envelope", "validator", "manifest", "audit_chain", "replay"];
+pub const TARGETS: [&str; 6] = [
+    "envelope",
+    "validator",
+    "manifest",
+    "audit_chain",
+    "replay",
+    "channel",
+];
 
 /// Runs the target called `name` on `data`. Returns `false` for an unknown name.
 pub fn run_target(name: &str, data: &[u8]) -> bool {
@@ -24,9 +31,24 @@ pub fn run_target(name: &str, data: &[u8]) -> bool {
         "manifest" => manifest(data),
         "audit_chain" => audit_chain(data),
         "replay" => replay(data),
+        "channel" => channel(data),
         _ => return false,
     }
     true
+}
+
+/// Control channel (R7): the request parser, the response parser and the command decoder, on any
+/// bytes. A message the channel refuses is an error, never a panic.
+pub fn channel(data: &[u8]) {
+    use tpt_shell_test::channel::{parse_request, parse_response, Command, Token};
+    let token = Token::generate();
+    let _ = parse_request(&token, 0, data);
+    let _ = parse_response(&token, 0, data);
+    if let Ok(text) = std::str::from_utf8(data) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+            let _ = Command::from_json(&value);
+        }
+    }
 }
 
 /// Replay reader: any text, read strictly and leniently. A recording that cannot be read is an
@@ -321,6 +343,29 @@ mod smoke {
         for _ in 0..ITERATIONS {
             let n = rng.bytes(256);
             replay(&n);
+        }
+    }
+
+    #[test]
+    fn channel_target_never_panics() {
+        use tpt_shell_test::channel::{encode_request, Command, Token};
+        let mut rng = Rng::new(0x3c6e_f372_fe94_f82b);
+        let token = Token::generate();
+        let seeds = [
+            encode_request(&token, 0, &Command::Press { key: "Enter".into() }),
+            encode_request(&token, 1, &Command::DomSnapshot),
+        ];
+        for input in fixed_inputs() {
+            channel(&input);
+        }
+        for seed in &seeds {
+            for _ in 0..ITERATIONS {
+                channel(&rng.mutate(seed));
+            }
+        }
+        for _ in 0..ITERATIONS {
+            let n = rng.bytes(256);
+            channel(&n);
         }
     }
 

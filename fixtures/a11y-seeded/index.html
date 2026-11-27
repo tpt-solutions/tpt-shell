@@ -9,17 +9,7 @@
   one deliberate violation listed in expected.json. The element marked control-ok is correct
   and must not be reported. Do not fix the seeded problems: the audit test depends on them.
 -->
-<style>
-  :root { color-scheme: light dark; }
-  body { font-family: system-ui, sans-serif; margin: 16px; background: #ffffff; color: #111111; }
-  .muted { color: #999999; font-size: 16px; }
-  .pulse { animation: pulse 600ms linear infinite; }
-  @keyframes pulse { from { opacity: 0.2; } to { opacity: 1; } }
-  .tiny { width: 16px; height: 16px; padding: 0; }
-  .ok-button { min-width: 44px; min-height: 44px; font-size: 16px; }
-  .row { display: flex; gap: 12px; margin: 12px 0; }
-  dialog { padding: 16px; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
   <h1>Settings</h1>
@@ -52,17 +42,6 @@
     <button type="button" id="trap-b">Second</button>
   </dialog>
 
-  <script>
-    // Keeps focus inside the dialog and never lets Tab leave it. This is the keyboard trap.
-    const dialog = document.getElementById('seed-trap-dialog');
-    document.getElementById('seed-trap-open').addEventListener('click', () => dialog.showModal());
-    dialog.addEventListener('keydown', (event) => {
-      if (event.key !== 'Tab') return;
-      event.preventDefault();
-      const first = document.getElementById('trap-a');
-      const second = document.getElementById('trap-b');
-      (document.activeElement === first ? second : first).focus();
-    });
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>

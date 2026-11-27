@@ -103,6 +103,9 @@ pub struct Window {
     /// The asset the window opens, relative to the app origin.
     #[cfg_attr(not(windows), allow(dead_code))]
     page: String,
+    /// Whether the window is shown when the app starts. A hidden window still loads its page.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    shown: bool,
 }
 
 impl Window {
@@ -114,7 +117,16 @@ impl Window {
             width: 800.0,
             height: 600.0,
             page: "index.html".into(),
+            shown: true,
         }
+    }
+
+    /// Creates the window without showing it. Its page still loads and runs, so a test or a CI
+    /// replay can drive the app with nothing on screen. Support: Partial. Clicks on a hidden window
+    /// depend on WebView2 laying the page out, which is not checked here.
+    pub fn hidden(mut self) -> Self {
+        self.shown = false;
+        self
     }
 
     pub fn title(mut self, title: &str) -> Self {
@@ -157,6 +169,8 @@ type Register = Box<dyn FnOnce(&mut Router)>;
 pub struct App {
     name: String,
     loader: Option<PathBuf>,
+    /// The WebView2 release channel the app asks for. `None` takes the default search.
+    channel: Option<tpt_shell_platform_windows::channel::Channel>,
     data_dir: Option<PathBuf>,
     /// The blob store limit, when the app sets one (see `blob_limit`).
     blob_limit: Option<usize>,
@@ -445,6 +459,20 @@ impl App {
     /// the app looks for `WebView2Loader.dll` beside the program.
     pub fn loader(mut self, path: impl Into<PathBuf>) -> Self {
         self.loader = Some(path.into());
+        self
+    }
+
+    /// Uses the WebView2 runtime of `channel` (Beta, Dev or Canary) instead of the Stable one. The
+    /// build fails when that channel is not installed. The choice applies to this process: it sets
+    /// `WEBVIEW2_RELEASE_CHANNELS` before the runtime is created.
+    ///
+    /// Support: Partial. Built and tested on Windows where the channel is installed; the other
+    /// channels are checked only for the refusal on the development machine.
+    pub fn webview2_channel(
+        mut self,
+        channel: tpt_shell_platform_windows::channel::Channel,
+    ) -> Self {
+        self.channel = Some(channel);
         self
     }
 
@@ -885,9 +913,14 @@ impl App {
         use tpt_shell_platform_windows::webview2::APP_ORIGIN;
 
         use crate::record::Recording;
+        // A dev run (a debug build with TPT_DEV_DIR) keeps its session in the dev folder, so a reload
+        // can save it and replay it on the reloaded page.
+        let dev_session =
+            dev_reload::dev_dir().map(|root| root.join(".tpt-dev").join("last.tptreplay"));
         let recording = self
             .record
             .take()
+            .or(dev_session)
             .map(|path| Rc::new(Recording::new(path, &self.name)));
         let loader = self
             .loader
@@ -899,6 +932,18 @@ impl App {
                         .into(),
                 )
             })?;
+        if let Some(channel) = self.channel {
+            use tpt_shell_platform_windows::channel;
+            let official = tpt_shell_platform_windows::loader::OfficialLoader::load(&loader)
+                .map_err(|e| Error::Backend(format!("cannot load the WebView2 loader: {e}")))?;
+            if let Err(e) = channel::installed_version(&official, channel) {
+                return Err(Error::Backend(format!(
+                    "the WebView2 {} channel is not installed ({e})",
+                    channel.name()
+                )));
+            }
+            channel::restrict_to(channel);
+        }
         let (data_dir, ephemeral) =
             resolve_data_dir(self.data_dir.as_ref(), self.profile.as_ref(), &self.name)?;
 
@@ -1166,7 +1211,9 @@ impl App {
                     eprintln!("tpt-shell: cannot restore window {}: {e}", window.name);
                 }
             }
-            backend.show(id)?;
+            if window.shown {
+                backend.show(id)?;
+            }
             if fullscreen {
                 backend.set_fullscreen(id, true)?;
             }
@@ -1197,6 +1244,7 @@ impl App {
             let overlay_for_page = overlay.clone();
             let recording_for_page = recording.clone();
             let recording_for_assets = recording.clone();
+            let window_for_page = window.name.clone();
             backend.set_message_handler(
                 id,
                 Box::new(move |text| {
@@ -1210,13 +1258,28 @@ impl App {
                             if let Err(e) = devtools::open(*overlay_id, shell) {
                                 eprintln!("tpt-shell: cannot open the developer overlay: {e}");
                             }
+                            // The page's accessibility data follows, and the overlay is shown again
+                            // with the report when it arrives.
+                            if let Err(e) = devtools::request_a11y(id) {
+                                eprintln!("tpt-shell: cannot check the page's accessibility: {e}");
+                            }
+                            return None;
+                        }
+                        if let Some(page_json) = devtools::a11y_reply(text) {
+                            match tpt_shell_devtools::a11y::check(&page_json) {
+                                Ok(report) => shell.set_a11y(report),
+                                Err(e) => eprintln!("tpt-shell: accessibility check failed: {e}"),
+                            }
+                            if let Err(e) = devtools::open(*overlay_id, shell) {
+                                eprintln!("tpt-shell: cannot open the developer overlay: {e}");
+                            }
                             return None;
                         }
                     }
                     // A page input record from the recording's listener is not a command: it is
                     // recorded and dropped here, so the router never sees it.
                     if let Some(recording) = &recording_for_page {
-                        if recording.page_input(text) {
+                        if recording.page_input(&window_for_page, text) {
                             return None;
                         }
                     }
@@ -1301,7 +1364,11 @@ impl App {
             let started = Instant::now();
             let mut next = 0usize;
             backend.every(crate::replay_page::PERIOD, move || match id {
-                Some(id) => crate::replay_page::tick(id, &steps, &mut next, started, &report),
+                Some(id) => {
+                    if crate::replay_page::tick(id, &steps, &mut next, started, &report) {
+                        tpt_shell_platform_windows::backend::request_quit();
+                    }
+                }
                 None => tpt_shell_platform_windows::backend::request_quit(),
             })?;
         }
@@ -1345,12 +1412,46 @@ impl App {
             // once when it changed. Nothing is sent over a socket.
             let mut watch = dev_reload::Watch::new(root);
             let ids = window_ids.clone();
+            let session = recording.clone();
+            #[cfg(all(windows, feature = "agent"))]
+            let mut replaying: Option<crate::replay_page::DevReplay> = None;
             backend.every(dev_reload::PERIOD, move || {
+                // A replay of the saved session is performed one step at a time. Its own input is
+                // not recorded: the recording is paused until it ends.
+                #[cfg(all(windows, feature = "agent"))]
+                {
+                    let finished = match (replaying.as_mut(), ids.first()) {
+                        (Some(dev), Some(id)) => dev.tick(*id),
+                        (Some(_), None) => true,
+                        (None, _) => false,
+                    };
+                    if finished {
+                        replaying = None;
+                        if let Some(rec) = &session {
+                            rec.set_paused(false);
+                        }
+                    }
+                }
                 if watch.changed() {
+                    // The session so far is saved, then the windows reload. The saved session is
+                    // performed again on the reloaded page, and a new session starts afterwards.
+                    if let Some(rec) = &session {
+                        if let Err(e) = rec.save_snapshot() {
+                            eprintln!("tpt-shell: cannot save the dev session: {e}");
+                        }
+                    }
                     for id in &ids {
                         if let Err(e) = reload_window(*id) {
                             eprintln!("tpt-shell: dev reload failed: {e}");
                         }
+                    }
+                    if let Some(rec) = &session {
+                        #[cfg(all(windows, feature = "agent"))]
+                        if let Some(dev) = crate::replay_page::DevReplay::from_file(rec.path()) {
+                            rec.set_paused(true);
+                            replaying = Some(dev);
+                        }
+                        rec.restart();
                     }
                 }
             })?;

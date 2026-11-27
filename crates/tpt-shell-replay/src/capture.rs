@@ -148,7 +148,21 @@ pub fn ipc_response(
 ///
 /// Support: Full.
 pub fn input(recorder: &mut Recorder, t_ns: u64, event: &Input) -> Result<(), String> {
-    let data = match event {
+    input_with_dom(recorder, t_ns, event, None)
+}
+
+/// Records an input event, with the page's HTML after the event's effects when `dom` is given. The
+/// HTML goes in the event's `dom` field, so the event kinds and the format do not change; a reader
+/// that does not know the field ignores it.
+///
+/// Support: Full.
+pub fn input_with_dom(
+    recorder: &mut Recorder,
+    t_ns: u64,
+    event: &Input,
+    dom: Option<&str>,
+) -> Result<(), String> {
+    let mut data = match event {
         Input::Click { path, x, y } => json!({
             "kind": "click",
             "path": path_value(path),
@@ -166,6 +180,9 @@ pub fn input(recorder: &mut Recorder, t_ns: u64, event: &Input) -> Result<(), St
             "value_length": value_length,
         }),
     };
+    if let (Some(html), Some(object)) = (dom, data.as_object_mut()) {
+        object.insert("dom".into(), Value::String(html.to_string()));
+    }
     recorder.record(t_ns, "input", data)
 }
 

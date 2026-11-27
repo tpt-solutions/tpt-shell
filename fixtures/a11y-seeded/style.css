@@ -1,0 +1,12 @@
+/* Served as a file: the shell's page policy blocks inline style. */
+:root { color-scheme: light dark; }
+body { font-family: system-ui, sans-serif; margin: 16px; background: #ffffff; color: #111111; }
+.muted { color: #999999; font-size: 16px; }
+.pulse { animation: pulse 600ms linear infinite; }
+@keyframes pulse { from { opacity: 0.2; } to { opacity: 1; } }
+.tiny { width: 16px; height: 16px; padding: 0; }
+.ok-button { min-width: 44px; min-height: 44px; font-size: 16px; }
+.row { display: flex; gap: 12px; margin: 12px 0; }
+dialog { padding: 16px; }
+/* Text fields meet the 24 px pointer target, so the field marked clean is correct. */
+input { min-height: 24px; }

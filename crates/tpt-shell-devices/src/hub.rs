@@ -137,6 +137,83 @@ impl DeviceHub {
     }
 }
 
+/// Where a filtered listing looks for devices.
+///
+/// Support: Full.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// Only the devices the hub was built with.
+    Hub,
+    /// Only the real devices the platform lists.
+    Native,
+    /// Both, with each device listed once.
+    Both,
+}
+
+/// What `devices.list` reports: the scope the caller holds, where to look, and whether devices
+/// this hub already has open are listed too.
+///
+/// Support: Full.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListFilter {
+    pub scope: DeviceScope,
+    pub source: Source,
+    /// Whether real devices this hub has opened are listed. A built-in device is never listed
+    /// once it is open, because the hub gave it away when it was opened.
+    pub include_open: bool,
+}
+
+impl ListFilter {
+    /// A filter over `scope` that looks at both sources and leaves out devices already open.
+    ///
+    /// Support: Full.
+    pub fn new(scope: DeviceScope) -> Self {
+        ListFilter {
+            scope,
+            source: Source::Both,
+            include_open: false,
+        }
+    }
+
+    /// Looks only at `source`.
+    ///
+    /// Support: Full.
+    pub fn from_source(mut self, source: Source) -> Self {
+        self.source = source;
+        self
+    }
+
+    /// Lists real devices this hub has opened too.
+    ///
+    /// Support: Full.
+    pub fn including_open(mut self) -> Self {
+        self.include_open = true;
+        self
+    }
+}
+
+impl DeviceHub {
+    /// The identifiers `filter` selects, in the order the hub then the platform report them.
+    ///
+    /// Support: Partial. The platform part is [`crate::native::discover`], so it lists only where a
+    /// backend exists.
+    pub fn list_filtered(&self, filter: &ListFilter) -> Vec<DeviceId> {
+        let mut ids = Vec::new();
+        if filter.source != Source::Native {
+            ids.extend(self.list(&filter.scope));
+        }
+        if filter.source != Source::Hub {
+            for id in crate::native::discover(&filter.scope) {
+                let open = self.in_use.contains(&id);
+                if (filter.include_open || !open) && !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+        ids
+    }
+}
+
 /// An open device. Dropping it closes the device, and the close is audited.
 ///
 /// Support: Full.
@@ -232,6 +309,33 @@ mod tests {
         DeviceId::Serial {
             port: name.to_string(),
         }
+    }
+
+    #[test]
+    fn a_filter_chooses_its_source_and_hides_open_built_ins() {
+        let mut hub = DeviceHub::new(
+            vec![Box::new(VirtualSerial::loopback(port("COM7")))],
+            |_| {},
+        );
+        let scope = DeviceScope::Serial {
+            port: "COM*".into(),
+        };
+        let hub_only = ListFilter::new(scope.clone()).from_source(Source::Hub);
+        let native_only = ListFilter::new(scope.clone()).from_source(Source::Native);
+        assert_eq!(hub.list_filtered(&hub_only), vec![port("COM7")]);
+        // The virtual port is never a real device, so the platform side cannot list it.
+        assert!(!hub.list_filtered(&native_only).contains(&port("COM7")));
+        assert!(hub
+            .list_filtered(&ListFilter::new(scope.clone()))
+            .contains(&port("COM7")));
+
+        // Once opened, a built-in device is given away and is not listed, even when open devices
+        // are asked for.
+        let open = hub.open(&port("COM7"), &scope).expect("opens");
+        drop(open);
+        let everything = ListFilter::new(scope).including_open();
+        assert!(!hub.list_filtered(&hub_only).contains(&port("COM7")));
+        assert!(!hub.list_filtered(&everything).contains(&port("COM7")));
     }
 
     #[test]

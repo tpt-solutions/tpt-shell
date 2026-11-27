@@ -31,8 +31,16 @@ pub mod unix_serial;
 /// macOS/Linux here; compile-checked.
 pub mod unix_spool;
 #[cfg(windows)]
+/// Support: Partial. Listing is tested on the desktop; open and transfers are built but not
+/// verified on a HID device.
+pub mod win_hid;
+#[cfg(windows)]
 /// Support: Full.
 pub mod win_serial;
 #[cfg(windows)]
 /// Support: Full.
 pub mod win_spool;
+#[cfg(windows)]
+/// Support: Partial. Best effort: built without a WinUSB device, so transfers are unverified.
+/// Listing and refusals are tested.
+pub mod win_usb;

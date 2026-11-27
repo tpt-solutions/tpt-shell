@@ -9,8 +9,8 @@
 //! recorded is logged, and the call still runs.
 //!
 //! Page input (clicks, key presses and input changes, with element paths) is recorded through a
-//! listener the app adds to each window before its first page. Not recorded yet: window resize and
-//! focus, because the backend reports no such events.
+//! listener the app adds to each window before its first page. The same listener reports the
+//! window's focus and its size, so those are recorded too, from the page rather than the backend.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -25,12 +25,15 @@ use tpt_shell_replay::{Header, Recorder};
 /// when [`Recording::finish`] is called.
 ///
 /// Support: Partial. A running app records on Windows only, and records IPC calls, window closes,
-/// protocol loads and page input. Resize and focus are not recorded. The recording logic is unit
-/// tested, and the page listener is checked end to end in WebView2 (tests/record_input.rs).
+/// protocol loads, page input, and window focus and resize as the page reports them. Resize is the
+/// page's inner size in CSS pixels, so a recording made on a different scale may not match. The
+/// recording logic is unit tested, and the page listener is checked end to end in WebView2
+/// (tests/record_input.rs).
 pub struct Recording {
     path: PathBuf,
     clock: Box<dyn Clock>,
     recorder: RefCell<Option<Recorder>>,
+    paused: std::cell::Cell<bool>,
 }
 
 impl Recording {
@@ -53,6 +56,7 @@ impl Recording {
             path: path.into(),
             clock,
             recorder: RefCell::new(Some(Recorder::new(header))),
+            paused: std::cell::Cell::new(false),
         }
     }
 
@@ -123,6 +127,44 @@ impl Recording {
         });
     }
 
+    /// Writes the recording so far to its file, compressed, and keeps recording. The dev run uses
+    /// it to save a session before a reload.
+    ///
+    /// Support: Full.
+    pub fn save_snapshot(&self) -> Result<(), String> {
+        let slot = self.recorder.borrow();
+        let Some(recorder) = slot.as_ref() else {
+            return Ok(());
+        };
+        let bytes = recorder.snapshot_compressed();
+        if let Some(dir) = self.path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        }
+        std::fs::write(&self.path, bytes)
+            .map_err(|e| format!("cannot write {}: {e}", self.path.display()))
+    }
+
+    /// Starts an empty recording with the same header, dropping what was recorded so far. A
+    /// recording that was finished stays finished.
+    ///
+    /// Support: Full.
+    pub fn restart(&self) {
+        let mut slot = self.recorder.borrow_mut();
+        if let Some(recorder) = slot.as_ref() {
+            let header = recorder.header().clone();
+            *slot = Some(Recorder::new(header));
+        }
+    }
+
+    /// Pauses or resumes recording. While paused, events are not written. The dev run pauses it
+    /// while it replays a session, so the replay is not recorded as new input.
+    ///
+    /// Support: Full.
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.set(paused);
+    }
+
     /// Writes the recording to its file, compressed. Anything recorded after this is dropped. A
     /// recording that is never finished writes nothing.
     ///
@@ -146,6 +188,9 @@ impl Recording {
 
     /// Adds one event at time `t`. A failure is logged and the app carries on.
     fn write(&self, t: u64, add: impl FnOnce(&mut Recorder, u64) -> Result<(), String>) {
+        if self.paused.get() {
+            return;
+        }
         let mut slot = self.recorder.borrow_mut();
         let Some(recorder) = slot.as_mut() else {
             return;
@@ -160,6 +205,9 @@ impl Recording {
 /// `(unparsed)` and no arguments.
 /// The message command a page script uses to report an input event.
 pub const INPUT_CMD: &str = "tpt.record.input";
+
+/// The longest page HTML a click or input record carries. A larger page is recorded without it.
+pub const MAX_DOM_BYTES: usize = 256 * 1024;
 
 /// The longest element path an input record may carry. A deeper path is dropped with its event.
 const MAX_PATH_STEPS: usize = 64;
@@ -185,8 +233,15 @@ pub const INPUT_JS: &str = r#"(function () {
   function send(args) {
     window.chrome.webview.postMessage(JSON.stringify({ v: 1, id: 0, cmd: 'tpt.record.input', args: args }));
   }
+  // A click or input record carries the page's HTML after the event's effects (the next tick), so
+  // the time-travel view can show the page as the event left it.
+  function dom() {
+    var html = document.documentElement.outerHTML;
+    return html.length <= 262144 ? html : null;
+  }
   window.addEventListener('click', function (e) {
-    send({ kind: 'click', path: path(e.target), x: e.clientX, y: e.clientY });
+    var args = { kind: 'click', path: path(e.target), x: e.clientX, y: e.clientY };
+    setTimeout(function () { args.dom = dom(); send(args); }, 0);
   }, true);
   window.addEventListener('keydown', function (e) {
     var secret = e.target && e.target.type === 'password';
@@ -194,9 +249,25 @@ pub const INPUT_JS: &str = r#"(function () {
   }, true);
   window.addEventListener('input', function (e) {
     var target = e.target;
-    send({ kind: 'input', path: path(target), value_length: String(target.value || '').length });
+    var args = { kind: 'input', path: path(target), value_length: String(target.value || '').length };
+    setTimeout(function () { args.dom = dom(); send(args); }, 0);
   }, true);
+  // Window focus and size: these listeners are not capturing, so only the window's own events
+  // reach them, not the focus of an element inside the page.
+  window.addEventListener('focus', function () {
+    send({ kind: 'window-focus' });
+  });
+  window.addEventListener('resize', function () {
+    send({ kind: 'window-resize', width: window.innerWidth, height: window.innerHeight });
+  });
 })();"#;
+
+/// The page HTML a click or input record carries, if it carries one within the limit.
+fn dom_from_args(args: &Value) -> Option<&str> {
+    args["dom"]
+        .as_str()
+        .filter(|html| html.len() <= MAX_DOM_BYTES)
+}
 
 /// The input event a page message describes, or `None` when the arguments are not one.
 fn input_from_args(args: &Value) -> Option<Input> {
@@ -232,21 +303,43 @@ fn input_from_args(args: &Value) -> Option<Input> {
     }
 }
 
+/// The window event a page message describes (focus or resize), or `None`.
+fn window_event_from_args(window: &str, args: &Value) -> Option<WindowEvent> {
+    match args["kind"].as_str()? {
+        "window-focus" => Some(WindowEvent::Focus {
+            window: window.to_string(),
+        }),
+        "window-resize" => Some(WindowEvent::Resize {
+            window: window.to_string(),
+            width: u32::try_from(args["width"].as_u64()?).ok()?,
+            height: u32::try_from(args["height"].as_u64()?).ok()?,
+        }),
+        _ => None,
+    }
+}
+
 impl Recording {
-    /// Records an input event the page script reported, if `text` is one. Returns whether it was,
-    /// so the host keeps it away from the router. A malformed input record is dropped, and still
-    /// counts as one, since it is the page's message and not a command.
+    /// Records an input or window event the page script reported, if `text` is one. `window` is
+    /// the window the message came from. Returns whether it was, so the host keeps it away from
+    /// the router. A malformed input record is dropped, and still counts as one, since it is the
+    /// page's message and not a command.
     ///
     /// Support: Full.
-    pub fn page_input(&self, text: &str) -> bool {
+    pub fn page_input(&self, window: &str, text: &str) -> bool {
         let Ok(message) = serde_json::from_str::<Value>(text) else {
             return false;
         };
         if message["cmd"].as_str() != Some(INPUT_CMD) {
             return false;
         }
-        if let Some(input) = input_from_args(&message["args"]) {
-            self.write(self.now(), |rec, t| capture::input(rec, t, &input));
+        let args = &message["args"];
+        if let Some(input) = input_from_args(args) {
+            let dom = dom_from_args(args).map(str::to_string);
+            self.write(self.now(), |rec, t| {
+                capture::input_with_dom(rec, t, &input, dom.as_deref())
+            });
+        } else if let Some(event) = window_event_from_args(window, args) {
+            self.write(self.now(), |rec, t| capture::window(rec, t, &event));
         }
         true
     }
@@ -449,7 +542,7 @@ mod input_tests {
         let recording = Recording::new(&path, "demo");
         let consumed: Vec<bool> = messages
             .iter()
-            .map(|m| recording.page_input(&m.to_string()))
+            .map(|m| recording.page_input("main", &m.to_string()))
             .collect();
         recording.finish().expect("finish");
         let bytes = std::fs::read(&path).expect("read");
@@ -466,6 +559,44 @@ mod input_tests {
 
     fn message(args: Value) -> Value {
         json!({ "v": 1, "id": 0, "cmd": INPUT_CMD, "args": args })
+    }
+
+    #[test]
+    fn window_focus_and_resize_are_recorded_for_the_window_that_sent_them() {
+        let path = temp("window-events");
+        let _ = std::fs::remove_file(&path);
+        let recording = Recording::new(&path, "demo");
+        let focus = message(json!({ "kind": "window-focus" }));
+        let resize = message(json!({ "kind": "window-resize", "width": 800, "height": 600 }));
+        assert!(recording.page_input("settings", &focus.to_string()));
+        assert!(recording.page_input("settings", &resize.to_string()));
+        recording.finish().expect("finish");
+        let bytes = std::fs::read(&path).expect("read");
+        let _ = std::fs::remove_file(&path);
+        let replay = tpt_shell_replay::read_compressed(&bytes, Mode::Strict).expect("read back");
+        let window: Vec<_> = replay
+            .events
+            .iter()
+            .filter(|e| e.kind == "window")
+            .collect();
+        assert_eq!(window.len(), 2, "{:?}", replay.events);
+        assert_eq!(window[0].data["op"], json!("focus"));
+        assert_eq!(window[0].data["window"], json!("settings"));
+        assert_eq!(window[1].data["op"], json!("resize"));
+        assert_eq!(window[1].data["width"], json!(800));
+        assert_eq!(window[1].data["height"], json!(600));
+    }
+
+    #[test]
+    fn a_resize_with_a_negative_size_is_consumed_and_not_recorded() {
+        let (events, consumed) = recorded(
+            "bad-resize",
+            &[message(
+                json!({ "kind": "window-resize", "width": -1, "height": 600 }),
+            )],
+        );
+        assert_eq!(consumed, [true]);
+        assert!(events.is_empty());
     }
 
     #[test]

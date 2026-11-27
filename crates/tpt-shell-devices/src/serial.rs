@@ -72,7 +72,11 @@ pub fn list() -> Vec<DeviceId> {
     {
         crate::platform::unix_serial::list()
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        crate::platform::win_serial::list()
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         Vec::new()
     }

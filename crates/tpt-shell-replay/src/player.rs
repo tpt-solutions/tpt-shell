@@ -173,6 +173,19 @@ mod tests {
         assert_eq!(outcome.replayed.len(), 1);
     }
 
+    /// The determinism gate (todo M8, spec §10.5): a recording played strictly 100 times against
+    /// the reference target gives the same replayed events every time, and none diverges.
+    #[test]
+    fn a_recording_replays_strictly_a_hundred_times_identically() {
+        let replay = recording();
+        let first = play(&replay, &mut Echo, Mode::Strict).unwrap();
+        for run in 1..100 {
+            let again = play(&replay, &mut Echo, Mode::Strict)
+                .unwrap_or_else(|e| panic!("run {run} failed: {e}"));
+            assert_eq!(again, first, "run {run} differs");
+        }
+    }
+
     #[test]
     fn strict_mode_turns_a_difference_into_an_error() {
         let mut replay = recording();

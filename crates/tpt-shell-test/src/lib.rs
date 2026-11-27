@@ -26,6 +26,8 @@ pub mod channel;
 /// Support: Full. Built only with the test-driver feature, which is off in normal builds.
 #[cfg(feature = "test-driver")]
 pub mod driver;
+/// Support: Partial. Runs the rules over a live page's data; see the module notes.
+pub mod page_audit;
 
 mod inflate;
 /// Support: Partial. The default native tree dump returns Unsupported. The Windows, macOS and Linux

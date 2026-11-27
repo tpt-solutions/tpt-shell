@@ -127,12 +127,28 @@ keyboard-class HID device needs the Input Monitoring permission.
 | Device path | Windows | macOS | Linux |
 |---|---|---|---|
 | Serial (`serial:COMn`, 8 data bits, no parity, 1 stop bit) | Built and tested | Built (termios, all line settings); type-checked, not run on a Mac | Built (termios, all line settings); run on CI only if a port exists |
-| Serial port discovery | Not built; the caller names the port | `/dev/cu.*` listing; type-checked | `/dev/ttyUSB*`, `ttyACM*`, `ttyS*`; run on CI |
-| HID | Not built | IOKit `IOHIDManager`; type-checked only, never run | hidraw; run on CI only if a device exists |
-| USB raw (bulk, control) | Not built (WinUSB) | Not built (IOKit USB) | usbfs; run on CI only if a device exists |
+| Serial port discovery | Listed from the SERIALCOMM registry key; the desktop lists COM1; the caller can also name a port | `/dev/cu.*` listing; type-checked | `/dev/ttyUSB*`, `ttyACM*`, `ttyS*`; run on CI |
+| HID | Listing and open through SetupAPI and hid.dll. Verified on the desktop: 6 HID devices list, and the first opens and reads without blocking. Writes are not verified: no device here takes an output report. | IOKit `IOHIDManager`; type-checked only, never run | hidraw; run on CI only if a device exists |
+| USB raw (bulk, control) | WinUSB, best effort: listing and refusals tested; no device here is bound to WinUSB, so transfers are unverified | Not built (IOKit USB) | usbfs; run on CI only if a device exists |
 | Raw print through the spooler | Built (winspool RAW) | Partial (CUPS `lp`, not run from here) | Partial (CUPS `lp`, not run from here) |
 | Network TCP and UDP (feature `net-devices`) | Built | Built, not run on macOS | Built, not run on Linux |
 | Virtual devices | Built and tested | Built; round-trip tests not run on macOS | Built; round-trip tests not run on Linux |
 
 The real-device matrix (one serial adapter, one HID scanner, one ESC/POS printer) is not done
-(todo M7). Do not claim support for a device that is not in that matrix.
+(todo M7). The development desktop has none of the three: its ports are a COM1 with nothing on it,
+its HID devices are keyboards, a mouse and input devices, and its printers are an inkjet over the
+network and the Microsoft virtual printers. Do not claim support for a device that is not in that
+matrix.
+
+### Support tags
+
+Tags describe what the code has been run against, not what it is meant to do.
+
+| Path | Windows | macOS | Linux |
+|---|---|---|---|
+| Serial open and loopback I/O | Full (WebView2 test: a page writes and reads a loopback port through a granted scope) | Partial (not run) | Partial (CI only) |
+| Serial discovery | Full for listing (registry); not checked against a real adapter | Partial (not run) | Partial (CI only) |
+| HID discovery and open | Partial: listing and a read on a present device are run; writes are not | Partial (IOKit, not run) | Partial (hidraw, CI only) |
+| USB raw | Partial: WinUSB, best effort, transfers unverified (no WinUSB device on the desktop) | Unsupported | Partial (usbfs, CI only) |
+| Print through the spooler | Built (winspool RAW); not run against a real printer | Partial (CUPS `lp`, not run from here) | Partial (CUPS `lp`, not run from here) |
+| Virtual devices | Full (tests run on Windows) | Partial (not run) | Partial (CI only) |

@@ -46,13 +46,13 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetMessageW,
-    GetWindowLongPtrW, GetWindowPlacement, KillTimer, PeekMessageW, PostMessageW, PostQuitMessage,
-    RegisterClassExW, SetTimer, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos,
-    SetWindowTextW, ShowWindow, TranslateMessage, CW_USEDEFAULT, GWL_STYLE, HWND_MESSAGE,
-    HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, MSG, PM_REMOVE, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNORMAL,
-    WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_SETTINGCHANGE, WM_SIZE,
-    WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_OVERLAPPEDWINDOW, WS_POPUP,
+    GetWindowLongPtrW, GetWindowPlacement, IsWindowVisible, KillTimer, PeekMessageW, PostMessageW,
+    PostQuitMessage, RegisterClassExW, SetTimer, SetWindowLongPtrW, SetWindowPlacement,
+    SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, CW_USEDEFAULT, GWL_STYLE,
+    HWND_MESSAGE, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, MSG, PM_REMOVE, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOW, SW_SHOWMAXIMIZED,
+    SW_SHOWNORMAL, WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_SETTINGCHANGE,
+    WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_OVERLAPPEDWINDOW, WS_POPUP,
 };
 
 use crate::com::{wide, HRESULT};
@@ -188,6 +188,16 @@ pub fn show_window(id: WindowId) -> Result<()> {
     // SAFETY: the handle belongs to a window registered with this thread's backend.
     unsafe { ShowWindow(id.0 as HWND, SW_SHOW) };
     Ok(())
+}
+
+/// Whether the window is shown on screen. A window that was created but never shown, such as a
+/// hidden window for a CI replay, reports `false`. An unknown window reports `false` too.
+///
+/// Support: Full on Windows.
+pub fn window_is_shown(id: WindowId) -> bool {
+    let known = WINDOWS.with(|w| w.borrow().contains_key(&id.0));
+    // SAFETY: the handle is only passed to IsWindowVisible, which accepts any value.
+    known && unsafe { IsWindowVisible(id.0 as HWND) } != 0
 }
 
 /// Sends `message` to the page of window `id` from code on the UI thread (see
@@ -2144,8 +2154,7 @@ mod tests {
         use windows_sys::core::BOOL;
         use windows_sys::Win32::Foundation::{HWND, LPARAM};
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            EnumChildWindows, IsWindow, IsWindowVisible, PostQuitMessage, GWL_EXSTYLE, WM_CLOSE,
-            WS_EX_TOPMOST,
+            EnumChildWindows, IsWindow, PostQuitMessage, GWL_EXSTYLE, WM_CLOSE, WS_EX_TOPMOST,
         };
 
         fn data_dir(name: &str) -> std::path::PathBuf {

@@ -9,7 +9,7 @@
 #
 # Mutation fuzzing without a fuzzing engine (stable Rust):
 #   cargo run --manifest-path fuzz/Cargo.toml --release -- <target> <seconds>
-#   targets: envelope, validator, manifest, audit_chain
+#   targets: envelope, validator, manifest, audit_chain, replay, channel
 #
 # A libFuzzer harness (cargo-fuzz) would need libfuzzer-sys, which is "(MIT OR Apache-2.0) AND
 # NCSA". The NCSA term is not on the licence allow list, so it is not used here.
@@ -28,6 +28,8 @@ description = "Fuzz targets and deterministic smoke tests for tpt-shell parsers 
 
 [dependencies]
 serde_json = "1"
+# The control channel of the test driver (R7). Its parsers are the fuzz target `channel`.
+tpt-shell-test = { path = "../crates/tpt-shell-test", version = "0.0.0", features = ["test-driver"] }
 tpt-shell-ipc = { path = "../crates/tpt-shell-ipc" }
 tpt-shell-manifest = { path = "../crates/tpt-shell-manifest" }
 tpt-shell-audit = { path = "../crates/tpt-shell-audit" }

@@ -10,7 +10,8 @@
 //!
 //! Support: Partial. Events come from polling, not from OS notifications: [`Watch::poll_native`]
 //! lists devices through [`crate::native::discover`] (macOS and Linux serial, hidraw, usbfs and
-//! IOKit HID; Windows has none) and reports the difference. A caller can still supply the list.
+//! IOKit HID; Windows lists serial ports only, from the SERIALCOMM key) and reports the difference.
+//! A caller can still supply the list.
 
 use crate::id::DeviceId;
 
@@ -81,7 +82,7 @@ impl Watch {
     /// Lists the devices `scope` covers through the platform and compares them with the last
     /// poll. A disabled watcher does not list anything, so it never touches the system.
     ///
-    /// Support: Partial. Polling, and no listing on Windows (the result is then always empty).
+    /// Support: Partial. Polling. Windows lists serial ports only; HID and USB listings are empty there.
     pub fn poll_native(&mut self, scope: &crate::id::DeviceScope) -> Vec<Change> {
         if !self.enabled {
             return Vec::new();

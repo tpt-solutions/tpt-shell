@@ -8,9 +8,9 @@
 //!
 //! | | Windows | macOS | Linux |
 //! |---|---|---|---|
-//! | serial | open (COM), no discovery | termios, `/dev` discovery | termios, `/dev` discovery |
-//! | HID | unsupported | IOKit | hidraw, sysfs discovery |
-//! | USB raw | unsupported (WinUSB not built) | unsupported (IOKit USB not built) | usbfs, sysfs discovery |
+//! | serial | open (COM), discovery from the SERIALCOMM registry key | termios, `/dev` discovery | termios, `/dev` discovery |
+//! | HID | listing and open through SetupAPI (open not verified on hardware) | IOKit | hidraw, sysfs discovery |
+//! | USB raw | WinUSB, best effort (transfers unverified) | unsupported (IOKit USB not built) | usbfs, sysfs discovery |
 //!
 //! Anything marked unsupported returns [`DeviceError::NotSupported`] naming the gap; no call
 //! pretends to succeed. Network devices are not opened here; see [`crate::net`].
@@ -65,7 +65,11 @@ fn hid_list() -> Vec<DeviceId> {
 fn hid_list() -> Vec<DeviceId> {
     crate::platform::macos_hid::list()
 }
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(target_os = "windows")]
+fn hid_list() -> Vec<DeviceId> {
+    crate::platform::win_hid::list()
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 fn hid_list() -> Vec<DeviceId> {
     Vec::new()
 }
@@ -78,7 +82,11 @@ fn hid_open(id: &DeviceId) -> Result<Box<dyn Transport>, DeviceError> {
 fn hid_open(id: &DeviceId) -> Result<Box<dyn Transport>, DeviceError> {
     Ok(Box::new(crate::platform::macos_hid::open(id)?))
 }
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(target_os = "windows")]
+fn hid_open(id: &DeviceId) -> Result<Box<dyn Transport>, DeviceError> {
+    Ok(Box::new(crate::platform::win_hid::open(id)?))
+}
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 fn hid_open(_id: &DeviceId) -> Result<Box<dyn Transport>, DeviceError> {
     Err(DeviceError::NotSupported("HID on this platform"))
 }
@@ -103,16 +111,29 @@ mod usb_impl {
         Ok(Box::new(crate::platform::linux_usb::open(id, o)?))
     }
 }
-#[cfg(not(all(
-    target_os = "linux",
-    not(any(
-        target_arch = "mips",
-        target_arch = "mips64",
-        target_arch = "powerpc",
-        target_arch = "powerpc64",
-        target_arch = "sparc",
-        target_arch = "sparc64"
-    ))
+#[cfg(windows)]
+mod usb_impl {
+    use super::*;
+    pub fn list() -> Vec<DeviceId> {
+        crate::platform::win_usb::list()
+    }
+    pub fn open(id: &DeviceId, o: &OpenOptions) -> Result<Box<dyn Transport>, DeviceError> {
+        Ok(Box::new(crate::platform::win_usb::open(id, o)?))
+    }
+}
+#[cfg(not(any(
+    windows,
+    all(
+        target_os = "linux",
+        not(any(
+            target_arch = "mips",
+            target_arch = "mips64",
+            target_arch = "powerpc",
+            target_arch = "powerpc64",
+            target_arch = "sparc",
+            target_arch = "sparc64"
+        ))
+    )
 )))]
 mod usb_impl {
     use super::*;
@@ -121,7 +142,7 @@ mod usb_impl {
     }
     pub fn open(_id: &DeviceId, _o: &OpenOptions) -> Result<Box<dyn Transport>, DeviceError> {
         Err(DeviceError::NotSupported(
-            "raw USB on this platform (usbfs is Linux only; WinUSB and IOKit USB are not built)",
+            "raw USB on this platform (usbfs is Linux only; IOKit USB is not built)",
         ))
     }
 }
@@ -173,31 +194,35 @@ mod tests {
         assert!(discover(&scope).is_empty());
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    /// On a platform with no HID backend, opening is refused as unsupported. Where a backend
+    /// exists (Windows, Linux, macOS), an id that is not present is refused rather than faked.
     #[test]
-    fn hid_is_unsupported_not_faked_on_this_platform() {
+    fn hid_open_of_an_absent_device_is_refused_not_faked() {
         let id: DeviceId = "hid:1a2b:0001".parse().expect("id");
         let scope = DeviceScope::Hid {
             vendor: None,
             product: None,
         };
-        assert!(matches!(
-            open(&id, &scope, &OpenOptions::default()),
-            Err(DeviceError::NotSupported(_))
-        ));
+        let refused = open(&id, &scope, &OpenOptions::default());
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        assert!(matches!(refused, Err(DeviceError::NotSupported(_))));
+        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+        assert!(refused.is_err());
     }
 
-    #[cfg(not(target_os = "linux"))]
+    /// Where no USB backend exists, opening is refused as unsupported. Where one exists (Linux,
+    /// Windows through WinUSB), an id that is not present is refused rather than faked.
     #[test]
-    fn usb_is_unsupported_not_faked_off_linux() {
+    fn usb_open_of_an_absent_device_is_refused_not_faked() {
         let id: DeviceId = "usb:0403:6001".parse().expect("id");
         let scope = DeviceScope::Usb {
             vendor: None,
             product: None,
         };
-        assert!(matches!(
-            open(&id, &scope, &OpenOptions::default()),
-            Err(DeviceError::NotSupported(_))
-        ));
+        let refused = open(&id, &scope, &OpenOptions::default());
+        #[cfg(not(any(target_os = "linux", windows)))]
+        assert!(matches!(refused, Err(DeviceError::NotSupported(_))));
+        #[cfg(any(target_os = "linux", windows))]
+        assert!(refused.is_err());
     }
 }

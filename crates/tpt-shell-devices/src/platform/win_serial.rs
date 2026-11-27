@@ -21,6 +21,12 @@ use crate::transport::{DeviceError, Transport};
 type Handle = *mut c_void;
 
 const INVALID_HANDLE_VALUE: Handle = -1isize as Handle;
+/// `HKEY_LOCAL_MACHINE` as the registry API takes it.
+const HKEY_LOCAL_MACHINE: isize = 0x8000_0002u32 as i32 as isize;
+const KEY_READ: u32 = 0x0002_0019;
+const ERROR_SUCCESS: i32 = 0;
+const ERROR_NO_MORE_ITEMS: i32 = 259;
+const REG_SZ: u32 = 1;
 const GENERIC_READ: u32 = 0x8000_0000;
 const GENERIC_WRITE: u32 = 0x4000_0000;
 const OPEN_EXISTING: u32 = 3;
@@ -110,6 +116,90 @@ pub struct WinSerial {
 // takes `&mut self`, so only one thread uses the handle at a time, which is what a synchronous
 // Win32 file handle needs.
 unsafe impl Send for WinSerial {}
+
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn RegOpenKeyExW(
+        key: isize,
+        sub_key: *const u16,
+        options: u32,
+        desired: u32,
+        result: *mut isize,
+    ) -> i32;
+    fn RegEnumValueW(
+        key: isize,
+        index: u32,
+        name: *mut u16,
+        name_len: *mut u32,
+        reserved: *mut u32,
+        value_type: *mut u32,
+        data: *mut u8,
+        data_len: *mut u32,
+    ) -> i32;
+    fn RegCloseKey(key: isize) -> i32;
+}
+
+/// The COM ports the system reports, from `HKLM\HARDWARE\DEVICEMAP\SERIALCOMM`, which lists
+/// every serial port the serial driver has created (a port that is only a name is not listed).
+/// Each entry is `serial:COMn`. The registry is read; no port is opened. A missing key or a read
+/// error gives an empty list rather than an error, because listing is only a discovery aid.
+///
+/// Support: Full on Windows.
+pub fn list() -> Vec<DeviceId> {
+    let key_path: Vec<u16> = r"HARDWARE\DEVICEMAP\SERIALCOMM"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut key: isize = 0;
+    // SAFETY: the path is NUL-terminated and `key` is a valid out-pointer. The key is closed below.
+    let opened =
+        unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, key_path.as_ptr(), 0, KEY_READ, &mut key) };
+    if opened != ERROR_SUCCESS {
+        return Vec::new();
+    }
+    let mut ports = Vec::new();
+    for index in 0u32.. {
+        let mut name = vec![0u16; 512];
+        let mut name_len = name.len() as u32;
+        let mut value_type = 0u32;
+        let mut data = vec![0u8; 512];
+        let mut data_len = data.len() as u32;
+        // SAFETY: every buffer is passed with its length, and the lengths are updated by the call.
+        let status = unsafe {
+            RegEnumValueW(
+                key,
+                index,
+                name.as_mut_ptr(),
+                &mut name_len,
+                null_mut(),
+                &mut value_type,
+                data.as_mut_ptr(),
+                &mut data_len,
+            )
+        };
+        if status == ERROR_NO_MORE_ITEMS {
+            break;
+        }
+        if status != ERROR_SUCCESS || value_type != REG_SZ {
+            continue;
+        }
+        let units: Vec<u16> = data[..data_len as usize]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| u16::from_le_bytes(*b))
+            .take_while(|&u| u != 0)
+            .collect();
+        let port = String::from_utf16_lossy(&units);
+        if let Ok(id) = format!("serial:{}", port.trim()).parse::<DeviceId>() {
+            ports.push(id);
+        }
+    }
+    // SAFETY: `key` was opened above and is closed exactly once.
+    unsafe { RegCloseKey(key) };
+    ports.sort_by_key(|id| id.to_string());
+    ports
+}
 
 /// The Win32 device path for a port name such as `COM3`, as a NUL-terminated UTF-16 string.
 /// Only `COM1` to `COM999` are accepted, so the name cannot be a path or a device namespace.
@@ -285,6 +375,17 @@ fn io_error(what: &str) -> DeviceError {
 
 #[cfg(test)]
 mod tests {
+    /// Every listed entry is a serial port name the driver would open, and the list follows the
+    /// registry: on a machine with no serial ports the list is empty, which is also a pass.
+    #[test]
+    fn listed_ports_are_com_names_from_the_registry() {
+        for id in list() {
+            let text = id.to_string();
+            assert!(text.starts_with("serial:COM"), "{text}");
+            assert!(device_path(&text["serial:".len()..]).is_ok(), "{text}");
+        }
+    }
+
     use super::*;
 
     #[test]

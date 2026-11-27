@@ -60,6 +60,8 @@ pub struct Shell {
     timeline: RefCell<Option<Model>>,
     /// The job table of the app's router, once the app attaches it. Empty until then.
     jobs: RefCell<Option<Rc<RefCell<tpt_shell_ipc::jobs::Jobs>>>>,
+    /// The latest accessibility check of the page, once one has run.
+    a11y: RefCell<Option<tpt_shell_devtools::a11y::Report>>,
 }
 
 impl Shell {
@@ -100,7 +102,15 @@ impl Shell {
             contract,
             timeline: RefCell::new(None),
             jobs: RefCell::new(None),
+            a11y: RefCell::new(None),
         }
+    }
+
+    /// Keeps the result of an accessibility check for the overlay to show.
+    ///
+    /// Support: Partial. See the devtools accessibility module.
+    pub fn set_a11y(&self, report: tpt_shell_devtools::a11y::Report) {
+        *self.a11y.borrow_mut() = Some(report);
     }
 
     /// Gives the overlay the app router's job table, so its jobs panel can list the jobs.
@@ -208,7 +218,38 @@ fn seek_reply(shell: &Shell, request: &Value) -> String {
     }
 }
 
+/// The page command that carries an accessibility check's data back to the host.
+pub const A11Y_CMD: &str = "tpt.devtools.a11y";
+
+/// Asks the page of `page` to run the accessibility collector and post its data back as a page
+/// message with [`A11Y_CMD`]. The overlay opens at once; the report follows when the reply comes.
+///
+/// Support: Partial. Debug builds on Windows. A page that does not answer leaves the panel at
+/// "not checked".
+pub fn request_a11y(page: WindowId) -> Result<()> {
+    let script = format!(
+        "window.chrome.webview.postMessage(JSON.stringify({{ v: 1, id: 0, cmd: \"{A11Y_CMD}\", args: {{ page: {} }} }}));",
+        tpt_shell_devtools::a11y::COLLECT_SCRIPT
+    );
+    eval_window(page, &script)
+}
+
+/// The page data in a page message that is an accessibility reply, or `None` for any other message.
+///
+/// Support: Full.
+pub fn a11y_reply(text: &str) -> Option<String> {
+    let message: Value = serde_json::from_str(text).ok()?;
+    if message.get("cmd").and_then(Value::as_str) != Some(A11Y_CMD) {
+        return None;
+    }
+    message["args"]["page"].as_str().map(str::to_string)
+}
+
 impl Inspect for Shell {
+    fn a11y(&self) -> Option<tpt_shell_devtools::a11y::Report> {
+        self.a11y.borrow().clone()
+    }
+
     fn engine(&self) -> Engine {
         Engine {
             name: "webview2".into(),
@@ -330,6 +371,37 @@ mod tests {
         assert_eq!(reply["error"]["code"], json!("CAP_DENIED"));
         let junk: Value = serde_json::from_str(&denied_reply("not json")).expect("json");
         assert_eq!(junk["id"], Value::Null);
+    }
+
+    #[test]
+    fn an_accessibility_reply_is_recognised_by_its_command() {
+        let reply =
+            json!({ "v": 1, "id": 0, "cmd": A11Y_CMD, "args": { "page": "{\"elements\":[]}" } });
+        assert_eq!(
+            a11y_reply(&reply.to_string()),
+            Some("{\"elements\":[]}".into())
+        );
+        assert_eq!(
+            a11y_reply(r#"{"v":1,"id":2,"cmd":"greet","args":{}}"#),
+            None
+        );
+        assert_eq!(a11y_reply("not json"), None);
+    }
+
+    #[test]
+    fn the_shell_keeps_the_latest_accessibility_report_for_the_snapshot() {
+        let shell = Shell::new(None, &[], None);
+        assert!(shell.a11y().is_none());
+        shell.set_a11y(tpt_shell_devtools::a11y::Report {
+            findings: vec![tpt_shell_devtools::a11y::Finding {
+                rule: "contrast".into(),
+                id: "note".into(),
+                message: "contrast is 2.8:1".into(),
+            }],
+            prefers_reduced_motion: false,
+        });
+        let json = Snapshot::collect(&shell).to_json();
+        assert_eq!(json["a11y"]["findings"][0]["id"], json!("note"));
     }
 
     #[test]

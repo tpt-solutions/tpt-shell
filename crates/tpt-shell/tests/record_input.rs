@@ -2,8 +2,8 @@
 // Copyright (c) 2026 TPT Solutions
 
 //! A recording captures the page's input (spec §10.5). The page dispatches a click, an input change
-//! and a key press on load; the page listener reports each one, and the recording written when the
-//! app quits holds them. Skipped unless `TPT_WEBVIEW2_LOADER` names WebView2Loader.dll and a
+//! and a key press on load, and then the window's focus and resize; the page listener reports each
+//! one, and the recording written when the app quits holds them. Skipped unless `TPT_WEBVIEW2_LOADER` names WebView2Loader.dll and a
 //! desktop is available.
 
 #![cfg(windows)]
@@ -27,6 +27,9 @@ const APP_JS: &str = r#"
       name.value = 'Ada';
       name.dispatchEvent(new Event('input', { bubbles: true }));
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      // The window's own focus and resize events (the listener does not capture them).
+      window.dispatchEvent(new Event('focus'));
+      window.dispatchEvent(new Event('resize'));
     });
 "#;
 
@@ -73,11 +76,38 @@ fn a_recording_holds_the_page_input_the_listener_reported() {
     assert!(kind_of("click"), "a click was recorded: {inputs:?}");
     assert!(kind_of("input"), "an input change was recorded: {inputs:?}");
     assert!(kind_of("key"), "a key press was recorded: {inputs:?}");
+    let windows: Vec<&serde_json::Value> = replay
+        .events
+        .iter()
+        .filter(|e| e.kind == "window")
+        .map(|e| &e.data)
+        .collect();
+    assert!(
+        windows
+            .iter()
+            .any(|d| d["op"] == "focus" && d["window"] == "main"),
+        "the window focus was recorded for the main window: {windows:?}"
+    );
+    assert!(
+        windows
+            .iter()
+            .any(|d| d["op"] == "resize" && d["width"].as_u64().is_some_and(|w| w > 0)),
+        "the window resize was recorded with a size: {windows:?}"
+    );
     assert!(
         inputs
             .iter()
             .any(|d| d["kind"] == "click" && d["path"][0]["name"] == "Save"),
         "the click names the Save button: {inputs:?}"
+    );
+    assert!(
+        inputs.iter().any(|d| {
+            d["kind"] == "click"
+                && d["dom"]
+                    .as_str()
+                    .is_some_and(|html| html.contains("id=\"save\""))
+        }),
+        "a click carries the page HTML, with the button in it: {inputs:?}"
     );
     assert!(
         inputs

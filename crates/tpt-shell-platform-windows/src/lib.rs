@@ -13,6 +13,8 @@ pub mod agent_confirm;
 #[cfg(windows)]
 pub mod backend;
 #[cfg(windows)]
+pub mod channel;
+#[cfg(windows)]
 pub mod clipboard;
 #[cfg(windows)]
 pub mod com;

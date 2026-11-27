@@ -23,6 +23,11 @@
 
 #![forbid(unsafe_code)]
 
+/// The accessibility quick check the overlay's accessibility panel shows.
+///
+/// Support: Partial. See the module documentation.
+pub mod a11y;
+
 /// The time-travel view of a recording: the cursor, the IPC state at it, and the first divergence.
 /// The overlay's timeline panel reads its JSON under `timeline` in the snapshot.
 ///
@@ -113,6 +118,8 @@ pub struct Snapshot {
     pub jobs: Vec<Job>,
     pub audit_tail: Vec<AuditRow>,
     pub contract: Vec<CommandInfo>,
+    /// The latest accessibility check of the page, when one has run.
+    pub a11y: Option<a11y::Report>,
 }
 
 /// The shell state the overlay reads. The app implements this on whatever holds its runtime.
@@ -124,6 +131,10 @@ pub trait Inspect {
     /// The last `max` lines of the audit log, as JSON Lines text.
     fn audit_jsonl(&self, max: usize) -> String;
     fn contract(&self) -> Vec<CommandInfo>;
+    /// The latest accessibility check, if one has run. Defaults to none.
+    fn a11y(&self) -> Option<a11y::Report> {
+        None
+    }
 }
 
 /// How many audit rows the overlay keeps.
@@ -139,6 +150,7 @@ impl Snapshot {
             jobs: shell.jobs(),
             audit_tail: audit_rows(&shell.audit_jsonl(AUDIT_TAIL)),
             contract: shell.contract(),
+            a11y: shell.a11y(),
         }
     }
 
@@ -178,6 +190,7 @@ impl Snapshot {
                 "capability": c.capability,
                 "args": c.args_schema,
             })).collect::<Vec<_>>(),
+            "a11y": self.a11y.as_ref().map(a11y::to_json),
         })
     }
 }

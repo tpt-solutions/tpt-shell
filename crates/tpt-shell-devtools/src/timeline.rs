@@ -132,6 +132,28 @@ impl Model {
         position
     }
 
+    /// The page's HTML as the latest input event before the cursor left it, with that event's index.
+    /// Only input events that carry a `dom` field have one (clicks and input changes in a recording,
+    /// taken after their effects). `None` when no event before the cursor has one.
+    ///
+    /// Support: Partial. A snapshot is taken at input events only, not at every event.
+    pub fn dom_at_cursor(&self) -> Option<(usize, String)> {
+        self.events[..self.position()]
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, event)| {
+                if event.kind != "input" {
+                    return None;
+                }
+                event
+                    .data
+                    .get("dom")
+                    .and_then(Value::as_str)
+                    .map(|html| (index, html.to_string()))
+            })
+    }
+
     /// The index of the first event that differed from the second run, if there was one.
     ///
     /// Support: Full.
@@ -250,6 +272,10 @@ impl Model {
             })).collect::<Vec<_>>(),
             "ipc": calls,
             "divergence": self.divergence_index(),
+            "dom": self.dom_at_cursor().map(|(index, html)| json!({
+                "event": index,
+                "html": html,
+            })),
         })
     }
 }
@@ -328,6 +354,40 @@ mod tests {
                 json!({ "id": 3, "cmd": "load", "args": {} }),
             ),
         ]
+    }
+
+    #[test]
+    fn the_dom_at_the_cursor_is_the_latest_snapshot_before_it() {
+        let events = vec![
+            ev(
+                0,
+                10,
+                "input",
+                json!({ "kind": "click", "dom": "<p>one</p>" }),
+            ),
+            ev(1, 20, "input", json!({ "kind": "key", "key": "a" })),
+            ev(
+                2,
+                30,
+                "input",
+                json!({ "kind": "click", "dom": "<p>two</p>" }),
+            ),
+            ev(3, 40, "input", json!({ "kind": "click" })),
+        ];
+        let mut m = Model::new(events);
+        assert_eq!(m.dom_at_cursor(), None, "nothing before the first event");
+        m.seek(2).expect("seek");
+        assert_eq!(m.dom_at_cursor(), Some((0, "<p>one</p>".into())));
+        m.seek(4).expect("seek");
+        assert_eq!(m.dom_at_cursor(), Some((2, "<p>two</p>".into())));
+        assert_eq!(m.to_json()["dom"]["html"], json!("<p>two</p>"));
+        assert_eq!(m.to_json()["dom"]["event"], json!(2));
+    }
+
+    #[test]
+    fn a_recording_without_snapshots_has_no_dom_in_the_json() {
+        let m = Model::new(run());
+        assert!(m.to_json()["dom"].is_null());
     }
 
     #[test]

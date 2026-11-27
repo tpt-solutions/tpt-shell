@@ -66,6 +66,9 @@ pub use tpt_shell_ipc::{Caller, Limits, Router, Target, Value};
 pub use tpt_shell_macros::{
     command, commands, embed_dir, include_manifest, register_commands, Contract,
 };
+/// The WebView2 release channel an app can ask for (Windows).
+#[cfg(windows)]
+pub use tpt_shell_platform_windows::channel::Channel as WebView2Channel;
 /// Where a window keeps its data: the default, a named profile, or an ephemeral session.
 pub use tpt_shell_profiles::Kind as ProfileKind;
 #[cfg(windows)]

@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tpt_shell_agent::page::{self, Action, Node};
-use tpt_shell_platform_windows::backend::{eval_window_json, request_quit, WindowId};
+use tpt_shell_platform_windows::backend::{eval_window_json, WindowId};
 use tpt_shell_replay::Replay;
 
 /// How often the timer runs a step.
@@ -150,18 +150,19 @@ pub(crate) fn perform(id: WindowId, nodes: &[Node], step: &Step) -> String {
 }
 
 /// The timer's work for one tick: waits for the page, performs the next step, and at the end
-/// reports the page title and quits. It gives up with a line in the report after [`GIVE_UP`].
-/// `next` is the index of the next step; `steps.len()` means the steps are done and the title is
-/// due, and one past that means the run has finished.
+/// reports the page title. It gives up with a line in the report after [`GIVE_UP`]. `next` is the
+/// index of the next step; `steps.len()` means the steps are done and the title is due, and one
+/// past that means the run has finished. Returns `true` once the run has finished, so the caller
+/// decides whether to quit.
 pub(crate) fn tick(
     id: WindowId,
     steps: &[Step],
     next: &mut usize,
     started: Instant,
     report: &Report,
-) {
+) -> bool {
     if *next > steps.len() {
-        return;
+        return true;
     }
     let nodes = match snapshot(id) {
         Ok(Some(nodes)) => nodes,
@@ -171,10 +172,10 @@ pub(crate) fn tick(
                     report,
                     "the page showed no elements in time; the replay stops".into(),
                 );
-                request_quit();
                 *next = steps.len() + 1;
+                return true;
             }
-            return;
+            return false;
         }
     };
     if *next == steps.len() {
@@ -185,13 +186,55 @@ pub(crate) fn tick(
             .and_then(|json| serde_json::from_str::<String>(&json).ok())
             .unwrap_or_default();
         push(report, format!("title after the replay: {title}"));
-        request_quit();
         *next = steps.len() + 1;
-        return;
+        return true;
     }
     let line = perform(id, &nodes, &steps[*next]);
     *next += 1;
     push(report, line);
+    false
+}
+
+/// A dev run's replay of the session saved before a reload. It performs the saved page input on the
+/// reloaded first window, one step per tick, and writes what it did to stderr when it ends.
+pub(crate) struct DevReplay {
+    steps: Vec<Step>,
+    next: usize,
+    started: Instant,
+    report: Report,
+}
+
+impl DevReplay {
+    /// The replay of the session in `path`, or `None` when it has no input to perform or does not
+    /// read.
+    pub(crate) fn from_file(path: &std::path::Path) -> Option<Self> {
+        let bytes = std::fs::read(path).ok()?;
+        let replay =
+            tpt_shell_replay::read_compressed(&bytes, tpt_shell_replay::Mode::Lenient).ok()?;
+        let (steps, _skipped) = plan(&replay);
+        (!steps.is_empty()).then(|| DevReplay {
+            steps,
+            next: 0,
+            started: Instant::now(),
+            report: Arc::new(Mutex::new(Vec::new())),
+        })
+    }
+
+    /// Performs the next step on `id`. Returns `true` once the replay has finished.
+    pub(crate) fn tick(&mut self, id: WindowId) -> bool {
+        let done = tick(id, &self.steps, &mut self.next, self.started, &self.report);
+        if done {
+            let lines = self
+                .report
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
+            for line in lines {
+                eprintln!("tpt-shell: dev replay: {line}");
+            }
+        }
+        done
+    }
 }
 
 fn push(report: &Report, line: String) {

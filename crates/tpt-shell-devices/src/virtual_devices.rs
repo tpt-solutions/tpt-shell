@@ -356,10 +356,40 @@ pub fn from_spec(spec: &str) -> Result<Vec<Box<dyn Transport>>, String> {
     Ok(devices)
 }
 
+/// The name of the environment variable that selects virtual devices.
+pub const ENV_VAR: &str = "TPT_VIRTUAL_DEVICES";
+
+/// The virtual devices named by `TPT_VIRTUAL_DEVICES`, read with [`from_spec`]. A variable that is
+/// not set, or is empty, gives no devices. A value that does not parse is an error, so a typo does
+/// not silently leave a test without its device.
+///
+/// Support: Full.
+pub fn from_env() -> Result<Vec<Box<dyn Transport>>, String> {
+    match std::env::var(ENV_VAR) {
+        Ok(spec) => from_spec(&spec).map_err(|e| format!("{ENV_VAR}: {e}")),
+        Err(std::env::VarError::NotPresent) => Ok(Vec::new()),
+        Err(e) => Err(format!("{ENV_VAR}: {e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::escpos::{Align, Receipt};
+
+    /// `from_env` reads the process environment, so the tests that set it run one at a time.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn from_env_reads_the_spec_and_refuses_a_typo() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        std::env::set_var(ENV_VAR, "serial@serial:COM7;scanner@hid:0c2e:0b61");
+        assert_eq!(from_env().expect("two devices").len(), 2);
+        std::env::set_var(ENV_VAR, "printr@usb:0416:5011");
+        assert!(from_env().is_err());
+        std::env::remove_var(ENV_VAR);
+        assert!(from_env().expect("unset").is_empty());
+    }
 
     fn id(text: &str) -> DeviceId {
         text.parse().expect("id")

@@ -271,6 +271,33 @@ jobs:
           path: visual/
           if-no-files-found: warn
 
+  # Spec §10.6: compares the screenshots of the test runs with the committed baseline in
+  # visual-baseline/. It runs the comparison only when both exist (tools/visual-compare.sh says why
+  # it skipped otherwise), and a failed comparison fails this job. No test run uploads
+  # visual-screenshots-* yet, so today this job skips.
+  visual-compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: visual-screenshots-*
+          path: shots
+          merge-multiple: true
+      - name: Compare screenshots with the baseline
+        env:
+          REPORT: visual-report.html
+        run: bash tools/visual-compare.sh visual-baseline shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: visual-report
+          path: visual-report.html
+          if-no-files-found: ignore
+
   fuzz-smoke:
     runs-on: ubuntu-latest
     steps:
