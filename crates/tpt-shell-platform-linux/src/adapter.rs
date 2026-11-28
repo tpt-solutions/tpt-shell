@@ -295,8 +295,8 @@ fn notification_app_name() -> String {
 ///
 /// Support: Partial. `notify` and the tray go through the session bus when the `dbus` feature is
 /// on, and return `Unsupported` otherwise. The tray has no menu, so a menu is refused. Scheme
-/// registration writes a desktop entry, which needs no feature. The dialogs and keystore are not
-/// built here.
+/// registration writes a desktop entry, which needs no feature. The keystore uses the Secret
+/// Service, so it needs the `dbus` feature too. The dialogs are not built here.
 impl Platform for LinuxBackend {
     fn notify(&mut self, title: &str, body: &str) -> Result<()> {
         let note = crate::dbus::notify::Notification {
@@ -339,6 +339,25 @@ impl Platform for LinuxBackend {
         schemes.retain(|s| s != scheme);
         write_scheme_entry(&schemes)
     }
+
+    fn keystore_set(&mut self, name: &str, secret: &[u8]) -> Result<()> {
+        keystore()?.store(name, secret)
+    }
+
+    fn keystore_get(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        keystore()?.load(name)
+    }
+
+    fn keystore_delete(&mut self, name: &str) -> Result<bool> {
+        keystore()?.delete(name)
+    }
+}
+
+/// Opens the Secret Service keystore for this program. Secrets are scoped to the program's app
+/// id, so another program's secrets are not visible through it.
+fn keystore() -> Result<crate::dbus::secrets::Keystore> {
+    let app_id = crate::desktop::app_id_for(&std::env::current_exe().unwrap_or_default());
+    crate::dbus::secrets::Keystore::open(&app_id)
 }
 
 /// The schemes this process has registered, in order. The desktop entry lists all of them, so
