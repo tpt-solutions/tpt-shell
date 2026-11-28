@@ -19,7 +19,7 @@ use tpt_shell_core::backend::{
     AssetSource, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler, WebviewBackend,
     WindowBackend, WindowSpec,
 };
-use tpt_shell_core::platform::{ClipboardBackend, ColorScheme, ThemeBackend};
+use tpt_shell_core::platform::{ClipboardBackend, ColorScheme, Platform, ThemeBackend};
 use tpt_shell_core::theme::Theme;
 use tpt_shell_core::{Error, LogicalRect, LogicalSize, Result, ScaleFactor};
 
@@ -277,6 +277,34 @@ impl LinuxBackend {
 impl ThemeBackend for LinuxBackend {
     fn color_scheme(&self) -> Result<ColorScheme> {
         each!(self, b => b.color_scheme())
+    }
+}
+
+/// The name a notification is shown under: the program's file name, or `tpt-shell` when that
+/// cannot be read.
+fn notification_app_name() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.file_stem().map(|s| s.to_string_lossy().into_owned()))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "tpt-shell".into())
+}
+
+/// Desktop services the Linux backend provides. The methods not listed keep their defaults, which
+/// return `Unsupported`.
+///
+/// Support: Partial. `notify` goes through the session bus when the `dbus` feature is on, and
+/// returns `Unsupported` otherwise. The dialogs, tray, keystore and schemes are not built here.
+impl Platform for LinuxBackend {
+    fn notify(&mut self, title: &str, body: &str) -> Result<()> {
+        let note = crate::dbus::notify::Notification {
+            app_name: notification_app_name(),
+            summary: title.to_string(),
+            body: body.to_string(),
+            timeout_ms: None,
+        };
+        let mut notifier = crate::dbus::notify::Notifier::connect()?;
+        notifier.show(&note).map(|_| ())
     }
 }
 

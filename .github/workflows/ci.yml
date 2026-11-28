@@ -74,6 +74,11 @@ jobs:
       - name: Test
         if: runner.os != 'Linux'
         run: cargo test --workspace
+      # The D-Bus services are behind the `dbus` feature, which the workspace run leaves off. Their
+      # tests use scripted buses, so they need no session bus or notification daemon.
+      - name: Test the D-Bus services (Linux)
+        if: runner.os == 'Linux'
+        run: bash tools/headless-linux.sh xvfb cargo test -p tpt-shell-platform-linux --features dbus --lib
 
   # aarch64 runners (spec §15, "where runners exist"). The labels are set by GitHub:
   # ubuntu-24.04-arm and windows-11-arm are arm64 Linux and Windows runners, and macos-14 is an

@@ -8,7 +8,7 @@
 
 use tpt_shell_core::{Error, Result};
 
-use super::bus::{session, Connection, Stream};
+use super::bus::{session, Connection, Stream, Transport};
 use super::wire::Value;
 
 const SERVICE: &str = "org.freedesktop.Notifications";
@@ -36,17 +36,27 @@ pub struct Notification {
 ///
 /// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
 /// Unsupported. Not run on macOS/Linux here; compile-checked.
-pub struct Notifier {
-    conn: Connection<Stream>,
+pub struct Notifier<S: Transport> {
+    conn: Connection<S>,
 }
 
-impl Notifier {
+impl Notifier<Stream> {
     /// Connects to the session bus. Fails with `Unsupported` without the `dbus` feature.
     ///
     /// Support: Partial. Behind the `dbus` feature, which is off by default and then returns
     /// Unsupported. Not run on macOS/Linux here; compile-checked.
-    pub fn connect() -> Result<Notifier> {
-        Ok(Notifier { conn: session()? })
+    pub fn connect() -> Result<Notifier<Stream>> {
+        Ok(Notifier::over(session()?))
+    }
+}
+
+impl<S: Transport> Notifier<S> {
+    /// Uses an existing connection. The connection is the only thing the notifier needs, so a
+    /// test can pass a scripted one.
+    ///
+    /// Support: Full.
+    pub fn over(conn: Connection<S>) -> Self {
+        Notifier { conn }
     }
 
     /// Shows the notification and returns the id the server gave it.
@@ -132,5 +142,71 @@ mod tests {
                 Err(Error::Unsupported { .. })
             ));
         }
+    }
+
+    /// A reply to the call that is the `serial`-th message on the connection (the Hello is 1).
+    fn reply(serial: u32, body: Vec<Value>) -> crate::dbus::wire::Message {
+        use crate::dbus::wire::Message;
+        let mut call = Message::method_call(SERVICE, PATH, INTERFACE, "Notify", vec![]);
+        call.serial = serial;
+        Message::method_return(&call, body)
+    }
+
+    fn hello_reply() -> crate::dbus::wire::Message {
+        use crate::dbus::wire::Message;
+        let mut call = Message::method_call(
+            "org.freedesktop.DBus",
+            "/",
+            "org.freedesktop.DBus",
+            "Hello",
+            vec![],
+        );
+        call.serial = 1;
+        call.header.sender = Some("org.freedesktop.DBus".into());
+        Message::method_return(&call, vec![Value::str(":1.7")])
+    }
+
+    #[test]
+    fn show_returns_the_id_the_server_gives() {
+        use crate::dbus::bus::test_support::ScriptedBus;
+        let bus = ScriptedBus::new(&[hello_reply(), reply(2, vec![Value::Uint32(41)])]);
+        let conn = Connection::authenticate(bus, "1000").expect("handshake");
+        let mut notifier = Notifier::over(conn);
+        let note = Notification {
+            app_name: "demo".into(),
+            summary: "Saved".into(),
+            body: "3 files <ok>".into(),
+            timeout_ms: Some(4000),
+        };
+        assert_eq!(notifier.show(&note).expect("show"), 41);
+    }
+
+    #[test]
+    fn show_refuses_a_missing_id_and_bad_text_before_sending() {
+        use crate::dbus::bus::test_support::ScriptedBus;
+        let bus = ScriptedBus::new(&[hello_reply(), reply(2, vec![])]);
+        let conn = Connection::authenticate(bus, "1000").expect("handshake");
+        let mut notifier = Notifier::over(conn);
+        let note = Notification {
+            app_name: "demo".into(),
+            summary: "x".repeat(MAX_TEXT + 1),
+            body: String::new(),
+            timeout_ms: None,
+        };
+        assert!(notifier.show(&note).is_err());
+
+        let bus = ScriptedBus::new(&[hello_reply(), reply(2, vec![])]);
+        let conn = Connection::authenticate(bus, "1000").expect("handshake");
+        let mut notifier = Notifier::over(conn);
+        let ok = Notification {
+            app_name: "demo".into(),
+            summary: "x".into(),
+            body: String::new(),
+            timeout_ms: None,
+        };
+        assert!(
+            notifier.show(&ok).is_err(),
+            "no id in the reply is an error"
+        );
     }
 }
