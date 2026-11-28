@@ -14,7 +14,8 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 ### Added
 - `WindowBackend::scale_factor` returns the window's scale factor. Windows and GTK implement it; other backends answer `Unsupported`.
 - Conformance: streams with credit-based back-pressure (checked over the platform message channel), snapshot, drag regions (the drag boxes and their rectangles; the window move is not measured) and DPI, on Windows. On Linux: streams, DPI, theme injection, the blob-URL read and drag regions (a press on a drag box starts a window move on GTK 3 and GTK 4).
-- macOS: `MacBackend` has an event loop: `run_until`, `run_until_quit` and a cross-thread `MacProxy`. The conformance suite runs on the main thread on every OS.
+- macOS: `MacBackend` has an event loop: `run_until`, `run_until_quit` and a cross-thread `MacProxy`. Scale factor, theme injection and drag regions are written. The conformance suite runs on the main thread on every OS, and all ten checks are wired for macOS and Linux through the shared checks.
+- Drag-region helpers moved to `tpt_shell_core::drag`, shared by the GTK and macOS backends.
 
 ### Changed (CI)
 - Conformance on Windows is a gate: a pending or skipped check fails the job (`TPT_CONFORMANCE_REQUIRE_PASS`).

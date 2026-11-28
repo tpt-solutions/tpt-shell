@@ -129,8 +129,8 @@ cargo feature.
 The conformance suite lives in `conformance/`, and it reports checks that need a platform backend as
 pending. Run it with `TPT_CONFORMANCE_REQUIRE_PASS=1` to make pending checks fail. CI sets that for
 Windows: on Windows all ten checks pass and a pending or skipped check fails the job. macOS and Linux
-still run without the gate. Linux has all ten checks written (none run in CI yet), and macOS has no
-checks wired yet: its event loop and main-thread harness are written and type-check for macOS. Parity across the three systems is an open milestone (todo M4 and
+still run without the gate. Linux and macOS have all ten checks wired (the checks are shared in
+`conformance/tests/conformance/shared.rs`). Neither has run in CI yet, and the macOS gate is off. Parity across the three systems is an open milestone (todo M4 and
 M5). Until it is done, a feature listed here as Windows only should be described as Windows only.
 
 ## Changing this page
