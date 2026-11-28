@@ -93,14 +93,26 @@ fn page_restrictions(
 #[cfg(target_os = "linux")]
 impl App {
     /// Opens the declared windows on GTK 3 and returns the backend that owns them, with the id of
-    /// each window. The pages are not loaded yet, so the windows open empty.
+    /// each window. Each window serves the app's assets and loads its page from the app origin.
     fn open_linux_windows(
         &self,
     ) -> Result<(
         tpt_shell_platform_linux::adapter::LinuxBackend,
         Vec<tpt_shell_platform_linux::gtk3::WindowId>,
     )> {
-        use tpt_shell_core::backend::WindowBackend;
+        self.open_linux_windows_observed(None)
+    }
+
+    /// As [`App::open_linux_windows`], and when `requests` is given, every path a window asks for
+    /// is appended to it. A test uses this to see that a page was requested and served.
+    fn open_linux_windows_observed(
+        &self,
+        requests: Option<Rc<RefCell<Vec<String>>>>,
+    ) -> Result<(
+        tpt_shell_platform_linux::adapter::LinuxBackend,
+        Vec<tpt_shell_platform_linux::gtk3::WindowId>,
+    )> {
+        use tpt_shell_core::backend::{WebviewBackend, WindowBackend};
         if self.windows.is_empty() {
             return Err(Error::Backend("the app declares no window".into()));
         }
@@ -109,7 +121,25 @@ impl App {
         )?;
         let mut ids = Vec::new();
         for window in &self.windows {
-            ids.push(backend.create(&window.spec())?);
+            let id = backend.create(&window.spec())?;
+            let assets = self.assets.clone();
+            let requests = requests.clone();
+            backend.set_asset_source(
+                id,
+                Box::new(move |path| {
+                    if let Some(log) = &requests {
+                        log.borrow_mut().push(path.to_string());
+                    }
+                    assets.get(path).cloned()
+                }),
+            )?;
+            let url = format!(
+                "{}/{}",
+                tpt_shell_platform_linux::gtk3::route::APP_ORIGIN,
+                window.page
+            );
+            backend.navigate(id, &url)?;
+            ids.push(id);
         }
         Ok((backend, ids))
     }
@@ -153,6 +183,36 @@ mod linux_runner_tests {
             backend.run_until(|| false, Duration::from_millis(20));
         }
         assert_eq!(backend.open_windows(), Some(0));
+    }
+
+    #[test]
+    fn a_window_asks_for_its_page_from_the_app_origin() {
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let app = App::new()
+            .name("demo")
+            .asset(
+                "index.html",
+                "text/html",
+                "<!doctype html><title>demo</title><p>hello</p>",
+            )
+            .window(Window::new("main"));
+        let (mut backend, _ids) = match app.open_linux_windows_observed(Some(Rc::clone(&requests)))
+        {
+            Ok(opened) => opened,
+            Err(why) => {
+                eprintln!("skipped: GTK 3 is not available here: {why}");
+                return;
+            }
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !requests.borrow().iter().any(|p| p == "index.html") && Instant::now() < deadline {
+            backend.run_until(|| false, Duration::from_millis(20));
+        }
+        assert!(
+            requests.borrow().iter().any(|p| p == "index.html"),
+            "the page was never asked for: {:?}",
+            requests.borrow()
+        );
     }
 }
 
