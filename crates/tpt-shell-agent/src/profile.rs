@@ -85,6 +85,13 @@ pub struct RouteRules {
 }
 
 impl RouteRules {
+    /// The patterns the rules were built from, as written.
+    ///
+    /// Support: Full.
+    pub fn patterns(&self) -> &[String] {
+        &self.patterns
+    }
+
     /// Builds the rules. A bare `*` is refused, because it would allow every URL.
     ///
     /// Support: Full.

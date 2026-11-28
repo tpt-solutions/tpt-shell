@@ -72,6 +72,13 @@ max_session_secs = 900
 Unknown keys, unknown action names and unusable route patterns are refused with `TS0110`. A typo
 cannot widen a profile. A route pattern is an exact path, or a prefix ending in `*`.
 
+Routes also limit clicks. Before a click on a link, or on a button that submits a form, runs, the
+address it would open is checked against the routes. A click to an address outside them is refused
+and the page does not move. A profile with no routes follows no link. On Windows the app's pages
+are served from `https://tpt-app.localhost`, so write the routes for that origin there; a route
+that names only `app://tpt-app.localhost` matches nothing on Windows. A page script that navigates
+by itself, without a link or a form, is not covered by this check.
+
 The action names are the verbs of the action API: `click`, `type`, `select`, `scroll`, `focus`,
 `key`, `wait_for`, `read` and `invoke`. `invoke` runs typed commands. The code accepts `wait_for`
 as a verb, but the todo does not count it as built, so do not enable it for a customer yet.

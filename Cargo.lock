@@ -853,6 +853,7 @@ dependencies = [
  "tpt-shell-profiles",
  "tpt-shell-replay",
  "tpt-shell-test",
+ "zstd",
 ]
 
 [[package]]
@@ -886,6 +887,7 @@ version = "0.0.0"
 dependencies = [
  "serde_json",
  "toml 0.8.23",
+ "tpt-shell-agent",
  "tpt-shell-audit",
  "tpt-shell-compliance",
  "tpt-shell-errors",
@@ -966,6 +968,7 @@ dependencies = [
  "tpt-shell-capabilities",
  "tpt-shell-manifest",
  "trybuild",
+ "zstd",
 ]
 
 [[package]]

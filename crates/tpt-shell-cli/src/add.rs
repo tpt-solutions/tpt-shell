@@ -26,13 +26,13 @@ fn section(feature: &str) -> Option<&'static str> {
             "[kiosk]\n# Single-app full-screen mode (spec \u{a7}10.1).\nmode = \"single-app\"\n"
         }
         "devices" => {
-            "[devices]\n# Use virtual serial, HID and printer devices in dev and tests (spec \u{a7}10.2).\nvirtual = true\n"
+            "[devices]\n# Use virtual serial, HID and printer devices in dev and tests (spec \u{a7}10.2).\nvirtual = true\n# Devices to open at start, as kind@id: serial@serial:COM7, hid@hid:1234:5678, printer@usb:0416:5011.\nvirtual_devices = []\n"
         }
         "audit" => {
             "[audit]\n# Keep only the hash of action parameters unless store_params is set (spec \u{a7}10.3).\nstore_params = false\nredact = [\"password\", \"token\", \"secret\"]\n"
         }
         "agent" => {
-            "[agent]\n# Agent surface is off until enabled (spec \u{a7}10.4).\nenabled = false\nmax_session_seconds = 900\n"
+            "[agent]\n# Agent surface is off until enabled (spec \u{a7}10.4).\nenabled = false\n\n[agent.profiles.assistant]\n# The page actions and typed commands the agent may use. Remove what it does not need.\nactions = [\"click\", \"type\", \"read\", \"wait_for\"]\nmax_session_secs = 900\n"
         }
         _ => return None,
     })
@@ -72,24 +72,43 @@ pub fn add(feature: &str, path: &Path) -> Result<ExitCode, String> {
     updated.push('\n');
     updated.push_str(section);
 
-    match tpt_shell_manifest::parse(&updated) {
-        Ok(_) => {
+    match check_section(feature, &updated) {
+        Ok(()) => {
             fs::write(path, &updated)
                 .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
             println!("added [{feature}] to {}", path.display());
             Ok(ExitCode::SUCCESS)
         }
-        Err(e) => {
+        Err((message, fix)) => {
             println!(
-                "{}: not changed; the new section does not check: {e}",
+                "{}: not changed; the new section does not check: {message}",
                 path.display()
             );
-            if let Some(entry) = lookup(e.code) {
-                println!("  {}", entry.fix);
+            if let Some(fix) = fix {
+                println!("  {fix}");
             }
             Ok(ExitCode::from(1))
         }
     }
+}
+
+/// Checks the manifest text, then the section for `feature` with the parser of the crate that
+/// owns it. The agent section is read by `tpt-shell-agent`, so a key it refuses is caught here
+/// rather than when the app starts. Returns the problem and, when the registry has one, its fix.
+fn check_section(feature: &str, text: &str) -> Result<(), (String, Option<&'static str>)> {
+    let parsed = tpt_shell_manifest::parse(text).map_err(|e| {
+        let fix = lookup(e.code).map(|entry| entry.fix);
+        (e.to_string(), fix)
+    })?;
+    if feature == "agent" {
+        let table = parsed
+            .stubs
+            .iter()
+            .find(|(name, _)| name.as_str() == "agent")
+            .map(|(_, table)| table);
+        tpt_shell_agent::profile::parse_agent_section(table).map_err(|e| (e.to_string(), None))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -106,14 +125,23 @@ mod tests {
     }
 
     #[test]
-    fn every_feature_section_passes_the_manifest_parser() {
+    fn every_feature_section_passes_its_owners_parser() {
         for feature in FEATURES {
             let text = format!("{BASE}\n{}", section(feature).expect("section"));
             assert!(
-                tpt_shell_manifest::parse(&text).is_ok(),
-                "[{feature}] does not check"
+                check_section(feature, &text).is_ok(),
+                "[{feature}] does not check: {:?}",
+                check_section(feature, &text).err()
             );
         }
+    }
+
+    #[test]
+    fn an_agent_section_with_a_key_the_agent_refuses_is_not_added() {
+        // The key this template used to write. The manifest parser accepts it; the agent does not.
+        let text = format!("{BASE}\n[agent]\nenabled = false\nmax_session_seconds = 900\n");
+        assert!(tpt_shell_manifest::parse(&text).is_ok());
+        assert!(check_section("agent", &text).is_err());
     }
 
     #[test]

@@ -62,18 +62,44 @@ pub struct Bounds {
 /// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
-    Click { ref_id: u32 },
-    Focus { ref_id: u32 },
-    Type { ref_id: u32, text: String },
-    Select { ref_id: u32, value: String },
-    Key { ref_id: Option<u32>, key: String },
-    Scroll { ref_id: Option<u32>, dy: i32 },
-    Read { ref_id: u32 },
+    Click {
+        ref_id: u32,
+    },
+    Focus {
+        ref_id: u32,
+    },
+    Type {
+        ref_id: u32,
+        text: String,
+    },
+    Select {
+        ref_id: u32,
+        value: String,
+    },
+    Key {
+        ref_id: Option<u32>,
+        key: String,
+    },
+    Scroll {
+        ref_id: Option<u32>,
+        dy: i32,
+    },
+    Read {
+        ref_id: u32,
+    },
+    /// Where a click on the element would navigate, without clicking: a link's address, or the
+    /// address the element's form submits to. Null when the click does not navigate.
+    Destination {
+        ref_id: u32,
+    },
 }
 
 impl Action {
     fn to_json(&self) -> Value {
         match self {
+            Action::Destination { ref_id } => {
+                serde_json::json!({ "op": "destination", "ref": ref_id })
+            }
             Action::Click { ref_id } => serde_json::json!({ "op": "click", "ref": ref_id }),
             Action::Focus { ref_id } => serde_json::json!({ "op": "focus", "ref": ref_id }),
             Action::Type { ref_id, text } => {
@@ -222,16 +248,26 @@ pub fn wait_for(
     }
     let start = now();
     loop {
-        let snapshot = take()?;
-        if let Some(node) = find(&snapshot.tree, want) {
-            return Ok(node.clone());
-        }
+        // A snapshot that fails while the page is still loading is retried like a missing element.
+        // Only the error from the last look is reported, at the timeout.
+        let failure = match take() {
+            Ok(snapshot) => {
+                if let Some(node) = find(&snapshot.tree, want) {
+                    return Ok(node.clone());
+                }
+                None
+            }
+            Err(e) => Some(e),
+        };
         if now().saturating_sub(start) >= timeout {
-            return Err(format!(
-                "timed out waiting for a {} {}",
-                want.role,
-                want.name.as_deref().map(untrusted).unwrap_or_default()
-            ));
+            return Err(match failure {
+                Some(e) => format!("no page snapshot before the timeout: {e}"),
+                None => format!(
+                    "timed out waiting for a {} {}",
+                    want.role,
+                    want.name.as_deref().map(untrusted).unwrap_or_default()
+                ),
+            });
         }
         pause(poll);
     }
@@ -359,6 +395,48 @@ mod tests {
             &mut |_| {},
         )
         .is_err());
+    }
+
+    #[test]
+    fn wait_for_retries_a_snapshot_that_fails_while_the_page_loads() {
+        let want = Want {
+            role: "button".into(),
+            name: None,
+        };
+        let looks = std::cell::Cell::new(0);
+        let clock = std::cell::Cell::new(Duration::ZERO);
+        let node = wait_for(
+            &want,
+            Duration::from_secs(5),
+            Duration::from_millis(100),
+            &mut || {
+                looks.set(looks.get() + 1);
+                if looks.get() < 3 {
+                    Err("the page gave no snapshot".into())
+                } else {
+                    parse_snapshot(SNAPSHOT)
+                }
+            },
+            &mut || clock.get(),
+            &mut |d| clock.set(clock.get() + d),
+        )
+        .expect("the page loads on the third look");
+        assert_eq!(node.role, "button");
+        assert_eq!(looks.get(), 3);
+
+        // A page that never gives a snapshot reports that, not a missing element.
+        clock.set(Duration::ZERO);
+        let err = wait_for(
+            &want,
+            Duration::from_millis(300),
+            Duration::from_millis(100),
+            &mut || Err("the page gave no snapshot".into()),
+            &mut || clock.get(),
+            &mut |d| clock.set(clock.get() + d),
+        )
+        .unwrap_err();
+        assert!(err.contains("no page snapshot"), "{err}");
+        assert!(err.contains("the page gave no snapshot"), "{err}");
     }
 
     #[test]

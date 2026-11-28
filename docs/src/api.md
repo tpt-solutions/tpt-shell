@@ -22,7 +22,7 @@ The facade is `tpt-shell`. Its main types:
 - `Window`: `new`, `title`, `size`, `page`.
 - `Grant`, `Scope`, `Engine`, `ConsentPrompt`: the permission types from `tpt-shell-capabilities`.
 - `Caller`, `Limits`, `Router`, `Target`, `Value`, `CommandError`: the IPC types.
-- `command`, `commands`, `register_commands`, `embed_dir`, `include_manifest`, `Contract`: the macros.
+- `command`, `commands`, `register_commands`, `embed_dir`, `embed_dir_compressed`, `include_manifest`, `Contract`: the macros.
 - `ProfileKind`, `MenuItem`, `TRAY_ACTIVATE`, `KioskSettings`: smaller types.
 - `Error` and `Result`: the error type from `tpt-shell-core`.
 - `devices`: the device crate, re-exported as a module.

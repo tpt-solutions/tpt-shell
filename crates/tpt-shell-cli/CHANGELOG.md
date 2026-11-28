@@ -4,6 +4,12 @@ All notable changes to `tpt-shell-cli` are recorded here. The format follows [Ke
 
 ## [Unreleased]
 
+### Fixed
+- `tpt-shell add agent` wrote `max_session_seconds`, which the agent parser refuses, and no profile, so the section could not enable an agent. It now writes a valid `[agent.profiles.assistant]`, and `add` checks the agent section with the agent parser before it writes.
+
+### Changed
+- `tpt-shell add devices` writes `virtual_devices = []` beside `virtual = true`. The app opens the devices listed there.
+
 ### Added
 - `tpt-shell explain <TS####>` prints the registry entry for an error code.
 - `tpt-shell manifest check` checks a manifest and reports each problem with its code and line.

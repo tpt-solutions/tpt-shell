@@ -31,9 +31,13 @@ tpt-shell-compliance = { path = "../tpt-shell-compliance", version = "0.0.0" }
 tpt-shell-agent = { path = "../tpt-shell-agent", version = "0.0.0", optional = true }
 tpt-shell-test = { path = "../tpt-shell-test", version = "0.0.0", optional = true }
 serde_json = "1"
+zstd = "0.14"
 
 [features]
 default = []
+# Raw TCP to network devices through the app's device hub (spec 10.2). Opens sockets, so it is off
+# by default. Forwards to tpt-shell-devices/net-devices.
+net-devices = ["tpt-shell-devices/net-devices"]
 # The agent surface: MCP over stdio for the app, enabled by an enabled [agent] profile (spec 10.4).
 agent = ["dep:tpt-shell-agent"]
 # MCP over localhost HTTP with a bearer token, on top of the agent (spec 10.4). Opens a socket, so

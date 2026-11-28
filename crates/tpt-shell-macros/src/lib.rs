@@ -44,6 +44,71 @@ pub fn embed_dir(input: TokenStream) -> TokenStream {
     quote! { &[ #(#entries),* ] as &[(&str, &str, &[u8])] }.into()
 }
 
+#[proc_macro]
+/// `embed_dir_compressed!("dir")` is `embed_dir!` with each file zstd-compressed at compile time.
+/// The output has the same shape, but its bytes are zstd frames: pass it to
+/// `App::assets_compressed`, which decompresses them. Each file is also read with `include_bytes!`,
+/// so an edit to it rebuilds the crate, as with `embed_dir!`. Like `embed_dir!`, a file added to
+/// the directory needs a touch to a source file before Cargo notices it.
+///
+/// Support: Full.
+pub fn embed_dir_compressed(input: TokenStream) -> TokenStream {
+    let dir = parse_macro_input!(input as LitStr);
+    let manifest = std::env::var_os("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let root = manifest.join(dir.value());
+
+    let mut files = Vec::new();
+    if let Err(err) = collect(&root, &root, &mut files) {
+        let msg = format!(
+            "embed_dir_compressed!: cannot read {}: {err}",
+            root.display()
+        );
+        return syn::Error::new(dir.span(), msg).to_compile_error().into();
+    }
+    files.sort();
+
+    let mut entries = Vec::new();
+    for (rel, abs) in &files {
+        let raw = match std::fs::read(abs) {
+            Ok(raw) => raw,
+            Err(err) => {
+                let msg = format!(
+                    "embed_dir_compressed!: cannot read {}: {err}",
+                    abs.display()
+                );
+                return syn::Error::new(dir.span(), msg).to_compile_error().into();
+            }
+        };
+        let packed = match zstd::encode_all(&raw[..], COMPRESSION_LEVEL) {
+            Ok(packed) => packed,
+            Err(err) => {
+                let msg = format!(
+                    "embed_dir_compressed!: cannot compress {}: {err}",
+                    abs.display()
+                );
+                return syn::Error::new(dir.span(), msg).to_compile_error().into();
+            }
+        };
+        let abs = abs.to_string_lossy().replace('\\', "/");
+        let mime = content_type(rel);
+        let bytes = syn::LitByteStr::new(&packed, dir.span());
+        entries.push(quote! {
+            (#rel, #mime, {
+                // Tracked for rebuilds only; the compressed copy is what the program holds.
+                const _: &[u8] = include_bytes!(#abs);
+                #bytes as &[u8]
+            })
+        });
+    }
+    quote! { &[ #(#entries),* ] as &[(&str, &str, &[u8])] }.into()
+}
+
+/// The zstd level for `embed_dir_compressed!`. Compression happens at build time, so the size of
+/// the binary is what matters, not the time to compress.
+const COMPRESSION_LEVEL: i32 = 19;
+
 /// Walks `dir`, pushing (path relative to `root` with `/` separators, absolute path).
 fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
@@ -89,8 +154,8 @@ fn content_type(path: &str) -> &'static str {
 /// The file is also tracked by `include_str!`, so an edit rebuilds the crate. Pass the text to
 /// `App::manifest_audit` or any other reader.
 ///
-/// Support: Partial. No test in this workspace expands it yet; the manifest check it runs is tested
-/// in tpt-shell-manifest.
+/// Support: Full for the expansion, which `crates/tpt-shell/tests/manifest_macro.rs` expands on the
+/// vanilla template's manifest. The check it runs is tested in tpt-shell-manifest.
 #[proc_macro]
 pub fn include_manifest(input: TokenStream) -> TokenStream {
     let rel = parse_macro_input!(input as LitStr);

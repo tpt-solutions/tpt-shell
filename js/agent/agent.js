@@ -187,8 +187,24 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  // Where a click on this element would navigate, as an absolute address, or null when it would not.
+  // A link goes to its href. A control that submits a form goes to the form's action. The page
+  // cannot see navigation a script starts on its own, so this is the check for what the page
+  // declares, not a guarantee.
+  function destination(el) {
+    var link = el.closest ? el.closest('a[href]') : null;
+    if (link) return link.href;
+    var control = el.closest ? el.closest('button, input') : null;
+    if (control && control.form && (control.type === 'submit' || control.type === 'image')) {
+      return control.form.action;
+    }
+    return null;
+  }
+
   function perform(action) {
     switch (action.op) {
+      case 'destination':
+        return destination(target(action.ref));
       case 'click': {
         var clicked = target(action.ref);
         if (clicked.disabled) throw new Error('the element is disabled');

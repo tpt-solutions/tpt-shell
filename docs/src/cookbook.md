@@ -80,7 +80,7 @@ fn app() -> App {
 }
 ```
 
-`embed_dir!` returns the same list `assets` takes. Cargo rebuilds only when an embedded file changes,
+`embed_dir!` returns the same list `assets` takes. `embed_dir_compressed!` returns the same shape with zstd-compressed bytes, for `App::assets_compressed`, which decompresses them once at build. Cargo rebuilds only when an embedded file changes,
 so touch a source file after you add a new file to the folder.
 
 ## Launch behaviour

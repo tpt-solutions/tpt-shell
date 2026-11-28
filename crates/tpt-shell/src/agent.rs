@@ -17,7 +17,7 @@ use tpt_shell_agent::catalog::{
     tools_from_catalog, CommandCatalog, CommandDescriptor, Dispatch, Runner,
 };
 use tpt_shell_agent::page;
-use tpt_shell_agent::profile::AgentConfig;
+use tpt_shell_agent::profile::{AgentConfig, RouteRules};
 use tpt_shell_agent::record::{RecordedAction, Recorder};
 use tpt_shell_agent::resources::PageTree;
 use tpt_shell_agent::{wait_for_tool, AgentTool, Outcome as AgentOutcome, Session};
@@ -36,7 +36,13 @@ pub(crate) const TICK: Duration = Duration::from_millis(20);
 pub(crate) struct AgentSetup {
     pub(crate) config: AgentConfig,
     pub(crate) profile: String,
+    /// The typed commands (agent-flagged and hand-written). Each is offered only when the profile
+    /// allows `invoke` and names it.
     pub(crate) tools: Vec<AgentTool>,
+    /// The page actions `click`, `type_text` and `read`. Each is offered only when the profile
+    /// lists its verb in `actions` (see [`page_verb`]). They are kept apart from `tools`, so a
+    /// typed command cannot be mistaken for one.
+    pub(crate) page_tools: Vec<AgentTool>,
     /// Runs the snapshot script in a window's page. When set, the session offers `wait_for`, if
     /// the profile allows it. The app sets it once the platform can run page scripts for it.
     pub(crate) page_script: Option<PageScript>,
@@ -92,14 +98,24 @@ pub(crate) fn session(
             "the agent needs an audit log: call App::audit or App::manifest_audit first".into(),
         );
     };
-    let mut offered = setup.tools;
-    if let Some(script) = setup.page_script {
-        offered.push(wait_for_tool(snapshot_source(script)));
-    }
-    let tools: Vec<AgentTool> = offered
+    // Typed commands need `invoke` and a listed name. Page actions need their own verb in
+    // `actions`, so a profile that lists only `click` gets `click` and nothing else.
+    let mut tools: Vec<AgentTool> = setup
+        .tools
         .into_iter()
         .filter(|tool| profile.allows_command(&tool.command))
         .collect();
+    tools.extend(
+        setup
+            .page_tools
+            .into_iter()
+            .filter(|tool| profile.allows_action(page_verb(&tool.command))),
+    );
+    if let Some(script) = setup.page_script {
+        if profile.allows_action("wait_for") {
+            tools.push(wait_for_tool(snapshot_source(script)));
+        }
+    }
     // The session's own allowlist is the same set as the filter above. Passing it again means a
     // tool the profile does not allow stays unlisted and uncallable even if the filter changes.
     let allowed: Vec<String> = tools.iter().map(|tool| tool.command.clone()).collect();
@@ -107,7 +123,22 @@ pub(crate) fn session(
         log,
         started: Instant::now(),
     };
-    let mut session = Session::new(tools, profile.policy())
+    // A tool name must be unique. The session answers a call with the first tool of that name, so a
+    // typed command and a page action with the same name would hide one of them.
+    let mut seen = std::collections::BTreeSet::new();
+    for tool in &tools {
+        if !seen.insert(tool.command.as_str()) {
+            return Err(format!(
+                "the agent tool name {:?} is used twice; rename one of the commands",
+                tool.command
+            ));
+        }
+    }
+    // The session's own `invoke` gate would also stop the page actions, so it is open here. Each
+    // tool was filtered above: a typed command still needs `invoke` through `allows_command`.
+    let mut policy = profile.policy();
+    policy.invoke = true;
+    let mut session = Session::new(tools, policy)
         .with_commands(allowed)
         .with_recorder(Box::new(recorder))
         .with_actor(format!("agent:{}", profile.name));
@@ -176,22 +207,57 @@ fn action_tool(
     }
 }
 
+/// The verb in a profile's `actions` list that allows a page tool. Most tools are named after their
+/// verb; `type_text` is the `type` verb.
+fn page_verb(tool: &str) -> &str {
+    match tool {
+        "type_text" => "type",
+        other => other,
+    }
+}
+
+/// The click tool. A click on a link, or on a control that submits a form, goes where the page
+/// says the click would go. The destination is checked against the profile's routes before the
+/// click runs, so a click cannot take the agent out of the app's routes. An element that does not
+/// navigate is clicked as before. Empty routes allow no navigation at all.
+fn click_tool(make_script: &dyn Fn() -> PageScript, routes: RouteRules) -> AgentTool {
+    let mut destination_script = make_script();
+    let mut click_script = make_script();
+    AgentTool {
+        command: "click".into(),
+        description: "Click an element of the page, by its reference from the page snapshot. A link or submit button may only lead to an address the profile allows.".into(),
+        args: Schema::Struct(REF_ARGS),
+        handler: Box::new(move |args: &Value| {
+            let ref_id = reference_of(args)?;
+            let destination = run_action(&mut destination_script, &page::Action::Destination { ref_id })?;
+            if let Some(url) = destination.as_str() {
+                if !routes.allows(url) {
+                    return Err(format!(
+                        "the click would open {url}, which the profile's routes do not allow"
+                    ));
+                }
+            }
+            run_action(&mut click_script, &page::Action::Click { ref_id })
+        }),
+    }
+}
+
+/// Runs one page action through `script` and returns its result, or its error.
+fn run_action(script: &mut PageScript, action: &page::Action) -> Result<Value, String> {
+    let json = script(&page::action_script(action))?
+        .ok_or_else(|| "the page gave no result for the action".to_string())?;
+    page::parse_action_result(&json)
+}
+
 /// The page actions an agent may use as tools: `click`, `type_text` and `read`. Each tool gets its
 /// own page script from `make_script`. The session offers only the ones the profile names, so a
 /// profile that does not list them gets none of them.
-pub(crate) fn page_action_tools(make_script: impl Fn() -> PageScript) -> Vec<AgentTool> {
+pub(crate) fn page_action_tools(
+    make_script: impl Fn() -> PageScript,
+    routes: RouteRules,
+) -> Vec<AgentTool> {
     vec![
-        action_tool(
-            "click",
-            "Click an element of the page, by its reference from the page snapshot.",
-            Schema::Struct(REF_ARGS),
-            make_script(),
-            |args| {
-                Ok(page::Action::Click {
-                    ref_id: reference_of(args)?,
-                })
-            },
-        ),
+        click_tool(&make_script, routes),
         action_tool(
             "type_text",
             "Type text into an element of the page, by its reference from the page snapshot.",
@@ -386,6 +452,7 @@ mod tests {
             config,
             profile: "assistant".into(),
             tools: vec![tool("set_volume"), tool("format_disk")],
+            page_tools: Vec::new(),
             page_script: None,
             resource_script: None,
         }
@@ -397,16 +464,74 @@ mod tests {
         Box::new(move |_| Ok(Some(page.to_string())))
     }
 
-    #[test]
-    fn the_page_action_tools_send_their_action_to_the_page_and_return_its_answer() {
-        let sent: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
-        let mut tools = page_action_tools(|| {
+    /// A page script that answers the destination query with `destination` and records each script.
+    fn link_page(
+        destination: Option<&'static str>,
+        sent: Rc<RefCell<Vec<String>>>,
+    ) -> impl Fn() -> PageScript {
+        move || {
             let sent = sent.clone();
             Box::new(move |script: &str| {
                 sent.borrow_mut().push(script.to_string());
-                Ok(Some(r#"{"ok":true,"data":"done"}"#.to_string()))
+                let data = if script.contains(r#""op":"destination""#) {
+                    destination.map_or("null".to_string(), |url| format!("\"{url}\""))
+                } else {
+                    "\"done\"".to_string()
+                };
+                Ok(Some(format!(r#"{{"ok":true,"data":{data}}}"#)))
             })
-        });
+        }
+    }
+
+    #[test]
+    fn a_click_on_a_link_outside_the_routes_is_refused_and_never_sent() {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let routes = RouteRules::new(vec!["app://tpt-app.localhost/*".into()]).expect("routes");
+        let mut tools = page_action_tools(
+            link_page(Some("https://example.com/"), sent.clone()),
+            routes,
+        );
+        let err = (tools[0].handler)(&serde_json::json!({ "ref": 3 })).expect_err("refused");
+        assert!(err.contains("https://example.com/"), "{err}");
+        assert!(
+            sent.borrow().iter().all(|s| !s.contains(r#""op":"click""#)),
+            "the click must not run: {:?}",
+            sent.borrow()
+        );
+    }
+
+    #[test]
+    fn a_click_on_a_link_inside_the_routes_runs() {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let routes = RouteRules::new(vec!["app://tpt-app.localhost/*".into()]).expect("routes");
+        let mut tools = page_action_tools(
+            link_page(Some("app://tpt-app.localhost/help.html"), sent.clone()),
+            routes,
+        );
+        assert_eq!(
+            (tools[0].handler)(&serde_json::json!({ "ref": 3 })),
+            Ok(serde_json::json!("done"))
+        );
+        assert!(sent.borrow().iter().any(|s| s.contains(r#""op":"click""#)));
+    }
+
+    #[test]
+    fn the_page_action_tools_send_their_action_to_the_page_and_return_its_answer() {
+        let sent: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let mut tools = page_action_tools(
+            || {
+                let sent = sent.clone();
+                Box::new(move |script: &str| {
+                    sent.borrow_mut().push(script.to_string());
+                    // A click asks first where it would go. This button does not navigate.
+                    if script.contains(r#""op":"destination""#) {
+                        return Ok(Some(r#"{"ok":true,"data":null}"#.to_string()));
+                    }
+                    Ok(Some(r#"{"ok":true,"data":"done"}"#.to_string()))
+                })
+            },
+            RouteRules::default(),
+        );
         let names: Vec<&str> = tools.iter().map(|t| t.command.as_str()).collect();
         assert_eq!(names, ["click", "type_text", "read"]);
         assert_eq!(
@@ -422,15 +547,20 @@ mod tests {
         let scripts = sent.borrow();
         assert_eq!(
             scripts.len(),
-            2,
-            "only the two valid calls reached the page"
+            3,
+            "the click's destination check, its click, then the type"
         );
         assert!(
-            scripts[0].contains(r#"{"op":"click","ref":3}"#),
+            scripts[0].contains(r#"{"op":"destination","ref":3}"#),
             "{}",
             scripts[0]
         );
-        assert!(scripts[1].contains(r#""op":"type""#), "{}", scripts[1]);
+        assert!(
+            scripts[1].contains(r#"{"op":"click","ref":3}"#),
+            "{}",
+            scripts[1]
+        );
+        assert!(scripts[2].contains(r#""op":"type""#), "{}", scripts[2]);
     }
 
     #[test]
@@ -519,6 +649,7 @@ mod tests {
             config: config.clone(),
             profile: "assistant".into(),
             tools: Vec::new(),
+            page_tools: Vec::new(),
             page_script: None,
             resource_script,
         };
@@ -553,7 +684,7 @@ mod tests {
     #[test]
     fn wait_for_is_offered_only_when_the_profile_allows_it_and_a_page_script_is_given() {
         let text = "[app]\nname = \"demo\"\n[agent]\nenabled = true\n\
-             [agent.profiles.assistant]\nactions = [\"invoke\"]\ncommands = [\"wait_for\"]\n";
+             [agent.profiles.assistant]\nactions = [\"wait_for\"]\n";
         let parsed = tpt_shell_manifest::parse(text).expect("manifest");
         let section = parsed
             .stubs
@@ -565,6 +696,7 @@ mod tests {
             config: config.clone(),
             profile: "assistant".into(),
             tools: Vec::new(),
+            page_tools: Vec::new(),
             page_script: script,
             resource_script: None,
         };
@@ -656,6 +788,100 @@ mod tests {
             .expect("a reply");
         assert!(reply.contains("set_volume"), "{reply}");
         assert!(!reply.contains("format_disk"), "{reply}");
+        let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
+    }
+
+    #[test]
+    fn a_typed_command_cannot_share_a_name_with_a_page_action() {
+        let path = temp_log("dup-names");
+        let log = Rc::new(RefCell::new(
+            AuditLog::open(&path, Policy::default()).expect("log"),
+        ));
+        let text = "[app]
+name = \"demo\"
+[agent]
+enabled = true
+             [agent.profiles.assistant]
+actions = [\"click\", \"invoke\"]
+";
+        let parsed = tpt_shell_manifest::parse(text).expect("manifest");
+        let section = parsed
+            .stubs
+            .iter()
+            .find(|(name, _)| name.as_str() == "agent")
+            .map(|(_, table)| table);
+        let config = tpt_shell_agent::profile::parse_agent_section(section).expect("section");
+        let setup = AgentSetup {
+            config,
+            profile: "assistant".into(),
+            tools: vec![AgentTool {
+                command: "click".into(),
+                description: String::new(),
+                args: Schema::Struct(&[]),
+                handler: Box::new(|_| Ok(serde_json::json!({ "done": true }))),
+            }],
+            page_tools: page_action_tools(
+                || Box::new(|_: &str| Ok(Some(r#"{"ok":true,"data":null}"#.to_string()))),
+                RouteRules::default(),
+            ),
+            page_script: None,
+            resource_script: None,
+        };
+        let err = match session(setup, Some(log)) {
+            Err(err) => err,
+            Ok(_) => panic!("two tools named click should be refused"),
+        };
+        assert!(err.contains("\"click\" is used twice"), "{err}");
+        let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
+    }
+
+    #[test]
+    fn a_page_action_is_offered_only_when_the_profile_lists_its_verb() {
+        let path = temp_log("page-verbs");
+        let log = Rc::new(RefCell::new(
+            AuditLog::open(&path, Policy::default()).expect("log"),
+        ));
+        // Lists two page verbs and no `invoke`, so no typed command may be offered.
+        let text = "[app]\nname = \"demo\"\n[agent]\nenabled = true\n\
+             [agent.profiles.assistant]\nactions = [\"click\", \"read\"]\n";
+        let parsed = tpt_shell_manifest::parse(text).expect("manifest");
+        let section = parsed
+            .stubs
+            .iter()
+            .find(|(name, _)| name.as_str() == "agent")
+            .map(|(_, table)| table);
+        let config = tpt_shell_agent::profile::parse_agent_section(section).expect("section");
+        let page_tools = page_action_tools(
+            || Box::new(|_: &str| Ok(Some(r#"{"ok":true,"data":null}"#.to_string()))),
+            RouteRules::default(),
+        );
+        let setup = AgentSetup {
+            config,
+            profile: "assistant".into(),
+            tools: vec![AgentTool {
+                command: "set_volume".into(),
+                description: String::new(),
+                args: Schema::Struct(&[]),
+                handler: Box::new(|_| Ok(serde_json::json!({ "done": true }))),
+            }],
+            page_tools,
+            page_script: None,
+            resource_script: None,
+        };
+        let mut session = session(setup, Some(log))
+            .expect("session")
+            .expect("enabled");
+        let list = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
+        let reply = session
+            .handle_line(list, Duration::ZERO, &mut |_, _| false)
+            .expect("a reply");
+        assert!(reply.contains(r#""name":"click""#), "{reply}");
+        assert!(reply.contains(r#""name":"read""#), "{reply}");
+        assert!(!reply.contains("type_text"), "type needs its verb: {reply}");
+        assert!(
+            !reply.contains("set_volume"),
+            "no invoke, no commands: {reply}"
+        );
         let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
     }
 

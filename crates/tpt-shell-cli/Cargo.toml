@@ -26,6 +26,7 @@ tpt-shell-ipc = { path = "../tpt-shell-ipc", version = "0.0.0" }
 tpt-shell-replay = { path = "../tpt-shell-replay", version = "0.0.0" }
 tpt-shell-errors = { path = "../tpt-shell-errors", version = "0.0.0" }
 tpt-shell-manifest = { path = "../tpt-shell-manifest", version = "0.0.0" }
+tpt-shell-agent = { path = "../tpt-shell-agent", version = "0.0.0" }
 tpt-shell-compliance = { path = "../tpt-shell-compliance", version = "0.0.0" }
 tpt-shell-audit = { path = "../tpt-shell-audit", version = "0.0.0" }
 tpt-shell-test = { path = "../tpt-shell-test", version = "0.0.0" }

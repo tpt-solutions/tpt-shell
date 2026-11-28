@@ -5,6 +5,12 @@ All notable changes to `tpt-shell` are recorded here. The format follows [Keep a
 ## [Unreleased]
 
 ### Added
+- `App::from_manifest(path)` builds the app's name, windows (`[[windows]]`, with their `allow_navigation`) and virtual devices (`[devices]`) from the manifest. Pages, commands, grants and the agent profile stay in code.
+- `Window::allow_navigation(prefixes)` sets the `https://` prefixes a window may navigate to, besides its own pages (Windows).
+- Feature `net-devices` (off by default) turns on raw TCP to network devices through the app.
+- Windows: `App::audit_signing_key(name)` signs the audit log's checkpoints with a key kept in the DPAPI keystore. The first run makes the key and writes its public half to `<log>.pub`; later runs reuse it (Partial: Windows only).
+- `App::manifest_devices(path)` opens the virtual devices named in the manifest's `[devices]` section (`virtual = true` and `virtual_devices = ["kind@id", ...]`). A non-empty `TPT_VIRTUAL_DEVICES` replaces the list for that run.
+- `App::assets_compressed(files)` takes the output of `embed_dir_compressed!` and decompresses each file once at `build`. A file that does not decompress fails the build and names the file.
 - Windows: `Window::on_monitor(index)` and `Window::on_each_monitor()`. Monitors are numbered from 0 in device-name order, and a window stays on its monitor when the layout changes. `on_each_monitor` opens one window per monitor, named `<name>-1`, `<name>-2`, and so on. An index with no monitor behind it stops the app before anything opens.
 - Windows: `Window::hidden()`. The page still loads and runs, so a test can drive the app with nothing on screen (Partial).
 - Windows: `Window::profile(ProfileKind)` keeps a window's data in its profile's folder. Windows that share a profile share that folder, and their consent answers are kept there too.
@@ -32,10 +38,16 @@ All notable changes to `tpt-shell` are recorded here. The format follows [Keep a
 - Every page the shell serves on Windows carries a strict Content-Security-Policy.
 
 ### Changed
+- A kiosk's navigation list replaces a window's list only when the kiosk sets one. Before, it always replaced it.
+- The agent's window (the first window) may navigate only to the agent profile's routes, narrowed by a kiosk list. Its other script navigations are cancelled.
 - MSRV is Rust 1.90, set in the workspace manifest.
 - The README quickstart no longer calls `App::loader`, which is optional on Windows.
 - The quickstart uses the vendored `redist/win-x64/WebView2Loader.dll`, and `tpt-shell run` copies it beside the program.
 
 ### Fixed
+- Agent: a click on a link, or on a button that submits a form, is checked against the profile's routes before it runs. The page is asked where the click would go first; a destination outside the routes refuses the click and it does not run.
+- Agent: `wait_for` keeps polling when a snapshot fails while the page loads, and reports the last failure only at its timeout.
+- Agent: a profile's `actions` list now decides which page tools (`click`, `type_text`, `read`, `wait_for`) an agent is offered. Before, `invoke` alone offered all of them, and a profile without `invoke` offered none. Typed commands still need `invoke` and a listed name.
+- Agent: two agent tools with the same name (a typed command and a page action, say) now stop the app at start with a message naming the tool. Before, the session silently answered with the first one.
 - Windows: job events go only to the window that started the job.
 - Windows: UI Automation reads of a new window retry instead of failing with `E_FAIL`.

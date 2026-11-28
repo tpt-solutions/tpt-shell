@@ -65,7 +65,8 @@ pub use tpt_shell_ipc::contract::Contract as CommandContract;
 pub use tpt_shell_ipc::schema::Schema;
 pub use tpt_shell_ipc::{Caller, Limits, Router, Target, Value};
 pub use tpt_shell_macros::{
-    command, commands, embed_dir, include_manifest, register_commands, Contract,
+    command, commands, embed_dir, embed_dir_compressed, include_manifest, register_commands,
+    Contract,
 };
 /// The WebView2 release channel an app can ask for (Windows).
 #[cfg(windows)]

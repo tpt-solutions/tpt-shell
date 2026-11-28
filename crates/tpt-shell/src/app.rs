@@ -112,6 +112,10 @@ pub struct Window {
     /// The profile whose folder this window keeps its data in, if not the app's (see `profile`).
     #[cfg_attr(not(windows), allow(dead_code))]
     profile: Option<tpt_shell_profiles::Kind>,
+    /// `https://` URL prefixes this window may navigate to, besides the app's own pages. Empty
+    /// means app pages only (see `allow_navigation`).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    allow_navigation: Vec<String>,
 }
 
 /// Where a window opens among the monitors (Windows).
@@ -135,6 +139,7 @@ impl Window {
             shown: true,
             monitor: None,
             profile: None,
+            allow_navigation: Vec::new(),
         }
     }
 
@@ -192,6 +197,16 @@ impl Window {
         self
     }
 
+    /// Lets this window navigate to these `https://` URL prefixes, as well as its own app pages.
+    /// Anything else is cancelled before it loads. The manifest's `[[windows]] allow_navigation`
+    /// gives the same list. A kiosk's allowed list, when it sets one, replaces this list.
+    ///
+    /// Support: Partial. Enforced on Windows only.
+    pub fn allow_navigation(mut self, prefixes: &[&str]) -> Self {
+        self.allow_navigation = prefixes.iter().map(|p| p.to_string()).collect();
+        self
+    }
+
     #[cfg(windows)]
     fn spec(&self) -> WindowSpec {
         WindowSpec {
@@ -201,7 +216,7 @@ impl Window {
                 width: self.width,
                 height: self.height,
             },
-            allow_navigation: Vec::new(),
+            allow_navigation: self.allow_navigation.clone(),
         }
     }
 }
@@ -226,9 +241,16 @@ pub struct App {
     /// Files the app serves from its origin, by path.
     #[cfg_attr(not(windows), allow(dead_code))]
     assets: HashMap<String, Asset>,
+    /// The first compressed asset that failed to decompress, reported by `build`.
+    asset_error: Option<String>,
+    /// The virtual devices the manifest's `[devices]` section names, in the `kind@id` form.
+    device_specs: Vec<String>,
     /// Where command calls are audited, and what the log keeps.
     #[cfg_attr(not(windows), allow(dead_code))]
     audit: Option<(PathBuf, Policy)>,
+    /// The keystore entry whose key signs the audit checkpoints (Windows), set by
+    /// `audit_signing_key`.
+    audit_key: Option<String>,
     /// A recording the developer overlay's timeline steps through (see `devtools_recording`).
     #[cfg(feature = "devtools")]
     devtools_recording: Option<(PathBuf, tpt_shell_replay::Mode)>,
@@ -350,6 +372,66 @@ fn resolve_data_dir(
         Some(kind) => profile_data_dir(&local, name, kind),
     }
 }
+
+/// Opens the audit log at `path` with checkpoints signed by the key `key_name` in the keystore at
+/// `keystore_dir`. Enrols a new random key when there is none, then writes the public half to
+/// `<path>.pub`. Fails closed: a keystore error stops the start, and the log is not opened unsigned.
+#[cfg(windows)]
+fn open_signed_audit(
+    path: &Path,
+    policy: Policy,
+    key_name: &str,
+    keystore_dir: &Path,
+) -> Result<AuditLog> {
+    use tpt_shell_audit::keys::{enroll_key, KeySupplier, StoreKeySupplier};
+    use tpt_shell_audit::Signing;
+    use tpt_shell_platform_windows::{keystore::Keystore, random};
+
+    let audit_error = |e: String| Error::Backend(format!("audit key {key_name:?}: {e}"));
+    let store = Keystore::new(keystore_dir);
+    if store.get(key_name).map_err(audit_error)?.is_none() {
+        let mut seed = [0u8; 32];
+        random::fill(&mut seed).map_err(audit_error)?;
+        enroll_key(&store, key_name, &seed).map_err(|e| Error::Backend(e.to_string()))?;
+    }
+    let signer = StoreKeySupplier::new(Keystore::new(keystore_dir), key_name)
+        .signer()
+        .map_err(|e| Error::Backend(e.to_string()))?;
+    let public: String = signer
+        .verifying_key()
+        .to_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let mut public_path = path.as_os_str().to_owned();
+    public_path.push(".pub");
+    std::fs::write(
+        &public_path,
+        format!(
+            "{public}
+"
+        ),
+    )
+    .map_err(|e| {
+        Error::Backend(format!(
+            "cannot write {}: {e}",
+            Path::new(&public_path).display()
+        ))
+    })?;
+    let signing = Signing {
+        key: signer,
+        every: AUDIT_CHECKPOINT_EVERY,
+        every_secs: AUDIT_CHECKPOINT_SECS,
+    };
+    AuditLog::open_signed(path, policy, signing).map_err(|e| Error::Backend(e.to_string()))
+}
+
+/// Entries between two signed checkpoints of an app's audit log.
+#[cfg(windows)]
+const AUDIT_CHECKPOINT_EVERY: u64 = 100;
+/// Seconds between two signed checkpoints, when a quiet log has no entry count to trigger one.
+#[cfg(windows)]
+const AUDIT_CHECKPOINT_SECS: u64 = 300;
 
 /// The user's local application data folder (`%LOCALAPPDATA%`).
 #[cfg(windows)]
@@ -509,6 +591,81 @@ fn read_manifest(manifest: &Path) -> Result<tpt_shell_manifest::Manifest> {
     let text = std::fs::read_to_string(manifest)
         .map_err(|e| Error::Backend(format!("cannot read {}: {e}", manifest.display())))?;
     tpt_shell_manifest::parse(&text).map_err(|e| Error::Backend(e.to_string()))
+}
+
+/// The navigation prefixes a route list allows. A pattern ending in `*` becomes its prefix; an exact
+/// pattern stays as written, so it allows that address and nothing that starts with it, at the
+/// host boundary as the window policy checks it.
+#[cfg(feature = "agent")]
+fn route_prefixes(routes: &tpt_shell_agent::profile::RouteRules) -> Vec<String> {
+    routes
+        .patterns()
+        .iter()
+        .map(|pattern| pattern.strip_suffix('*').unwrap_or(pattern).to_string())
+        .collect()
+}
+
+/// The navigation list of the agent's window: the profile's route prefixes, narrowed by the
+/// kiosk's list when one is set, so a profile never widens a kiosk's policy. Empty routes give an
+/// empty list, which is app pages only.
+#[cfg(feature = "agent")]
+fn agent_navigation_list(routes: &[String], kiosk: &[String]) -> Vec<String> {
+    if kiosk.is_empty() {
+        return routes.to_vec();
+    }
+    routes
+        .iter()
+        .filter(|route| {
+            kiosk
+                .iter()
+                .any(|allowed| route.starts_with(allowed.as_str()))
+        })
+        .cloned()
+        .collect()
+}
+
+/// The virtual devices a manifest's `[devices]` section names. Empty when the section is absent or
+/// `virtual` is not set. A list without `virtual = true`, an unknown key, or a value of the wrong
+/// type is an error, so a mistake does not silently leave the app without its devices.
+fn devices_from_text(text: &str) -> Result<Vec<String>> {
+    let parsed = tpt_shell_manifest::parse(text).map_err(|e| Error::Backend(e.to_string()))?;
+    let Some(section) = parsed
+        .stubs
+        .iter()
+        .find(|(name, _)| name.as_str() == "devices")
+        .map(|(_, table)| table)
+    else {
+        return Ok(Vec::new());
+    };
+    for key in section.keys() {
+        if key != "virtual" && key != "virtual_devices" {
+            return Err(Error::Backend(format!("[devices]: unknown key {key:?}")));
+        }
+    }
+    let virtual_on = match section.get("virtual") {
+        None => false,
+        Some(value) => value
+            .as_bool()
+            .ok_or_else(|| Error::Backend("[devices] virtual must be true or false".into()))?,
+    };
+    let mut specs = Vec::new();
+    if let Some(value) = section.get("virtual_devices") {
+        let entries = value
+            .as_array()
+            .ok_or_else(|| Error::Backend("[devices] virtual_devices must be a list".into()))?;
+        for entry in entries {
+            let spec = entry.as_str().ok_or_else(|| {
+                Error::Backend("[devices] virtual_devices entries must be strings".into())
+            })?;
+            specs.push(spec.to_string());
+        }
+    }
+    if !specs.is_empty() && !virtual_on {
+        return Err(Error::Backend(
+            "[devices] virtual_devices needs virtual = true".into(),
+        ));
+    }
+    Ok(if virtual_on { specs } else { Vec::new() })
 }
 
 /// Reads a kiosk config's settings. `home` must be a plain path under the app origin.
@@ -689,6 +846,19 @@ impl App {
         self
     }
 
+    /// Signs the audit log's checkpoints with a key kept in the Windows keystore under `key_name`.
+    /// The first run makes a new random key, stores it encrypted for the current user (DPAPI), and
+    /// writes its public half as hex to `<log>.pub` beside the log. Later runs load the same key,
+    /// and an existing key is never replaced. Needs [`App::audit`] as well.
+    ///
+    /// Support: Partial. Windows only; the keystore is DPAPI, and macOS Keychain and Linux Secret
+    /// Service are not built.
+    #[cfg(windows)]
+    pub fn audit_signing_key(mut self, key_name: &str) -> Self {
+        self.audit_key = Some(key_name.to_string());
+        self
+    }
+
     /// Loads a `.tptreplay` recording into the developer overlay's timeline, so the overlay can
     /// step through it. `mode` decides how strictly it is read. Only debug builds with the
     /// `devtools` feature show the overlay, and an unreadable file stops the app from starting
@@ -768,6 +938,60 @@ impl App {
     pub fn assets(mut self, files: &[(&str, &str, &[u8])]) -> Self {
         for (path, content_type, body) in files {
             self = self.asset(path, content_type, *body);
+        }
+        self
+    }
+
+    /// Builds the app's declarations from the manifest at `manifest`: the app name (`[app]`), its
+    /// windows (`[[windows]]`: title, size and allowed navigation) and its virtual devices
+    /// (`[devices]`). Pages, commands, grants and the agent profile stay in code, since the manifest
+    /// does not hold them. Anything added with the other builder methods is added to these.
+    ///
+    /// Support: Partial. Windows are created as the manifest declares them; the navigation list is
+    /// enforced on Windows only.
+    pub fn from_manifest(manifest: &Path) -> Result<Self> {
+        let text = std::fs::read_to_string(manifest)
+            .map_err(|e| Error::Backend(format!("cannot read {}: {e}", manifest.display())))?;
+        let parsed = tpt_shell_manifest::parse(&text).map_err(|e| Error::Backend(e.to_string()))?;
+        let mut app = App::new().name(&parsed.app.name);
+        for declared in &parsed.windows {
+            let prefixes: Vec<&str> = declared
+                .allow_navigation
+                .iter()
+                .map(String::as_str)
+                .collect();
+            app = app.window(
+                Window::new(&declared.name)
+                    .title(&declared.title)
+                    .size(declared.width, declared.height)
+                    .allow_navigation(&prefixes),
+            );
+        }
+        app.manifest_devices(manifest)
+    }
+
+    /// Reads the `[devices]` section of the manifest at `manifest` and selects the virtual devices it
+    /// names. With `virtual = true`, `virtual_devices` lists them in the `kind@id` form of
+    /// `tpt_shell_devices::virtual_devices::from_spec`. A non-empty `TPT_VIRTUAL_DEVICES` replaces
+    /// the list for that run.
+    pub fn manifest_devices(mut self, manifest: &Path) -> Result<Self> {
+        let text = std::fs::read_to_string(manifest)
+            .map_err(|e| Error::Backend(format!("cannot read {}: {e}", manifest.display())))?;
+        self.device_specs = devices_from_text(&text)?;
+        Ok(self)
+    }
+
+    /// Adds several files that `embed_dir_compressed!` made. Each body is zstd-compressed and is
+    /// decompressed here, once, so the app serves plain bytes. A file that does not decompress
+    /// makes `build` fail, and names the file.
+    pub fn assets_compressed(mut self, files: &[(&str, &str, &[u8])]) -> Self {
+        for (path, content_type, packed) in files {
+            match zstd::decode_all(*packed) {
+                Ok(body) => self = self.asset(path, content_type, body),
+                Err(err) => {
+                    self.asset_error.get_or_insert(format!("{path}: {err}"));
+                }
+            }
         }
         self
     }
@@ -1024,6 +1248,9 @@ impl App {
     /// Fails when another launch of a single-instance app already owns it.
     #[cfg(windows)]
     pub fn build(mut self) -> Result<Running> {
+        if let Some(err) = self.asset_error.take() {
+            return Err(Error::Backend(format!("compressed asset: {err}")));
+        }
         blob::set_limit(self.blob_limit.unwrap_or(blob::LIMIT));
         let guard = match self.claim_instance()? {
             Claimed::Forwarded => {
@@ -1211,9 +1438,27 @@ impl App {
                         Error::Backend(format!("cannot create {}: {e}", dir.display()))
                     })?;
                 }
-                Some(Rc::new(RefCell::new(
-                    AuditLog::open(&path, policy).map_err(|e| Error::Backend(e.to_string()))?,
-                )))
+                let log = match self.audit_key.take() {
+                    #[cfg(windows)]
+                    Some(key_name) => {
+                        let keystore = tpt_shell_platform_windows::keystore::default_keystore_dir(
+                            &local_app_data()?,
+                            &self.name,
+                        );
+                        open_signed_audit(&path, policy, &key_name, &keystore)?
+                    }
+                    #[cfg(not(windows))]
+                    Some(_) => {
+                        return Err(Error::Backend(
+                            "audit_signing_key needs Windows; the keystore is not built here"
+                                .into(),
+                        ))
+                    }
+                    None => {
+                        AuditLog::open(&path, policy).map_err(|e| Error::Backend(e.to_string()))?
+                    }
+                };
+                Some(Rc::new(RefCell::new(log)))
             }
             None => None,
         };
@@ -1260,6 +1505,13 @@ impl App {
         let agent_window = Rc::new(std::cell::Cell::new(
             None::<tpt_shell_platform_windows::backend::WindowId>,
         ));
+        // The agent profile's routes, as navigation prefixes for the agent's window (see below).
+        #[cfg(feature = "agent")]
+        let agent_routes: Option<Vec<String>> = self
+            .agent_config
+            .as_ref()
+            .and_then(|(config, profile)| config.profile(profile))
+            .map(|p| route_prefixes(&p.routes));
         // The agent, when its manifest profile enables it. It writes to the same audit log.
         #[cfg(feature = "agent")]
         let agent_tick = match self.agent_config.take() {
@@ -1273,14 +1525,23 @@ impl App {
                         router.clone(),
                     ));
                 }
-                // The page actions an agent may use (click, type_text, read), which the profile allows.
-                tools.extend(crate::agent::page_action_tools(|| {
-                    agent_page_script(agent_window.clone())
-                }));
+                // The page actions an agent may use (click, type_text, read). The session offers
+                // each one only when the profile lists its verb.
+                // A click may only lead where the profile's routes allow. No profile, or no routes,
+                // means no link or submit button may be followed.
+                let routes = config
+                    .profile(&profile)
+                    .map(|p| p.routes.clone())
+                    .unwrap_or_default();
+                let page_tools = crate::agent::page_action_tools(
+                    || agent_page_script(agent_window.clone()),
+                    routes,
+                );
                 let setup = crate::agent::AgentSetup {
                     config,
                     profile,
                     tools,
+                    page_tools,
                     page_script: Some(agent_page_script(agent_window.clone())),
                     resource_script: Some(agent_page_script(agent_window.clone())),
                 };
@@ -1332,17 +1593,26 @@ impl App {
             }
             None => None,
         };
-        // Virtual devices from TPT_VIRTUAL_DEVICES (see `tpt_shell_devices::virtual_devices`).
-        let devices = match std::env::var("TPT_VIRTUAL_DEVICES") {
-            Ok(spec) if !spec.trim().is_empty() => {
-                let transports = tpt_shell_devices::virtual_devices::from_spec(&spec)
-                    .map_err(|e| Error::Backend(format!("TPT_VIRTUAL_DEVICES: {e}")))?;
+        // Virtual devices from TPT_VIRTUAL_DEVICES (see `tpt_shell_devices::virtual_devices`). A
+        // variable that is unset or empty gives no hub; a typo fails the start.
+        let devices = {
+            // A non-empty environment variable replaces the manifest's list for this run.
+            let env_set = std::env::var(tpt_shell_devices::virtual_devices::ENV_VAR)
+                .is_ok_and(|spec| !spec.trim().is_empty());
+            let transports = if !env_set && !self.device_specs.is_empty() {
+                tpt_shell_devices::virtual_devices::from_spec(&self.device_specs.join(";"))
+                    .map_err(|e| Error::Backend(format!("[devices] virtual_devices: {e}")))?
+            } else {
+                tpt_shell_devices::virtual_devices::from_env().map_err(Error::Backend)?
+            };
+            if transports.is_empty() {
+                None
+            } else {
                 Some(tpt_shell_devices::hub::DeviceHub::new(
                     transports,
                     |_: &tpt_shell_devices::hub::Event| {},
                 ))
             }
-            _ => None,
         };
         let kiosk = self.kiosk;
         // Single-app kiosks block the chords Alt+Tab, Win, Alt+F4 and Ctrl+Esc (best effort).
@@ -1391,7 +1661,18 @@ impl App {
         let mut windows = Vec::new();
         for (window, device, profile_dir) in declared {
             let mut spec = window.spec();
-            spec.allow_navigation = kiosk_allow.clone();
+            // A kiosk's list is its own policy, so it replaces the window's only when it sets one.
+            if !kiosk_allow.is_empty() {
+                spec.allow_navigation = kiosk_allow.clone();
+            }
+            // The agent's window, which is the first one, may navigate only where the profile's
+            // routes lead, narrowed by the kiosk's list.
+            #[cfg(feature = "agent")]
+            if windows.is_empty() {
+                if let Some(routes) = &agent_routes {
+                    spec.allow_navigation = agent_navigation_list(routes, &kiosk_allow);
+                }
+            }
             let id = match &profile_dir {
                 Some(dir) => backend.create_in_profile(&spec, dir)?,
                 None => backend.create(&spec)?,
@@ -2246,6 +2527,158 @@ mod tests {
             app.assets["app.js"].content_type,
             "text/javascript; charset=utf-8"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn from_manifest_declares_the_app_its_windows_and_its_navigation() {
+        let dir = std::env::temp_dir().join(format!("tpt-from-manifest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("test folder");
+        let manifest = dir.join("tpt-shell.toml");
+        std::fs::write(
+            &manifest,
+            "[app]
+name = \"demo\"
+             [[windows]]
+name = \"main\"
+title = \"Main\"
+width = 640
+height = 480
+             allow_navigation = [\"https://example.com/\"]
+",
+        )
+        .expect("manifest");
+        let app = App::from_manifest(&manifest).expect("the manifest declares the app");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(app.name, "demo");
+        assert_eq!(app.windows.len(), 1);
+        let spec = app.windows[0].spec();
+        assert_eq!(spec.name, "main");
+        assert_eq!(spec.title, "Main");
+        assert_eq!(spec.allow_navigation, ["https://example.com/"]);
+    }
+
+    #[cfg(feature = "agent")]
+    #[test]
+    fn a_profile_route_becomes_a_navigation_prefix() {
+        let routes = tpt_shell_agent::profile::RouteRules::new(vec![
+            "https://a.example/*".into(),
+            "https://b.example/help.html".into(),
+        ])
+        .expect("routes");
+        assert_eq!(
+            route_prefixes(&routes),
+            ["https://a.example/", "https://b.example/help.html"]
+        );
+    }
+
+    #[cfg(feature = "agent")]
+    #[test]
+    fn a_kiosk_list_narrows_the_agent_list_and_is_never_widened_by_it() {
+        let routes = vec![
+            "https://a.example/x/y".to_string(),
+            "https://evil.example/".to_string(),
+        ];
+        // No kiosk list: the routes stand as they are.
+        assert_eq!(agent_navigation_list(&routes, &[]), routes);
+        // A kiosk list keeps only the routes inside it.
+        let kiosk = vec!["https://a.example/x/".to_string()];
+        assert_eq!(
+            agent_navigation_list(&routes, &kiosk),
+            ["https://a.example/x/y"]
+        );
+        // No routes allow nothing: app pages only.
+        assert!(agent_navigation_list(&[], &kiosk).is_empty());
+    }
+
+    #[test]
+    fn the_manifest_devices_are_read_only_when_virtual_is_on() {
+        let base = "[app]
+name = \"demo\"
+";
+        let on = format!(
+            "{base}[devices]
+virtual = true
+virtual_devices = [\"serial@serial:COM7\", \"hid@hid:1234:5678\"]
+"
+        );
+        assert_eq!(
+            devices_from_text(&on).expect("two devices"),
+            ["serial@serial:COM7", "hid@hid:1234:5678"]
+        );
+        // No section, or a section with no list, names nothing.
+        assert!(devices_from_text(base).expect("no section").is_empty());
+        let no_list = format!(
+            "{base}[devices]
+virtual = true
+"
+        );
+        assert!(devices_from_text(&no_list).expect("no list").is_empty());
+        // A list without `virtual = true` is refused, not ignored.
+        let off = format!(
+            "{base}[devices]
+virtual = false
+virtual_devices = [\"serial@serial:COM7\"]
+"
+        );
+        assert!(devices_from_text(&off).is_err());
+        // Unknown keys and wrong types are refused.
+        let typo = format!(
+            "{base}[devices]
+virtul = true
+"
+        );
+        assert!(devices_from_text(&typo).is_err());
+        let wrong = format!(
+            "{base}[devices]
+virtual = \"yes\"
+"
+        );
+        assert!(devices_from_text(&wrong).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_signed_audit_log_keeps_its_key_across_starts() {
+        let dir = std::env::temp_dir().join(format!("tpt-audit-key-{}", std::process::id()));
+        let keystore = dir.join("keystore");
+        let log = dir.join("audit.log");
+        drop(
+            open_signed_audit(&log, Policy::default(), "audit-test", &keystore)
+                .expect("first start"),
+        );
+        let first = std::fs::read_to_string(dir.join("audit.log.pub")).expect("public key");
+        drop(
+            open_signed_audit(&log, Policy::default(), "audit-test", &keystore)
+                .expect("second start"),
+        );
+        let second = std::fs::read_to_string(dir.join("audit.log.pub")).expect("public key");
+        assert_eq!(first, second, "a second start must not replace the key");
+        assert!(
+            tpt_shell_audit::verifying_key_from_hex(first.trim()).is_some(),
+            "the public key file holds a verifying key: {first}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compressed_embedded_files_decompress_to_the_raw_bytes() {
+        let raw = App::new().assets(crate::embed_dir!("../../fixtures/app"));
+        let packed =
+            App::new().assets_compressed(crate::embed_dir_compressed!("../../fixtures/app"));
+        assert!(packed.asset_error.is_none());
+        assert_eq!(packed.assets.len(), raw.assets.len());
+        for (path, asset) in &raw.assets {
+            assert_eq!(&packed.assets[path], asset, "{path}");
+        }
+    }
+
+    #[test]
+    fn a_compressed_file_that_does_not_decompress_fails_the_build() {
+        let app = App::new().assets_compressed(&[("bad.js", "text/javascript", b"not zstd")]);
+        assert!(!app.assets.contains_key("bad.js"));
+        let err = app.asset_error.expect("the bad file is reported");
+        assert!(err.starts_with("bad.js: "), "{err}");
     }
 
     #[cfg(windows)]
