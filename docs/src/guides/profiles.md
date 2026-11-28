@@ -5,9 +5,9 @@ sessions. It also covers export, quotas and wiping. It is for developers who cho
 and for operators who need to know what is left on a machine.
 
 Status: the profile kinds, the profile store, ephemeral folders, wiping, quotas and encrypted export
-are built and tested as file operations. The app uses the chosen folder for its windows on Windows.
-Per-window profiles, the browser-side mappings on macOS and Linux, and the conformance tests for
-isolation are not done.
+are built and tested as file operations. The app uses the chosen folder for its windows on Windows,
+and each window can have its own profile there. The browser-side mappings on macOS and Linux, and
+the conformance tests for isolation, are not done.
 
 ## Kinds
 
@@ -30,8 +30,19 @@ fn private_session() -> App {
 
 `App::data_dir(path)` names a folder directly. It wins over the profile.
 
-Every window of one app shares the chosen folder. Separate profiles for separate windows are not
-built.
+Every window of one app shares the chosen folder unless the window says otherwise. A window can
+name its own profile with `Window::profile(kind)` (Windows):
+
+```rust
+App::new("demo")
+    .window(Window::new("main"))                                   // the app's folder
+    .window(Window::new("work").profile(Kind::Named("work".into()))) // its own folder
+```
+
+Windows that name the same profile share one WebView2 environment, so they share their storage.
+A window in another profile cannot see cookies, local storage or cache from the first. A window
+with `Kind::Ephemeral` gets a session folder that is wiped when the app stops. A profiled window's
+consent answers go in that folder's `consent.txt`; other windows keep theirs in the app's folder.
 
 ## Names
 
@@ -76,7 +87,8 @@ Keep the passphrase apart from the file. A lost passphrase cannot be recovered.
 | Mapping | Windows | macOS | Linux |
 |---|---|---|---|
 | Default, named and ephemeral folders | Built | Not built | Not built |
-| WebView2 user data folder | Built | Not applicable | Not applicable |
+| WebView2 user data folder, app-wide | Built | Not applicable | Not applicable |
+| WebView2 user data folder, per window (`Window::profile`) | Built; isolation tested live on one machine | Not applicable | Not applicable |
 | Data-store identifier (macOS 14+) | Not applicable | Not built | Not applicable |
 | WebsiteDataManager base directories | Not applicable | Not applicable | Not built |
 | `tpt.caps` reports the profile level | Not built | Not built | Not built |

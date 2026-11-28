@@ -37,7 +37,11 @@ Keys (from `tpt-shell-kiosk::policy`):
 - `home`: a path under the app origin. Default `index.html`. A path that leaves the app is refused.
 - `idle_seconds`: a whole number above 0. Absent means no idle reset.
 - `allow`: extra URLs the windows may open. Entries are absolute URLs or app paths.
-- `fullscreen` and `single_window`: window placement. The backends do not apply them yet.
+- `fullscreen` and `single_window`: window placement. Applied on Windows; macOS and Linux do not
+  apply them yet.
+- `monitors`: `"default"` (the system places the window) or `"each"`, one window per connected
+  monitor, each filling its monitor (Windows). `"each"` needs `"single_window": false`. The windows
+  are named `<name>-1`, `<name>-2` and so on, in device-name order, and grants refer to those names.
 - `disable`: booleans for devtools, context menu, zoom, text selection, drag and drop, print
   shortcuts, function keys, swipe gestures and key chords. Unset keys take the mode's default.
 
@@ -123,7 +127,8 @@ is handled by Windows and cannot be blocked from the app.
 | Navigation allowlist | Parsed; enforcement is partial (see [Security](../security.md)) |
 | Lock-down features (devtools, context menu, zoom and so on) | Parsed; only some are applied, on Windows (todo M6) |
 | Key-chord hook | Windows only, best effort |
-| Multi-monitor placement and rotation | Not built |
+| Multi-monitor placement (`monitors: "each"`, `App::on_monitor`) | Built on Windows. Tested on one monitor; a second monitor is not exercised on hardware |
+| Rotation and resolution changes | Built on Windows: a window bound to a monitor is refit when the display layout changes (WM_DISPLAYCHANGE). Not seen on a rotated display yet |
 | Local admin endpoint and health endpoint | Behind the `admin-endpoint` and `health-endpoint` features, off by default. Not in the todo as done |
 | Signing tool for configs | Not built as a command (helper function only) |
 | `tpt-shell add kiosk` and the `kiosk` template | Not built (todo M6, M11) |

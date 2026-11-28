@@ -13,6 +13,8 @@
 //! - `allow`: extra URLs the windows may navigate to. Each entry is an absolute URL or a path
 //!   under the app origin. Prefix matches count only at a path boundary.
 //! - `fullscreen` and `single_window`: window placement, both default `true` in single-app mode.
+//! - `monitors`: `"default"` (the system places the window) or `"each"`, one full-screen window
+//!   per connected monitor. `"each"` needs `single_window` to be `false`. Default `"default"`.
 //! - `disable`: an object of booleans, see [`Lockdown`]. Unset keys take the mode's default.
 
 use std::fmt;
@@ -92,6 +94,8 @@ impl Lockdown {
 pub struct Windows {
     pub fullscreen: bool,
     pub single_window: bool,
+    /// One window per connected monitor (`"monitors": "each"`).
+    pub each_monitor: bool,
 }
 
 /// A parsed kiosk config.
@@ -227,10 +231,26 @@ pub fn parse(config: &Value) -> Result<KioskPolicy, PolicyError> {
         Some(_) => return Err(PolicyError("allow must be a list of strings".into())),
     };
 
+    let each_monitor = match config.get("monitors") {
+        None => false,
+        Some(Value::String(s)) if s == "default" => false,
+        Some(Value::String(s)) if s == "each" => true,
+        Some(_) => {
+            return Err(PolicyError(
+                "monitors must be \"default\" or \"each\"".into(),
+            ))
+        }
+    };
     let windows = Windows {
         fullscreen: flag(config, "fullscreen", mode == Mode::SingleApp)?,
         single_window: flag(config, "single_window", mode == Mode::SingleApp)?,
+        each_monitor,
     };
+    if windows.each_monitor && windows.single_window {
+        return Err(PolicyError(
+            "monitors \"each\" opens one window per monitor, so single_window must be false".into(),
+        ));
+    }
 
     let base = match mode {
         Mode::SingleApp => Lockdown::single_app(),
@@ -298,6 +318,18 @@ mod tests {
         assert!(policy.windows.fullscreen && policy.windows.single_window);
         assert_eq!(policy.lockdown, Lockdown::single_app());
         assert!(!policy.lockdown.text_selection, "selection is left on");
+    }
+
+    #[test]
+    fn monitors_each_needs_several_windows_and_the_default_is_the_system_placement() {
+        let each = parse(&json!({"monitors": "each", "single_window": false})).expect("parse");
+        assert!(each.windows.each_monitor);
+        assert!(!parse(&json!({})).expect("parse").windows.each_monitor);
+        assert!(
+            parse(&json!({"monitors": "each"})).is_err(),
+            "single_window is true by default"
+        );
+        assert!(parse(&json!({"monitors": "some"})).is_err());
     }
 
     #[test]

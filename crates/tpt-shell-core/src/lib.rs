@@ -34,7 +34,7 @@ pub use executor::{block_on, Executor};
 pub use geometry::{LogicalRect, LogicalSize, PhysicalSize, ScaleFactor};
 pub use platform::{
     ClipboardBackend, ColorScheme, MessageAnswer, MessageBox, MessageButtons, MessageIcon,
-    OpenDialog, Platform, ThemeBackend,
+    OpenDialog, Platform, Rgb, ThemeBackend, TrayItem, TRAY_ACTIVATE,
 };
 pub use rng::{Rng, SeededRng, SystemRng};
 pub use theme::{injection_script, Signals, Theme};

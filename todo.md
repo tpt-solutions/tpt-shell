@@ -114,7 +114,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] `WebviewBackend` trait, M1 subset: load html, navigate (app:// only), eval, post message, set_message_handler (page to shell; the default returns `Unsupported`, so macOS and Linux stay honest until they implement it; Windows and the fake implement it)
 - [x] `WebviewBackend` crash callback and reload (verified by a renderer crash through DevTools), intercept (WebResourceRequested), nav policy hooks, doc-start script
 - [ ] `WebviewBackend` remaining: snapshot, devtools toggle, profile binding, a11y tree (devtools and context menu are set per window at creation, release off, debug on; no runtime toggle is exposed yet)
-- [ ] `Platform` trait (menus, tray, dialogs, clipboard, notifications, deep links, single instance, theme/accent, keystore) (clipboard text and colour scheme are in `tpt-shell-core::platform` with Windows and fake implementations; single instance is in `tpt-shell-platform-windows::single_instance` (Windows only, named mutex and `WM_COPYDATA`, tested in one process and across two processes); the notification-area icon with a context menu is `tpt-shell-platform-windows::tray` and `App::tray` (Windows only; a left click and a menu pick are tested, a right click is not, since it needs a user; the icon is the default application icon; balloon notifications through `Running::notify`); DPAPI keystore, deep-link registration and window-state restore are on Windows too (see their items below); the rest are not started)
+- [ ] `Platform` trait (menus, tray, dialogs, clipboard, notifications, deep links, single instance, theme/accent, keystore) (clipboard text and colour scheme are in `tpt-shell-core::platform` with Windows and fake implementations; single instance is in `tpt-shell-platform-windows::single_instance` (Windows only, named mutex and `WM_COPYDATA`, tested in one process and across two processes); the notification-area icon with a context menu is `tpt-shell-platform-windows::tray` and `App::tray` (Windows only; a left click and a menu pick are tested, a right click is not, since it needs a user; the icon is the default application icon; balloon notifications through `Running::notify`); DPAPI keystore, deep-link registration and window-state restore are on Windows too (see their items below); the rest are not started; 2026-11-28: `Platform` now carries `accent_color` (on `ThemeBackend`), `set_tray`, `remove_tray` and `notify`, with Windows and the fake implementing them. The tray icon moved from `Running` into the backend. Tested live on Windows (set, replace, remove, accent colour read from DWM). 2026-11-28 (later): `Platform::set_menu_bar` puts a Windows menu bar on every top-level window, including ones made later; picks reach the app's callback (tested live). macOS native menus and Linux menus are not built. Single instance stays a start-up step, not a trait call (see the `platform` module docs). macOS and Linux do not implement the new methods)
 - [x] `Clock` and `Rng` traits (system and fake/seeded implementations, unit tested)
 - [x] Single UI thread model and `EventLoopProxy` (Send + Sync)
 - [x] Minimal built-in async executor and worker pool (no external runtime): `block_on`, `Executor` (`execute`, `spawn`), tested
@@ -363,7 +363,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 
 ### tpt-shell-profiles
 - [x] Profile kinds: default, named, ephemeral (`tpt-shell-profiles`)
-- [ ] Window-to-profile binding (`App::profile(ProfileKind::Named | Ephemeral)` chooses the folder the windows keep their data in; every window of an app shares that folder, so per-window profiles are not built)
+- [x] Window-to-profile binding (`App::profile(ProfileKind::Named | Ephemeral)` chooses the folder the windows keep their data in; 2026-11-28, Windows: `Window::profile(kind)` binds one window to its own profile, with its own WebView2 environment. Windows in the same profile share storage. Tested live: a second profile cannot read the first one's local storage. The macOS and Linux mappings are separate items below. Consent answers for a profiled window go in that window's folder too, in `consent.txt` there, tested on Windows)
 - [ ] Windows mapping: WebView2 profile name / user data folder
 - [ ] macOS mapping: data-store identifier (14+), non-persistent otherwise
 - [x] Linux mapping: WebsiteDataManager base dirs / ephemeral (`a_data_directory_gives_persistent_storage_in_private_folders` and `no_directory_means_ephemeral_storage` pass in CI)
@@ -380,11 +380,11 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [x] `[kiosk] mode = "single-app"` full-screen, single window, allowlisted navigation
 - [ ] Disable devtools, context menu, zoom, optional text selection, drag-drop, print shortcuts, function keys, swipe gestures
 - [x] Windows low-level keyboard hook (Alt+Tab, Win, Alt+F4, Ctrl+Esc), best effort
-- [ ] Document OS lock-down recipes: Windows Assigned Access, macOS guided access/MDM, Linux dedicated session (R10)
+- [x] Document OS lock-down recipes: Windows Assigned Access, macOS guided access/MDM, Linux dedicated session (R10) (2026-11-28: `docs/src/guides/kiosk.md`, "Operating system lock-down". The macOS and Linux recipes are not tested on those systems.)
 - [ ] `app.snapshot_state()` on interval and on exit, typed state store, restore on restart (`App::snapshot_state(path, every, capture, restore)` saves what `capture` returns on a UI-thread timer and when the event loop ends, and calls `restore` once with the saved value before the windows show; live test. Typed state is `serde_json::Value` for now, not a derived struct; a corrupt file is reported and skipped)
 - [x] Page crash recovery: reload to last good state (routes are read from WebView2 get_Source; bounded at three failures in 60 s)
 - [ ] Idle reset: home route, clear session, ephemeral integration (`App::kiosk_config` with `idle_seconds` resets every window to the `home` page after that long with no page messages; live test. Clearing the session is done: the idle reset calls clear_session (ClearBrowsingDataAll) before going home, and the runtime test checks the return to home; the wipe of the ephemeral profile on idle is not done, and the item stays open)
-- [ ] Multi-monitor placement, rotation, per-monitor kiosk windows
+- [x] Multi-monitor placement, rotation, per-monitor kiosk windows (2026-11-28, Windows: `Window::on_monitor(n)` and `Window::on_each_monitor()` place a window on a monitor, filling its work area or, fullscreen, the whole monitor. The kiosk config's `"monitors": "each"` gives one window per monitor, named `<name>-1`, `<name>-2`. A bound window is refit on WM_DISPLAYCHANGE, so a rotated or re-sized monitor keeps it. Tested live on one monitor; placement and the refit rule are unit tested. Not seen on a second monitor or a rotated display, so those are unverified on hardware)
 - [ ] Signed local config (Ed25519) (`App::kiosk_config` loads the config only when its signature checks out, and rejects a `home` path that leaves the app; tested. The signing tool is not written, and the config does not yet set the windows or the policy beyond home and idle)
 - [x] Local admin endpoint (off by default, token protected)
 - [x] Heartbeat file and optional local HTTP health endpoint (off by default)
@@ -534,7 +534,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec ย
 - [ ] Devtools audit viewer panel
 - [x] Tamper tests: flip, drop, swap, truncate all detected (flip, drop, swap, re-chain and forged signatures are tested; truncating the tail is a documented limit that needs an external anchor)
 - [x] Property tests for the full chain with checkpoints (a seeded suite of 30 random signed chains, with byte flips, removed and swapped records, each caught; tail truncation is left out, as the anchor item covers it)
-- [ ] Document limits (compromised host, role of anchoring)
+- [x] Document limits (compromised host, role of anchoring) (2026-11-28: `docs/src/guides/audit.md`, "What the chain proves", and the Audit section of `docs/src/security.md` state the tail-truncation and compromised-host limits and the role of anchors.)
 - [ ] `audit-app` template and `audit-viewer` example (preview)
 
 ### Agent (tpt-shell-agent)
@@ -704,7 +704,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [x] Idle shell memory overhead โค 25 MB. Met for the shell process on Windows: 5.4 MB private, 23.2 MB working set (release hello, 2026-10-23). The WebView2 processes it starts take about 140 MB private, reported separately. Reading decided on the recommendation: the budget is the shell process's private memory (see BENCHMARKS.md). macOS and Linux are not measured yet (see CI)
 - [ ] Supervisor โค 5 MB idle (see the M6 item: private memory 3.2 MB, working set 7.0 MB)
 - [ ] `BENCHMARKS.md` with methodology and results (created with the method and the binary-size result; cold start, IPC, blob, memory and the macOS and Linux numbers are still to add)
-- [ ] Document any budget gaps
+- [x] Document any budget gaps (2026-11-28: `BENCHMARKS.md` marks each budget met, not met or around the budget. Gaps on Windows: cold start and first paint, and the blob sustained rate. macOS and Linux are not measured.)
 - [ ] macOS and Linux on CI. The workflow runs the tests and the conformance suite on all three OSes, and the benchmarks job now runs on all three (binary size and router cost). Not yet verified: no CI run from this session, because pushing is not part of it. The Linux adapter tests (`linux-adapters`) are `continue-on-error`, so they cannot fail the build; keep them that way until they have passed in CI. The conformance suite has checks only on Windows: on macOS and Linux every check is pending until a backend has them
 
 ### Risk review
@@ -715,7 +715,7 @@ The review found no `todo!()`, `TODO` or `FIXME` markers; unfinished work shows 
 - [ ] R5 sprawl: all support tags accurate
 - [ ] R6 device differences: real-device matrix current
 - [ ] R7 control channels: gated, tokenised, fuzzed
-- [ ] R8 replay limits: documented
+- [x] R8 replay limits: documented (2026-11-28: `docs/src/replay-format.md`, "Limits (R8)". The spec ยง10.5 run of 100 strict replays on the recording OS is still open under M8.)
 - [x] R9 competitive claims: README audited against evidence (2026-11-27: a search of the README files and docs for "first", "only" and "unique" found no uniqueness claim; `docs/src/competitive-scan.md` says none of the eight differentiators is confirmed as unique and none is claimed)
 - [ ] R10 kiosk lock-down: recipes and wording reviewed
 

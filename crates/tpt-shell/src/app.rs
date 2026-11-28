@@ -106,6 +106,21 @@ pub struct Window {
     /// Whether the window is shown when the app starts. A hidden window still loads its page.
     #[cfg_attr(not(windows), allow(dead_code))]
     shown: bool,
+    /// Which monitor the window opens on, if not chosen by the system (see `on_monitor`).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    monitor: Option<MonitorChoice>,
+    /// The profile whose folder this window keeps its data in, if not the app's (see `profile`).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    profile: Option<tpt_shell_profiles::Kind>,
+}
+
+/// Where a window opens among the monitors (Windows).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MonitorChoice {
+    /// The monitor at this index, in the order `placement::monitors` lists them.
+    Index(usize),
+    /// One window per monitor.
+    Each,
 }
 
 impl Window {
@@ -118,7 +133,37 @@ impl Window {
             height: 600.0,
             page: "index.html".into(),
             shown: true,
+            monitor: None,
+            profile: None,
         }
+    }
+
+    /// Keeps this window's data (cookies, local storage, cache) in `kind`'s folder, not the app's
+    /// (Windows, spec §10.7). Windows with the same profile share it; a window in another profile
+    /// cannot see it. `Kind::Ephemeral` gives this window a session folder that is wiped when the
+    /// app stops. Consent answers stay with the app's folder for now, not per window.
+    pub fn profile(mut self, kind: tpt_shell_profiles::Kind) -> Self {
+        self.profile = Some(kind);
+        self
+    }
+
+    /// Opens the window on monitor `index` (Windows), filling that monitor's work area, or the
+    /// whole monitor in a single-app kiosk that is full screen. Monitors are numbered from 0 in
+    /// device-name order (`\\.\DISPLAY1`, `\\.\DISPLAY2`, ...). The window stays on that monitor
+    /// when the display layout changes, for example after a rotation. An index with no monitor
+    /// behind it stops the app before anything opens.
+    pub fn on_monitor(mut self, index: usize) -> Self {
+        self.monitor = Some(MonitorChoice::Index(index));
+        self
+    }
+
+    /// Opens one window per connected monitor (Windows), each filling its monitor as
+    /// [`Window::on_monitor`] does. The windows are named `<name>-1`, `<name>-2`, and so on, in the
+    /// order of the monitors, and grants refer to those names. This is the shape of a multi-screen
+    /// kiosk. With no monitors connected the app stops before anything opens.
+    pub fn on_each_monitor(mut self) -> Self {
+        self.monitor = Some(MonitorChoice::Each);
+        self
     }
 
     /// Creates the window without showing it. Its page still loads and runs, so a test or a CI
@@ -196,6 +241,9 @@ pub struct App {
     /// The notification-area icon: tooltip, menu, and what a pick does.
     #[cfg_attr(not(windows), allow(dead_code))]
     tray: Option<(String, Vec<MenuItem>, TrayHandler)>,
+    /// The menu bar of every top-level window, and what a pick does (see [`App::menu_bar`]).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    menu_bar: Option<(Vec<tpt_shell_core::platform::Menu>, TrayHandler)>,
     /// What a signed kiosk config sets, if one was loaded.
     #[cfg_attr(not(windows), allow(dead_code))]
     kiosk: Option<KioskSettings>,
@@ -293,9 +341,7 @@ fn resolve_data_dir(
     if let Some(dir) = data_dir {
         return Ok((dir.clone(), None));
     }
-    let local = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .ok_or_else(|| Error::Backend("LOCALAPPDATA is not set".into()))?;
+    let local = local_app_data()?;
     match profile {
         None => Ok((
             default_user_data_dir(&local, name).map_err(Error::Backend)?,
@@ -303,6 +349,56 @@ fn resolve_data_dir(
         )),
         Some(kind) => profile_data_dir(&local, name, kind),
     }
+}
+
+/// The user's local application data folder (`%LOCALAPPDATA%`).
+#[cfg(windows)]
+fn local_app_data() -> Result<PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::Backend("LOCALAPPDATA is not set".into()))
+}
+
+/// Turns the windows' monitor choices into windows: each with the device name it is bound to, if
+/// any. A window for each monitor expands into one window per connected monitor, named by number.
+/// An index with no monitor behind it, or no monitor at all for `on_each_monitor`, is an error.
+#[cfg(windows)]
+fn assign_monitors(windows: Vec<Window>) -> Result<Vec<(Window, Option<String>)>> {
+    let monitors = tpt_shell_platform_windows::placement::monitors();
+    let mut out = Vec::new();
+    for window in windows {
+        match window.monitor {
+            None => out.push((window, None)),
+            Some(MonitorChoice::Index(index)) => {
+                let device = monitors
+                    .get(index)
+                    .map(|m| m.device.clone())
+                    .ok_or_else(|| {
+                        Error::Backend(format!(
+                            "window {} asks for monitor {index}, but {} monitor(s) are connected",
+                            window.name,
+                            monitors.len()
+                        ))
+                    })?;
+                out.push((window, Some(device)));
+            }
+            Some(MonitorChoice::Each) => {
+                if monitors.is_empty() {
+                    return Err(Error::Backend(format!(
+                        "window {} opens on each monitor, but none is connected",
+                        window.name
+                    )));
+                }
+                for (number, monitor) in monitors.iter().enumerate() {
+                    let mut one = window.clone();
+                    one.name = format!("{}-{}", window.name, number + 1);
+                    one.monitor = None;
+                    out.push((one, Some(monitor.device.clone())));
+                }
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// The consent answers for a window's data folder, kept in `consent.txt` there. Named profiles
@@ -315,6 +411,56 @@ fn consent_store(data_dir: &Path) -> Box<dyn tpt_shell_capabilities::ConsentStor
     match FileConsent::open(data_dir.join("consent.txt")) {
         Ok(store) => Box::new(store),
         Err(_) => Box::new(MemoryConsent::default()),
+    }
+}
+
+/// Consent answers for windows that have a profile of their own (spec §10.7: consent decisions are
+/// stored per profile). A window with no profile of its own uses the app's store. Windows that
+/// share a profile folder share one file; answers are still keyed by window name inside it.
+#[cfg(windows)]
+struct WindowConsent {
+    app: Box<dyn tpt_shell_capabilities::ConsentStore>,
+    own: HashMap<String, Rc<RefCell<Box<dyn tpt_shell_capabilities::ConsentStore>>>>,
+}
+
+#[cfg(windows)]
+impl tpt_shell_capabilities::ConsentStore for WindowConsent {
+    fn get(&self, window: &str, capability: &str) -> Option<bool> {
+        match self.own.get(window) {
+            Some(store) => store.borrow().get(window, capability),
+            None => self.app.get(window, capability),
+        }
+    }
+
+    fn set(&mut self, window: &str, capability: &str, allowed: bool) {
+        match self.own.get(window) {
+            Some(store) => store.borrow_mut().set(window, capability, allowed),
+            None => self.app.set(window, capability, allowed),
+        }
+    }
+}
+
+/// The consent store for a run: the app's folder, plus each profiled window's own folder.
+#[cfg(windows)]
+fn window_consent(
+    data_dir: &Path,
+    windows: &[(Window, Option<String>, Option<PathBuf>)],
+) -> WindowConsent {
+    let mut by_dir: HashMap<PathBuf, Rc<RefCell<Box<dyn tpt_shell_capabilities::ConsentStore>>>> =
+        HashMap::new();
+    let mut own = HashMap::new();
+    for (window, _, dir) in windows {
+        if let Some(dir) = dir {
+            let store = by_dir
+                .entry(dir.clone())
+                .or_insert_with(|| Rc::new(RefCell::new(consent_store(dir))))
+                .clone();
+            own.insert(window.name.clone(), store);
+        }
+    }
+    WindowConsent {
+        app: consent_store(data_dir),
+        own,
     }
 }
 
@@ -673,6 +819,17 @@ impl App {
         self
     }
 
+    /// Gives every top-level window a menu bar (Windows). `on_command` gets the id of a command
+    /// when the user picks it; ids must be non-zero. Windows created later get the bar too.
+    pub fn menu_bar(
+        mut self,
+        menus: Vec<tpt_shell_core::platform::Menu>,
+        on_command: impl FnMut(u32) + 'static,
+    ) -> Self {
+        self.menu_bar = Some((menus, Box::new(on_command)));
+        self
+    }
+
     /// Adds an icon to the notification area with a context menu (Windows). A left click calls
     /// `on_select` with [`TRAY_ACTIVATE`], and a right click shows the menu, whose pick calls it
     /// with that item's id (non-zero). The icon is removed when the app stops.
@@ -948,6 +1105,35 @@ impl App {
         }
         let (data_dir, ephemeral) =
             resolve_data_dir(self.data_dir.as_ref(), self.profile.as_ref(), &self.name)?;
+        // Monitor choices become concrete windows here, before anything is created.
+        // A kiosk config with `"monitors": "each"` puts one window on every monitor.
+        let each_monitor = self
+            .kiosk
+            .as_ref()
+            .is_some_and(|k| k.policy.mode == Mode::SingleApp && k.policy.windows.each_monitor);
+        let mut templates = std::mem::take(&mut self.windows);
+        if each_monitor {
+            for window in &mut templates {
+                window.monitor = Some(MonitorChoice::Each);
+            }
+        }
+        let placed = assign_monitors(templates)?;
+        // Per-window profile folders, and the ephemeral guards that keep those folders until the
+        // app stops. The guards are declared before the backend, so they outlive its windows.
+        let app_name = self.name.clone();
+        let mut window_guards: Vec<tpt_shell_profiles::Ephemeral> = Vec::new();
+        let mut declared: Vec<(Window, Option<String>, Option<PathBuf>)> = Vec::new();
+        for (window, device) in placed {
+            let dir = match &window.profile {
+                Some(kind) => {
+                    let (dir, guard) = profile_data_dir(&local_app_data()?, &app_name, kind)?;
+                    window_guards.extend(guard);
+                    Some(dir)
+                }
+                None => None,
+            };
+            declared.push((window, device, dir));
+        }
 
         // A single-app kiosk is one full-screen window that navigates only inside its allow-list.
         let single_app = self
@@ -956,10 +1142,10 @@ impl App {
             .filter(|k| k.policy.mode == Mode::SingleApp)
             .map(|k| k.policy.clone());
         if let Some(policy) = &single_app {
-            if policy.windows.single_window && self.windows.len() > 1 {
+            if policy.windows.single_window && declared.len() > 1 {
                 return Err(Error::Backend(format!(
                     "a single-app kiosk opens one window, but this app declares {}",
-                    self.windows.len()
+                    declared.len()
                 )));
             }
         }
@@ -1003,24 +1189,7 @@ impl App {
             }
             None => None,
         };
-        // The tray takes its menu out of `self`, so it is made after the overlay reads `self`.
-        let tray = match self.tray {
-            Some((tooltip, items, on_select)) => {
-                let items = items
-                    .into_iter()
-                    .map(|item| tpt_shell_platform_windows::tray::MenuItem {
-                        id: item.id,
-                        label: item.label,
-                    })
-                    .collect();
-                Some(
-                    tpt_shell_platform_windows::tray::Tray::new(&tooltip, items, on_select)
-                        .map_err(Error::Backend)?,
-                )
-            }
-            None => None,
-        };
-        let mut engine = Engine::with_consent_store(consent_store(&data_dir));
+        let mut engine = Engine::with_consent_store(Box::new(window_consent(&data_dir, &declared)));
         for grant in self.grants {
             engine.add_grant(grant).map_err(|e| Error::Backend(e.0))?;
         }
@@ -1059,6 +1228,21 @@ impl App {
         // A kiosk config's lock-down applies to every window this run creates.
         if let Some(settings) = &self.kiosk {
             backend.set_page_restrictions(page_restrictions(&settings.policy.lockdown))?;
+        }
+        // The notification-area icon, if the app asked for one.
+        if let Some((tooltip, items, on_select)) = self.tray.take() {
+            let items: Vec<tpt_shell_core::TrayItem> = items
+                .into_iter()
+                .map(|item| tpt_shell_core::TrayItem {
+                    id: item.id,
+                    label: item.label,
+                })
+                .collect();
+            tpt_shell_core::Platform::set_tray(&mut backend, &tooltip, &items, on_select)?;
+        }
+        // The menu bar goes on before any window is created, so every window gets it.
+        if let Some((menus, on_command)) = self.menu_bar.take() {
+            tpt_shell_core::Platform::set_menu_bar(&mut backend, &menus, on_command)?;
         }
         // In a debug build, TPT_DEV_DIR serves the pages from a folder, and the windows reload
         // when a file in it changes.
@@ -1140,7 +1324,7 @@ impl App {
         #[cfg(feature = "admin-endpoint")]
         let admin_server = match self.admin.take() {
             Some((addr, token)) => {
-                let names: Vec<String> = self.windows.iter().map(|w| w.name.clone()).collect();
+                let names: Vec<String> = declared.iter().map(|(w, _, _)| w.name.clone()).collect();
                 let status = Arc::new(move || serde_json::json!({ "windows": names }).to_string());
                 let flag = reset_home.clone();
                 let reset = Arc::new(move || flag.store(true, Ordering::SeqCst));
@@ -1205,24 +1389,35 @@ impl App {
             }
         })?;
         let mut windows = Vec::new();
-        for window in self.windows {
+        for (window, device, profile_dir) in declared {
             let mut spec = window.spec();
             spec.allow_navigation = kiosk_allow.clone();
-            let id = backend.create(&spec)?;
+            let id = match &profile_dir {
+                Some(dir) => backend.create_in_profile(&spec, dir)?,
+                None => backend.create(&spec)?,
+            };
             #[cfg(feature = "agent")]
             if agent_window.get().is_none() {
                 agent_window.set(Some(id));
             }
             panes.add(id, &window.name);
-            if let Some(placement) = saved.get(&window.name) {
-                if let Err(e) = backend.set_placement(id, placement.clone()) {
-                    eprintln!("tpt-shell: cannot restore window {}: {e}", window.name);
+            // A window bound to a monitor is placed there, not where it was saved.
+            match &device {
+                Some(device) => {
+                    backend.place_on_monitor(id, device, fullscreen)?;
+                }
+                None => {
+                    if let Some(placement) = saved.get(&window.name) {
+                        if let Err(e) = backend.set_placement(id, placement.clone()) {
+                            eprintln!("tpt-shell: cannot restore window {}: {e}", window.name);
+                        }
+                    }
                 }
             }
             if window.shown {
                 backend.show(id)?;
             }
-            if fullscreen {
+            if fullscreen && device.is_none() {
                 backend.set_fullscreen(id, true)?;
             }
             let caller = Caller {
@@ -1523,7 +1718,6 @@ impl App {
             windows,
             ui,
             _instance: instance,
-            tray,
             state_file,
             snapshot_state,
             recording,
@@ -1606,8 +1800,6 @@ pub struct Running {
     windows: Vec<(String, tpt_shell_platform_windows::backend::WindowId)>,
     /// Held so that no other launch can become the first instance while this app runs.
     _instance: Option<tpt_shell_platform_windows::single_instance::InstanceGuard>,
-    /// The notification-area icon, which stays until the app stops.
-    tray: Option<tpt_shell_platform_windows::tray::Tray>,
     /// Where window positions are saved when the event loop ends.
     state_file: Option<PathBuf>,
     /// The session folder of an ephemeral profile. Dropping the app wipes it.
@@ -1673,14 +1865,9 @@ impl Running {
     }
 
     /// Shows a balloon notification from the tray icon. Needs an icon, so it fails when the app
-    /// has no [`App::tray`].
-    pub fn notify(&self, title: &str, body: &str) -> Result<()> {
-        match &self.tray {
-            Some(tray) => tray.notify(title, body).map_err(Error::Backend),
-            None => Err(Error::Backend(
-                "the app has no tray icon to notify from".into(),
-            )),
-        }
+    /// has no [`App::tray`]. Goes through [`tpt_shell_core::Platform::notify`].
+    pub fn notify(&mut self, title: &str, body: &str) -> Result<()> {
+        tpt_shell_core::Platform::notify(&mut self.backend, title, body)
     }
 
     /// The virtual devices from `TPT_VIRTUAL_DEVICES`, if the variable was set. The hub is not yet
@@ -1851,6 +2038,66 @@ mod tests {
         drop(guard);
         assert!(!session.exists(), "the session folder was not wiped");
         let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_monitor_index_with_no_monitor_behind_it_stops_the_app_and_plain_windows_pass_through() {
+        let count = tpt_shell_platform_windows::placement::monitors().len();
+        let plain = Window::new("plain");
+        let out = assign_monitors(vec![plain.clone()]).expect("plain windows need no monitor");
+        assert_eq!(out, vec![(plain, None)]);
+        let missing = Window::new("far").on_monitor(count + 5);
+        let err = assign_monitors(vec![missing]).expect_err("no such monitor");
+        assert!(err.to_string().contains("asks for monitor"), "{err}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn each_monitor_expands_into_one_numbered_window_per_monitor() {
+        let monitors = tpt_shell_platform_windows::placement::monitors();
+        let out = assign_monitors(vec![Window::new("kiosk").on_each_monitor()]);
+        if monitors.is_empty() {
+            assert!(out.is_err(), "no monitors is an error for each-monitor");
+            return;
+        }
+        let out = out.expect("expands");
+        assert_eq!(out.len(), monitors.len());
+        for (i, (window, device)) in out.iter().enumerate() {
+            assert_eq!(window.name, format!("kiosk-{}", i + 1));
+            assert_eq!(device.as_deref(), Some(monitors[i].device.as_str()));
+            assert!(
+                window.monitor.is_none(),
+                "an expanded window is not expanded again"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_profiled_window_keeps_its_consent_in_its_own_folder() {
+        use tpt_shell_capabilities::ConsentStore;
+        let base = std::env::temp_dir().join(format!("tpt-app-winconsent-{}", std::process::id()));
+        let app_dir = base.join("app");
+        let work_dir = base.join("work");
+        let declared = vec![
+            (Window::new("main"), None, None),
+            (Window::new("work"), None, Some(work_dir.clone())),
+            (Window::new("work2"), None, Some(work_dir.clone())),
+        ];
+        let mut store = window_consent(&app_dir, &declared);
+        store.set("work", "device.hid", true);
+        assert_eq!(store.get("work", "device.hid"), Some(true));
+        // Answers are keyed by window name, as everywhere: another window in the same folder
+        // is asked afresh.
+        assert_eq!(store.get("work2", "device.hid"), None);
+        // The app's window does not, and its answer lands in the app's folder.
+        assert_eq!(store.get("main", "device.hid"), None);
+        store.set("main", "device.hid", false);
+        assert!(work_dir.join("consent.txt").is_file());
+        let text = std::fs::read_to_string(app_dir.join("consent.txt")).unwrap();
+        assert!(text.contains("main") && !text.contains("work"), "{text}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[cfg(windows)]

@@ -28,8 +28,29 @@ pub struct Monitor {
     pub device: String,
     /// The work area (left, top, right, bottom) in device pixels: the monitor less the taskbar.
     pub work: [i32; 4],
+    /// The whole monitor (left, top, right, bottom) in device pixels. A fullscreen window fills it.
+    pub bounds: [i32; 4],
     /// Whether this is the primary monitor. A tie between two monitors goes to the primary one.
     pub primary: bool,
+}
+
+/// The rectangle a window bound to `monitor` occupies: the whole monitor when `fullscreen`, else
+/// its work area. Read again after a display change, so a rotated monitor gets its new shape.
+///
+/// Support: Full. Pure; unit tested.
+pub fn bound_rect(monitor: &Monitor, fullscreen: bool) -> [i32; 4] {
+    if fullscreen {
+        monitor.bounds
+    } else {
+        monitor.work
+    }
+}
+
+/// The monitor named `device`, if it is still connected.
+///
+/// Support: Full. Pure; unit tested.
+pub fn find<'a>(monitors: &'a [Monitor], device: &str) -> Option<&'a Monitor> {
+    monitors.iter().find(|m| m.device == device)
 }
 
 /// The area two rectangles (left, top, right, bottom) share. Zero when they do not overlap.
@@ -133,9 +154,11 @@ fn info_of(monitor: HMONITOR) -> Option<Monitor> {
         .position(|&c| c == 0)
         .unwrap_or(info.szDevice.len());
     let w = info.monitorInfo.rcWork;
+    let b = info.monitorInfo.rcMonitor;
     Some(Monitor {
         device: String::from_utf16_lossy(&info.szDevice[..len]),
         work: [w.left, w.top, w.right, w.bottom],
+        bounds: [b.left, b.top, b.right, b.bottom],
         primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
     })
 }
@@ -168,7 +191,10 @@ pub fn monitors() -> Vec<Monitor> {
             &mut handles as *mut Vec<HMONITOR> as LPARAM,
         )
     };
-    handles.into_iter().filter_map(info_of).collect()
+    let mut found: Vec<Monitor> = handles.into_iter().filter_map(info_of).collect();
+    // Sorted by device name, so monitor N is the same monitor from one run to the next.
+    found.sort_by(|a, b| a.device.cmp(&b.device));
+    found
 }
 
 /// The device name of the monitor a window is on now, or the nearest one if it is off screen.
@@ -189,8 +215,38 @@ mod tests {
         Monitor {
             device: device.to_owned(),
             work,
+            // The taskbar is the only difference in these fixtures.
+            bounds: [work[0], work[1], work[2], work[3] + 40],
             primary,
         }
+    }
+
+    #[test]
+    fn a_bound_window_takes_the_whole_monitor_when_fullscreen_and_the_work_area_otherwise() {
+        let m = monitor("A", PRIMARY, true);
+        assert_eq!(bound_rect(&m, true), [0, 0, 1920, 1080]);
+        assert_eq!(bound_rect(&m, false), PRIMARY);
+    }
+
+    #[test]
+    fn a_rotated_monitor_is_refit_to_its_new_shape() {
+        // Landscape 1920x1080 turned to portrait: same device, new work area.
+        let before = monitor("A", PRIMARY, true);
+        let after = Monitor {
+            device: "A".into(),
+            work: [0, 0, 1080, 1920],
+            bounds: [0, 0, 1080, 1920],
+            primary: true,
+        };
+        assert_eq!(bound_rect(&before, false), [0, 0, 1920, 1040]);
+        assert_eq!(bound_rect(&after, true), [0, 0, 1080, 1920]);
+    }
+
+    #[test]
+    fn a_monitor_is_found_by_its_device_name_and_a_missing_one_is_none() {
+        let monitors = [monitor("A", PRIMARY, true), monitor("B", RIGHT, false)];
+        assert_eq!(find(&monitors, "B").map(|m| m.work), Some(RIGHT));
+        assert!(find(&monitors, "C").is_none());
     }
 
     const PRIMARY: [i32; 4] = [0, 0, 1920, 1040];

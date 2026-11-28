@@ -15,7 +15,8 @@ use crate::backend::{
 use crate::error::{Error, Result};
 use crate::geometry::{LogicalRect, LogicalSize};
 use crate::platform::{
-    ClipboardBackend, ColorScheme, MessageAnswer, MessageBox, OpenDialog, Platform, ThemeBackend,
+    ClipboardBackend, ColorScheme, MessageAnswer, MessageBox, OpenDialog, Platform, Rgb,
+    ThemeBackend, TrayItem,
 };
 
 /// The PNG signature, which the fake's snapshots start with.
@@ -106,6 +107,47 @@ pub struct FakeBackend {
     pub schemes: Vec<String>,
     /// Notifications shown, as (title, body).
     pub notifications: Vec<(String, String)>,
+    /// The accent colour the fake reports.
+    pub accent: Rgb,
+    /// The tray icon shown, as (tooltip, items). `None` when there is none.
+    pub tray: Option<(String, Vec<TrayItem>)>,
+    /// What the tray icon calls when clicked or picked from its menu.
+    tray_callback: Option<Box<dyn FnMut(u32)>>,
+    /// The menu bar set (`Platform::set_menu_bar`). Empty when there is none.
+    pub menu_bar: Vec<crate::platform::Menu>,
+    /// What the menu bar calls when a command is picked.
+    menu_callback: Option<Box<dyn FnMut(u32)>>,
+}
+
+impl FakeBackend {
+    /// Simulates picking a menu command. Returns `false` when no menu bar is set, or when no
+    /// command has that id.
+    pub fn pick_menu(&mut self, id: u32) -> bool {
+        let known = self.menu_bar.iter().any(|menu| {
+            menu.entries.iter().any(|entry| {
+                matches!(entry, crate::platform::MenuEntry::Command { id: i, enabled: true, .. } if *i == id)
+            })
+        });
+        match (known, self.menu_callback.as_mut()) {
+            (true, Some(callback)) => {
+                callback(id);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Simulates a click on the tray icon: `0` for a left click, or a menu item's id. Returns
+    /// `false` when no icon is shown.
+    pub fn click_tray(&mut self, id: u32) -> bool {
+        match self.tray_callback.as_mut() {
+            Some(callback) => {
+                callback(id);
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 impl ClipboardBackend for FakeBackend {
@@ -122,6 +164,10 @@ impl ClipboardBackend for FakeBackend {
 impl ThemeBackend for FakeBackend {
     fn color_scheme(&self) -> Result<ColorScheme> {
         Ok(self.scheme)
+    }
+
+    fn accent_color(&self) -> Result<Rgb> {
+        Ok(self.accent)
     }
 }
 
@@ -430,7 +476,58 @@ impl Platform for FakeBackend {
         Ok(())
     }
 
+    fn set_tray(
+        &mut self,
+        tooltip: &str,
+        items: &[TrayItem],
+        on_select: Box<dyn FnMut(u32)>,
+    ) -> Result<()> {
+        if items
+            .iter()
+            .any(|item| item.id == crate::platform::TRAY_ACTIVATE)
+        {
+            return Err(Error::Backend("tray menu ids must be non-zero".into()));
+        }
+        self.tray = Some((tooltip.to_string(), items.to_vec()));
+        self.tray_callback = Some(on_select);
+        Ok(())
+    }
+
+    fn remove_tray(&mut self) -> Result<()> {
+        self.tray = None;
+        self.tray_callback = None;
+        Ok(())
+    }
+
+    fn set_menu_bar(
+        &mut self,
+        menus: &[crate::platform::Menu],
+        on_command: Box<dyn FnMut(u32)>,
+    ) -> Result<()> {
+        use crate::platform::MenuEntry;
+        let zero = menus.iter().any(|menu| {
+            menu.entries
+                .iter()
+                .any(|e| matches!(e, MenuEntry::Command { id: 0, .. }))
+        });
+        if zero {
+            return Err(Error::Backend("menu command ids must be non-zero".into()));
+        }
+        self.menu_bar = menus.to_vec();
+        self.menu_callback = if menus.is_empty() {
+            None
+        } else {
+            Some(on_command)
+        };
+        Ok(())
+    }
+
     fn notify(&mut self, title: &str, body: &str) -> Result<()> {
+        if self.tray.is_none() {
+            return Err(Error::Backend(
+                "the app has no tray icon to notify from".into(),
+            ));
+        }
         self.notifications
             .push((title.to_string(), body.to_string()));
         Ok(())
@@ -856,6 +953,8 @@ mod platform_tests {
         assert_eq!(b.schemes, vec!["myapp".to_string()]);
         b.unregister_scheme("myapp").unwrap();
         assert!(b.schemes.is_empty());
+        // A notification is a balloon from the tray icon, so the icon comes first.
+        b.set_tray("My app", &[], Box::new(|_| {})).unwrap();
         b.notify("Done", "Export finished").unwrap();
         assert_eq!(
             b.notifications,

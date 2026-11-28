@@ -28,8 +28,11 @@ use tpt_shell_core::platform::{
 use tpt_shell_core::theme::{injection_script, settings_script, Theme};
 use tpt_shell_core::{Error, LogicalSize, PhysicalSize, Result, ScaleFactor};
 use tpt_shell_core::{LogicalRect, Platform};
+use windows_sys::core::BOOL;
 use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows_sys::Win32::Graphics::Dwm::{DwmExtendFrameIntoClientArea, DwmSetWindowAttribute};
+use windows_sys::Win32::Graphics::Dwm::{
+    DwmExtendFrameIntoClientArea, DwmGetColorizationColor, DwmSetWindowAttribute,
+};
 
 use windows_sys::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
@@ -51,12 +54,13 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, CW_USEDEFAULT, GWL_STYLE,
     HWND_MESSAGE, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, MSG, PM_REMOVE, SWP_FRAMECHANGED,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOW, SW_SHOWMAXIMIZED,
-    SW_SHOWNORMAL, WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_DESTROY, WM_DPICHANGED, WM_SETTINGCHANGE,
-    WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_CAPTION, WS_OVERLAPPEDWINDOW, WS_POPUP,
+    SW_SHOWNORMAL, WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DISPLAYCHANGE,
+    WM_DPICHANGED, WM_SETTINGCHANGE, WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_CAPTION,
+    WS_OVERLAPPEDWINDOW, WS_POPUP,
 };
 
 use crate::com::{wide, HRESULT};
-use crate::loader::OfficialLoader;
+use crate::loader::{CreateEnvironmentFn, OfficialLoader};
 use crate::shim::SHIM_JS;
 use crate::webview2::{
     check_fixed_runtime_folder, create_environment_with, Color, Controller, Environment,
@@ -134,6 +138,9 @@ struct Entry {
     /// Called when WebView2 reports a process failure for this window. Set by
     /// `on_process_failed`; empty until then.
     process_failed: Rc<RefCell<Option<ProcessFailedHandler>>>,
+    /// The monitor (device name) the window is bound to by `place_on_monitor`. A bound window
+    /// is refit to that monitor when the display layout changes, for example after a rotation.
+    monitor: Option<String>,
 }
 
 thread_local! {
@@ -505,6 +512,24 @@ pub struct WindowsBackend {
     /// Folder for the keystore (`Platform::keystore_set` and friends). Unset until the app
     /// chooses one with `set_keystore_dir`; keystore calls are refused until then.
     keystore_dir: Option<std::path::PathBuf>,
+    /// The data folder the backend's own environment (`env`) uses: the folder `new` was given.
+    default_dir: PathBuf,
+    /// What is needed to make more environments, one per profile folder (`create_in_profile`).
+    create_env: CreateEnvironmentFn,
+    env_options: EnvironmentOptions,
+    /// Environments for windows bound to another profile folder, one per folder.
+    profile_envs: Vec<(PathBuf, Environment)>,
+    /// The notification-area icon (`Platform::set_tray`). Removed when the backend drops.
+    tray: Option<crate::tray::Tray>,
+    /// The menu bar (`Platform::set_menu_bar`), attached to each top-level window, now and later.
+    menu_bar: Option<Vec<tpt_shell_core::platform::Menu>>,
+}
+
+/// What a menu command calls (`Platform::set_menu_bar`), with the command id.
+type MenuCallback = Box<dyn FnMut(u32)>;
+
+thread_local! {
+    static MENU_CALLBACK: RefCell<Option<MenuCallback>> = RefCell::new(None);
 }
 
 impl WindowsBackend {
@@ -541,7 +566,7 @@ impl WindowsBackend {
             return Err(hr_error("CoInitializeEx", hr));
         }
         match Self::start(loader_path, user_data_dir, options) {
-            Ok((loader, env)) => {
+            Ok((loader, env, create_env)) => {
                 // SAFETY: no pointer arguments; per-monitor V2 is process-wide, and a second
                 // call simply fails, which is fine.
                 unsafe {
@@ -567,6 +592,12 @@ impl WindowsBackend {
                     env: Some(env),
                     _loader: loader,
                     keystore_dir: None,
+                    default_dir: user_data_dir.to_path_buf(),
+                    create_env,
+                    env_options: options.clone(),
+                    profile_envs: Vec::new(),
+                    tray: None,
+                    menu_bar: None,
                 })
             }
             Err(e) => {
@@ -581,28 +612,48 @@ impl WindowsBackend {
         loader_path: &Path,
         user_data_dir: &Path,
         options: &EnvironmentOptions,
-    ) -> Result<(OfficialLoader, Environment)> {
+    ) -> Result<(OfficialLoader, Environment, CreateEnvironmentFn)> {
         let loader = OfficialLoader::load(loader_path)
             .map_err(|e| Error::Backend(format!("loader: {e}")))?;
         let create = loader
             .create_environment_fn()
             .map_err(|e| Error::Backend(format!("loader: {e}")))?;
-        let slot: Rc<RefCell<Option<std::result::Result<Environment, HRESULT>>>> =
-            Rc::new(RefCell::new(None));
-        let done = slot.clone();
-        create_environment_with(create, user_data_dir, options, move |r| {
-            *done.borrow_mut() = Some(r)
-        })
-        .map_err(|hr| hr_error("CreateCoreWebView2Environment", hr))?;
-        if !pump_until(CONTROLLER_TIMEOUT, || slot.borrow().is_some()) {
-            return Err(Error::Backend("WebView2 environment timed out".into()));
+        let env = new_environment(create, user_data_dir, options)?;
+        Ok((loader, env, create))
+    }
+
+    /// The environment for windows bound to `dir` (see [`WindowsBackend::create_in_profile`]).
+    /// Made on first use and kept until the backend is dropped.
+    fn environment_for(&mut self, dir: &Path) -> Result<Environment> {
+        if let Some((_, env)) = self.profile_envs.iter().find(|(d, _)| d == dir) {
+            return Ok(env.clone());
         }
-        let env = slot
-            .borrow_mut()
-            .take()
-            .ok_or_else(|| Error::Backend("WebView2 environment lost".into()))?
-            .map_err(|hr| hr_error("WebView2 environment", hr))?;
-        Ok((loader, env))
+        let env = new_environment(self.create_env, dir, &self.env_options)?;
+        self.profile_envs.push((dir.to_path_buf(), env.clone()));
+        Ok(env)
+    }
+
+    fn default_env(&self) -> Result<Environment> {
+        self.env
+            .clone()
+            .ok_or_else(|| Error::Backend("environment released".into()))
+    }
+
+    /// Creates a window whose page keeps its data in `profile_dir`, not in the backend's folder.
+    /// Windows with the same folder share one WebView2 environment, so they share their storage;
+    /// windows in different folders cannot see each other's cookies, local storage or cache. The
+    /// folder is used as given and created by WebView2 if it does not exist. A folder equal to the
+    /// backend's own one is the same as [`WindowBackend::create`].
+    ///
+    /// Support: Partial. Verified on Windows with two folders in one process (storage is not shared
+    /// between them). The folder's lifetime is the caller's: the backend does not delete it.
+    pub fn create_in_profile(&mut self, spec: &WindowSpec, profile_dir: &Path) -> Result<WindowId> {
+        self.check_thread()?;
+        if profile_dir == self.default_dir {
+            return self.create(spec);
+        }
+        let env = self.environment_for(profile_dir)?;
+        self.create_window(null_mut(), spec, env)
     }
 
     /// Sets the theme for windows created after this call. Existing windows keep their theme.
@@ -709,6 +760,35 @@ impl WindowsBackend {
             return Err(Error::Backend("SetWindowPlacement failed".into()));
         }
         Ok(())
+    }
+
+    /// The monitors that are connected now, sorted by device name, so index `n` names the same
+    /// monitor from one run to the next. Empty when Windows reports none.
+    ///
+    /// Support: Partial. Read when called; see `placement::monitors`.
+    pub fn monitors(&self) -> Result<Vec<crate::placement::Monitor>> {
+        self.check_thread()?;
+        Ok(crate::placement::monitors())
+    }
+
+    /// Moves window `id` onto the monitor named `device` (a device name from [`Self::monitors`])
+    /// and binds it there: the window fills that monitor's work area, or the whole monitor when
+    /// `fullscreen`. A bound window is refit when the display layout changes (WM_DISPLAYCHANGE),
+    /// so a monitor that rotates or changes resolution keeps its window on it. Fails when the
+    /// monitor is not connected; the window is left where it was.
+    ///
+    /// Support: Partial. Verified on Windows with one monitor. Rotation and a second monitor are
+    /// not exercised on real hardware.
+    pub fn place_on_monitor(&mut self, id: WindowId, device: &str, fullscreen: bool) -> Result<()> {
+        self.check_thread()?;
+        let hwnd = self.require(id)?;
+        let monitors = crate::placement::monitors();
+        let monitor = crate::placement::find(&monitors, device)
+            .ok_or_else(|| Error::Backend(format!("no monitor named {device} is connected")))?;
+        move_to(hwnd, crate::placement::bound_rect(monitor, false));
+        self.with_entry(id, |e| e.monitor = Some(device.to_string()))?;
+        // Fullscreen is applied after the move, so it takes the monitor the window is now on.
+        self.set_fullscreen(id, fullscreen)
     }
 
     /// Calls `tick` on the UI thread every `interval`, from the message loop, until it is
@@ -878,7 +958,10 @@ impl Drop for WindowsBackend {
         }
         // SAFETY: the message window was created by `new` and is destroyed once, here.
         unsafe { DestroyWindow(self.message_hwnd) };
-        // Release the environment before COM is uninitialized.
+        // The icon goes first: it belongs to a window of its own, and the shell must not keep it.
+        self.tray.take();
+        // Release the environments before COM is uninitialized.
+        self.profile_envs.clear();
         drop(self.env.take());
         if self.com_initialized {
             // SAFETY: balances the CoInitializeEx in `new`.
@@ -907,7 +990,8 @@ impl WindowBackend for WindowsBackend {
     type Id = WindowId;
 
     fn create(&mut self, spec: &WindowSpec) -> Result<WindowId> {
-        self.create_window(null_mut(), spec)
+        let env = self.default_env()?;
+        self.create_window(null_mut(), spec, env)
     }
 
     fn show(&mut self, id: WindowId) -> Result<()> {
@@ -1128,7 +1212,8 @@ impl WindowBackend for WindowsBackend {
 
     fn create_child(&mut self, parent: WindowId, spec: &WindowSpec) -> Result<WindowId> {
         let owner = self.require(parent)?;
-        self.create_window(owner, spec)
+        let env = self.default_env()?;
+        self.create_window(owner, spec, env)
     }
 
     fn set_modal(&mut self, child: WindowId, on: bool) -> Result<()> {
@@ -1305,7 +1390,12 @@ struct Margins {
 }
 
 impl WindowsBackend {
-    fn create_window(&mut self, owner: HWND, spec: &WindowSpec) -> Result<WindowId> {
+    fn create_window(
+        &mut self,
+        owner: HWND,
+        spec: &WindowSpec,
+        env: Environment,
+    ) -> Result<WindowId> {
         self.check_thread()?;
         let class = wide(WINDOW_CLASS);
         let title = wide(&spec.title);
@@ -1334,7 +1424,17 @@ impl WindowsBackend {
         let id = WindowId(hwnd as isize);
         // Size the window before the webview is attached, so the webview gets real bounds.
         resize_logical(hwnd, spec.size);
-        match self.attach_webview(hwnd, &spec.allow_navigation) {
+        // A top-level window gets the menu bar the app set, if any.
+        if owner.is_null() {
+            if let Some(menus) = &self.menu_bar {
+                if let Err(e) = attach_menu_bar(hwnd, Some(menus)) {
+                    // SAFETY: the window was created above and is not registered yet.
+                    unsafe { DestroyWindow(hwnd) };
+                    return Err(e);
+                }
+            }
+        }
+        match self.attach_webview(hwnd, &spec.allow_navigation, env) {
             Ok(mut entry) => {
                 entry.owner = (!owner.is_null()).then_some(owner);
                 WINDOWS.with(|w| w.borrow_mut().insert(id.0, entry));
@@ -1390,14 +1490,15 @@ impl WindowsBackend {
         Ok(())
     }
 
-    fn attach_webview(&self, hwnd: HWND, allow_navigation: &[String]) -> Result<Entry> {
+    fn attach_webview(
+        &self,
+        hwnd: HWND,
+        allow_navigation: &[String],
+        env: Environment,
+    ) -> Result<Entry> {
         let slot: Rc<RefCell<Option<std::result::Result<Controller, HRESULT>>>> =
             Rc::new(RefCell::new(None));
         let done = slot.clone();
-        let env = self
-            .env
-            .as_ref()
-            .ok_or_else(|| Error::Backend("environment released".into()))?;
         env.create_controller(hwnd as isize, move |r| *done.borrow_mut() = Some(r))
             .map_err(|hr| hr_error("CreateCoreWebView2Controller", hr))?;
         if !pump_until(CONTROLLER_TIMEOUT, || slot.borrow().is_some()) {
@@ -1514,7 +1615,149 @@ impl WindowsBackend {
             backdrop: Backdrop::None,
             drag_regions: Vec::new(),
             process_failed,
+            monitor: None,
         })
+    }
+}
+
+/// Creates a WebView2 environment in `dir` and waits for it, pumping messages meanwhile.
+fn new_environment(
+    create: CreateEnvironmentFn,
+    dir: &Path,
+    options: &EnvironmentOptions,
+) -> Result<Environment> {
+    let slot: Rc<RefCell<Option<std::result::Result<Environment, HRESULT>>>> =
+        Rc::new(RefCell::new(None));
+    let done = slot.clone();
+    create_environment_with(create, dir, options, move |r| *done.borrow_mut() = Some(r))
+        .map_err(|hr| hr_error("CreateCoreWebView2Environment", hr))?;
+    if !pump_until(CONTROLLER_TIMEOUT, || slot.borrow().is_some()) {
+        return Err(Error::Backend("WebView2 environment timed out".into()));
+    }
+    let env = slot
+        .borrow_mut()
+        .take()
+        .ok_or_else(|| Error::Backend("WebView2 environment lost".into()))?
+        .map_err(|hr| hr_error("WebView2 environment", hr))?;
+    Ok(env)
+}
+
+/// Builds a Win32 menu bar for `menus`. Each call makes new handles, so each window gets its own.
+fn build_menu_bar(
+    menus: &[tpt_shell_core::platform::Menu],
+) -> Result<windows_sys::Win32::UI::WindowsAndMessaging::HMENU> {
+    use tpt_shell_core::platform::MenuEntry;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        AppendMenuW, CreateMenu, CreatePopupMenu, MF_ENABLED, MF_GRAYED, MF_POPUP, MF_SEPARATOR,
+        MF_STRING,
+    };
+    // SAFETY: no arguments; a null return is checked below.
+    let bar = unsafe { CreateMenu() };
+    if bar.is_null() {
+        return Err(Error::Backend("CreateMenu failed".into()));
+    }
+    for menu in menus {
+        // SAFETY: no arguments; a null return is checked below.
+        let popup = unsafe { CreatePopupMenu() };
+        if popup.is_null() {
+            // SAFETY: `bar` was made above and is not attached anywhere yet.
+            unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyMenu(bar) };
+            return Err(Error::Backend("CreatePopupMenu failed".into()));
+        }
+        for entry in &menu.entries {
+            // SAFETY: `popup` is live; each string outlives its call.
+            unsafe {
+                match entry {
+                    MenuEntry::Command { id, label, enabled } => {
+                        let text = wide(label);
+                        let state = if *enabled { MF_ENABLED } else { MF_GRAYED };
+                        AppendMenuW(popup, MF_STRING | state, *id as usize, text.as_ptr());
+                    }
+                    MenuEntry::Separator => {
+                        AppendMenuW(popup, MF_SEPARATOR, 0, std::ptr::null());
+                    }
+                }
+            }
+        }
+        let title = wide(&menu.title);
+        // SAFETY: `bar` and `popup` are live; the popup becomes part of the bar.
+        unsafe { AppendMenuW(bar, MF_POPUP, popup as usize, title.as_ptr()) };
+    }
+    Ok(bar)
+}
+
+/// Sets window `hwnd`'s menu bar to `menus` (or none), destroying the one it had.
+fn attach_menu_bar(hwnd: HWND, menus: Option<&[tpt_shell_core::platform::Menu]>) -> Result<()> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{DestroyMenu, DrawMenuBar, GetMenu, SetMenu};
+    let new = match menus {
+        Some(menus) => build_menu_bar(menus)?,
+        None => null_mut(),
+    };
+    // SAFETY: `hwnd` is a live window of this backend; the old menu is ours to destroy.
+    unsafe {
+        let old = GetMenu(hwnd);
+        if SetMenu(hwnd, new) == 0 {
+            if !new.is_null() {
+                DestroyMenu(new);
+            }
+            return Err(Error::Backend("SetMenu failed".into()));
+        }
+        DrawMenuBar(hwnd);
+        if !old.is_null() {
+            DestroyMenu(old);
+        }
+    }
+    Ok(())
+}
+
+/// Calls the menu callback with a picked command's id. A callback that changes the menu bar
+/// replaces the callback; the new one is kept.
+fn run_menu_command(id: u32) {
+    let mut callback = MENU_CALLBACK.with(|c| c.borrow_mut().take());
+    if let Some(f) = callback.as_mut() {
+        // A panic must not unwind across the window procedure.
+        let _ = catch_unwind(AssertUnwindSafe(|| f(id)));
+    }
+    MENU_CALLBACK.with(|c| {
+        let mut slot = c.borrow_mut();
+        if slot.is_none() {
+            *slot = callback;
+        }
+    });
+}
+
+/// Puts a window's outer rectangle (left, top, right, bottom) without changing its z-order.
+fn move_to(hwnd: HWND, rect: [i32; 4]) {
+    // SAFETY: `hwnd` is a live window handle checked by the caller; no pointers are passed.
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            null_mut(),
+            rect[0],
+            rect[1],
+            rect[2] - rect[0],
+            rect[3] - rect[1],
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
+/// Refits a window bound to a monitor to that monitor's current shape. Called from the window
+/// procedure on WM_DISPLAYCHANGE. A window whose monitor has gone keeps where it is.
+fn refit_bound_window(hwnd: HWND) {
+    // Copy what is needed out of the registry first: moving the window sends WM_SIZE, which
+    // borrows the same table.
+    let bound = WINDOWS.with(|w| {
+        w.borrow()
+            .get(&(hwnd as isize))
+            .and_then(|e| e.monitor.clone().map(|d| (d, e.fullscreen.is_some())))
+    });
+    let Some((device, fullscreen)) = bound else {
+        return;
+    };
+    let monitors = crate::placement::monitors();
+    if let Some(monitor) = crate::placement::find(&monitors, &device) {
+        move_to(hwnd, crate::placement::bound_rect(monitor, fullscreen));
     }
 }
 
@@ -1851,6 +2094,17 @@ unsafe extern "system" fn wnd_proc(
             push_settings_to_pages();
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
+        WM_DISPLAYCHANGE => {
+            // Sent when the monitors change: resolution, arrangement, or a rotation.
+            refit_bound_window(hwnd);
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_COMMAND if lparam == 0 => {
+            // A menu pick: the command id is in the low word of wParam. A control's message
+            // carries its window handle in lParam instead, and is not a menu pick.
+            run_menu_command((wparam & 0xffff) as u32);
+            0
+        }
         WM_DPICHANGED => {
             // SAFETY: on this message lParam points at the suggested new window rectangle.
             let r = &*(lparam as *const RECT);
@@ -1913,6 +2167,23 @@ impl tpt_shell_core::ThemeBackend for WindowsBackend {
             tpt_shell_core::ColorScheme::Light
         } else {
             tpt_shell_core::ColorScheme::Dark
+        })
+    }
+
+    fn accent_color(&self) -> Result<tpt_shell_core::Rgb> {
+        self.check_thread()?;
+        let mut argb: u32 = 0;
+        let mut opaque: BOOL = 0;
+        // SAFETY: both out-pointers are valid for the duration of the call.
+        let hr = unsafe { DwmGetColorizationColor(&mut argb, &mut opaque) };
+        if hr < 0 {
+            return Err(hr_error("DwmGetColorizationColor", hr));
+        }
+        // The colour is 0xAARRGGBB; the alpha is not part of the accent the app shows.
+        Ok(tpt_shell_core::Rgb {
+            r: (argb >> 16) as u8,
+            g: (argb >> 8) as u8,
+            b: argb as u8,
         })
     }
 }
@@ -1986,6 +2257,82 @@ impl Platform for WindowsBackend {
     fn keystore_delete(&mut self, name: &str) -> Result<bool> {
         self.check_thread()?;
         self.keystore()?.delete(name).map_err(Error::Backend)
+    }
+
+    fn set_tray(
+        &mut self,
+        tooltip: &str,
+        items: &[tpt_shell_core::TrayItem],
+        on_select: Box<dyn FnMut(u32)>,
+    ) -> Result<()> {
+        self.check_thread()?;
+        let items = items
+            .iter()
+            .map(|item| crate::tray::MenuItem {
+                id: item.id,
+                label: item.label.clone(),
+            })
+            .collect();
+        // The old icon goes before the new one is added, so the shell never shows two.
+        self.tray.take();
+        self.tray =
+            Some(crate::tray::Tray::new(tooltip, items, on_select).map_err(Error::Backend)?);
+        Ok(())
+    }
+
+    fn remove_tray(&mut self) -> Result<()> {
+        self.check_thread()?;
+        self.tray.take();
+        Ok(())
+    }
+
+    fn set_menu_bar(
+        &mut self,
+        menus: &[tpt_shell_core::platform::Menu],
+        on_command: Box<dyn FnMut(u32)>,
+    ) -> Result<()> {
+        use tpt_shell_core::platform::MenuEntry;
+        self.check_thread()?;
+        let zero = menus.iter().any(|menu| {
+            menu.entries
+                .iter()
+                .any(|e| matches!(e, MenuEntry::Command { id: 0, .. }))
+        });
+        if zero {
+            return Err(Error::Backend("menu command ids must be non-zero".into()));
+        }
+        let next = (!menus.is_empty()).then(|| menus.to_vec());
+        // Each top-level window gets its own menu, built from the same description. A child
+        // window (a dialog) has no menu bar of its own.
+        let tops: Vec<HWND> = WINDOWS.with(|w| {
+            w.borrow()
+                .iter()
+                .filter(|(_, e)| e.owner.is_none())
+                .map(|(id, _)| *id as HWND)
+                .collect()
+        });
+        for hwnd in tops {
+            attach_menu_bar(hwnd, next.as_deref())?;
+        }
+        self.menu_bar = next;
+        MENU_CALLBACK.with(|c| {
+            *c.borrow_mut() = if menus.is_empty() {
+                None
+            } else {
+                Some(on_command)
+            };
+        });
+        Ok(())
+    }
+
+    fn notify(&mut self, title: &str, body: &str) -> Result<()> {
+        self.check_thread()?;
+        match &self.tray {
+            Some(tray) => tray.notify(title, body).map_err(Error::Backend),
+            None => Err(Error::Backend(
+                "the app has no tray icon to notify from".into(),
+            )),
+        }
     }
 
     fn register_scheme(&mut self, scheme: &str, description: &str) -> Result<()> {
@@ -2189,6 +2536,186 @@ mod tests {
             let dir = data_dir(name);
             let backend = WindowsBackend::new(Path::new(&loader), &dir).expect("backend");
             Some((backend, dir, serial))
+        }
+
+        fn outer_rect(id: WindowId) -> [i32; 4] {
+            use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
+            let mut r = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            // SAFETY: a read-only query on a window handle this backend created; `r` is a RECT.
+            unsafe { GetWindowRect(id.0 as HWND, &mut r) };
+            [r.left, r.top, r.right, r.bottom]
+        }
+
+        #[test]
+        fn a_window_is_placed_on_a_monitor_and_fills_it_when_fullscreen() {
+            let Some((mut b, _dir, _serial)) = start("monitor") else {
+                return;
+            };
+            let monitors = b.monitors().expect("monitors");
+            let Some(target) = monitors.first().cloned() else {
+                eprintln!("skipped: no monitors are reported on this machine");
+                return;
+            };
+            let id = b.create(&spec("placed")).expect("window");
+            b.place_on_monitor(id, &target.device, false)
+                .expect("place on the first monitor");
+            let [l, t, r, bo] = outer_rect(id);
+            let w = target.work;
+            assert!(
+                l >= w[0] && t >= w[1] && r <= w[2] && bo <= w[3],
+                "window {:?} outside work area {:?}",
+                [l, t, r, bo],
+                w
+            );
+            b.place_on_monitor(id, &target.device, true)
+                .expect("fullscreen on the same monitor");
+            assert_eq!(
+                outer_rect(id),
+                target.bounds,
+                "fullscreen fills the monitor"
+            );
+            let unknown = b.place_on_monitor(id, "\\\\.\\DISPLAY99", false);
+            assert!(unknown.is_err(), "an unplugged monitor is refused");
+        }
+
+        #[test]
+        fn the_tray_icon_is_set_replaced_and_removed_through_the_platform_trait() {
+            use tpt_shell_core::{Platform, TrayItem};
+            let Some((mut b, dir, _serial)) = start("tray") else {
+                return;
+            };
+            let accent = tpt_shell_core::ThemeBackend::accent_color(&b);
+            let items = [TrayItem {
+                id: 3,
+                label: "Open".into(),
+            }];
+            assert!(
+                b.notify("before", "no icon").is_err(),
+                "no icon, no balloon"
+            );
+            b.set_tray("tpt-shell test", &items, Box::new(|_| {}))
+                .expect("set_tray");
+            // A second call replaces the icon rather than adding one.
+            b.set_tray("tpt-shell test 2", &items, Box::new(|_| {}))
+                .expect("replace the icon");
+            b.remove_tray().expect("remove_tray");
+            assert!(b.notify("after", "removed").is_err(), "the icon is gone");
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+            let rgb = accent.expect("the accent colour is readable on a desktop");
+            eprintln!("accent colour: {rgb:?}");
+        }
+
+        #[test]
+        fn a_menu_bar_goes_on_every_top_level_window_and_its_picks_reach_the_app() {
+            use std::sync::atomic::AtomicU32;
+            use tpt_shell_core::platform::{Menu, MenuEntry};
+            use windows_sys::Win32::UI::WindowsAndMessaging::{GetMenu, GetMenuItemCount};
+            let Some((mut b, dir, _serial)) = start("menu") else {
+                return;
+            };
+            let first = b.create(&spec("one")).expect("create");
+            let picked = Arc::new(AtomicU32::new(0));
+            let seen = picked.clone();
+            let menus = vec![Menu {
+                title: "File".into(),
+                entries: vec![
+                    MenuEntry::Command {
+                        id: 10,
+                        label: "Open".into(),
+                        enabled: true,
+                    },
+                    MenuEntry::Separator,
+                    MenuEntry::Command {
+                        id: 11,
+                        label: "Locked".into(),
+                        enabled: false,
+                    },
+                ],
+            }];
+            b.set_menu_bar(&menus, Box::new(move |id| seen.store(id, Ordering::SeqCst)))
+                .expect("set_menu_bar");
+            // A window made after the bar is set gets one too.
+            let second = b.create(&spec("two")).expect("create after the bar");
+            for id in [first, second] {
+                // SAFETY: read-only queries on windows this backend created.
+                let bar = unsafe { GetMenu(id.0 as HWND) };
+                assert!(!bar.is_null(), "window {id:?} has a menu bar");
+                assert_eq!(unsafe { GetMenuItemCount(bar) }, 1, "one top-level menu");
+            }
+            // A pick arrives as WM_COMMAND with no control handle in lParam.
+            // SAFETY: posts a message to a window this backend created.
+            unsafe { PostMessageW(first.0 as HWND, WM_COMMAND, 10, 0) };
+            let got = pump_until(Duration::from_secs(5), || {
+                picked.load(Ordering::SeqCst) == 10
+            });
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(got, "the pick reached the app");
+        }
+
+        /// Loads a minimal app page into `id` and waits until it has its title.
+        fn load_ready_page(b: &mut WindowsBackend, id: WindowId) {
+            use tpt_shell_core::backend::Asset;
+            b.set_asset_source(
+                id,
+                Box::new(|path| {
+                    (path == "index.html").then(|| Asset {
+                        content_type: "text/html".into(),
+                        body: b"<!doctype html><title>ready</title>".to_vec(),
+                    })
+                }),
+            )
+            .expect("set_asset_source");
+            b.navigate(id, &format!("{APP_ORIGIN}/index.html"))
+                .expect("navigate");
+            let mut title = String::new();
+            let got = pump_until(Duration::from_secs(30), || {
+                title = b.document_title(id).unwrap_or_default();
+                title == "ready"
+            });
+            assert!(got, "page title was {title:?}");
+        }
+
+        /// Runs `script` in the window and returns its JSON result.
+        fn run_json(b: &mut WindowsBackend, id: WindowId, script: &str) -> String {
+            b.eval_json(id, script)
+                .expect("eval")
+                .unwrap_or_else(|| "null".into())
+        }
+
+        #[test]
+        fn windows_in_one_profile_share_storage_and_a_second_profile_does_not() {
+            let Some((mut b, dir, _serial)) = start("profiles") else {
+                return;
+            };
+            let a_dir = dir.join("profile-a");
+            let c_dir = dir.join("profile-c");
+            let a = b
+                .create_in_profile(&spec("a"), &a_dir)
+                .expect("window in profile a");
+            let a2 = b
+                .create_in_profile(&spec("a2"), &a_dir)
+                .expect("second window in profile a");
+            let c = b
+                .create_in_profile(&spec("c"), &c_dir)
+                .expect("window in profile c");
+            for id in [a, a2, c] {
+                b.show(id).expect("show");
+                load_ready_page(&mut b, id);
+            }
+            run_json(&mut b, a, "localStorage.setItem('k', 'from-a'); 'ok'");
+            let in_same = run_json(&mut b, a2, "localStorage.getItem('k')");
+            let in_other = run_json(&mut b, c, "localStorage.getItem('k')");
+            drop(b);
+            let _ = std::fs::remove_dir_all(&dir);
+            assert_eq!(in_same, "\"from-a\"", "same profile shares storage");
+            assert_eq!(in_other, "null", "another profile cannot see it");
         }
 
         /// A page that asks for a file in scope, then one out of scope, and shows each reply in
