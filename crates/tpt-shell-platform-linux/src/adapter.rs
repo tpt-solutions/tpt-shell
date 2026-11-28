@@ -19,11 +19,13 @@ use tpt_shell_core::backend::{
     AssetSource, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler, WebviewBackend,
     WindowBackend, WindowSpec,
 };
-use tpt_shell_core::platform::{ClipboardBackend, ColorScheme, Platform, ThemeBackend, TrayItem};
+use tpt_shell_core::platform::{
+    ClipboardBackend, ColorScheme, OpenDialog, Platform, ThemeBackend, TrayItem,
+};
 use tpt_shell_core::theme::Theme;
 use tpt_shell_core::{Error, LogicalRect, LogicalSize, Result, ScaleFactor};
 
-use crate::gtk3::dialogs::FileDialog;
+use crate::gtk3::dialogs::{FileDialog, FileFilter};
 use crate::gtk3::{Gtk3Backend, Gtk3Proxy, WindowId};
 use crate::gtk4::{Gtk4Backend, Gtk4Proxy};
 use crate::probe::{self, Adapter};
@@ -280,6 +282,24 @@ impl ThemeBackend for LinuxBackend {
     }
 }
 
+/// Turns the platform's open dialog into the GTK chooser's. Each (name, pattern) pair becomes one
+/// filter with that one pattern.
+fn open_dialog_to_gtk(dialog: &OpenDialog) -> FileDialog {
+    FileDialog {
+        title: dialog.title.clone(),
+        multiple: dialog.multiple,
+        filters: dialog
+            .filters
+            .iter()
+            .map(|(name, pattern)| FileFilter {
+                name: name.clone(),
+                patterns: vec![pattern.clone()],
+            })
+            .collect(),
+        suggested_name: None,
+    }
+}
+
 /// The name a notification is shown under: the program's file name, or `tpt-shell` when that
 /// cannot be read.
 fn notification_app_name() -> String {
@@ -340,6 +360,11 @@ impl Platform for LinuxBackend {
         write_scheme_entry(&schemes)
     }
 
+    fn open_files(&mut self, owner: Option<WindowId>, dialog: &OpenDialog) -> Result<Vec<PathBuf>> {
+        let chooser = open_dialog_to_gtk(dialog);
+        Ok(LinuxBackend::open_files(self, owner, &chooser)?.unwrap_or_default())
+    }
+
     fn keystore_set(&mut self, name: &str, secret: &[u8]) -> Result<()> {
         keystore()?.store(name, secret)
     }
@@ -383,6 +408,25 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::rc::Rc;
+
+    #[test]
+    fn each_open_dialog_filter_becomes_one_gtk_filter() {
+        let dialog = OpenDialog {
+            title: "Pick".into(),
+            filters: vec![
+                ("Text".into(), "*.txt".into()),
+                ("Images".into(), "*.png".into()),
+            ],
+            multiple: true,
+        };
+        let chooser = open_dialog_to_gtk(&dialog);
+        assert_eq!(chooser.title, "Pick");
+        assert!(chooser.multiple);
+        assert_eq!(chooser.filters.len(), 2);
+        assert_eq!(chooser.filters[0].name, "Text");
+        assert_eq!(chooser.filters[0].patterns, vec!["*.txt".to_string()]);
+        assert_eq!(chooser.suggested_name, None);
+    }
 
     use crate::testutil::{gui_session, skip_or_fail};
     use tpt_shell_core::backend::Asset;
