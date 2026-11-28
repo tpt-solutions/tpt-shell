@@ -11,7 +11,7 @@ Part of [tpt-shell](https://github.com/tpt-solutions/tpt-shell). Most apps use t
 | Module | Contents |
 |---|---|
 | `backend` | The window backend traits that each platform crate implements, and `devtools_policy` and `PreferredScheme`. |
-| `platform` | Platform-neutral types and helpers shared by the backends. |
+| `platform` | Platform-neutral types and helpers shared by the backends, including `Rgb`, the tray and menu types (`TrayItem`, `Menu`, `MenuEntry`) and the accent colour. The menu bar is not in the trait yet. |
 | `clock` | The `Clock` trait, with `SystemClock` and `FakeClock`. The replay system swaps in its own clock. |
 | `rng` | The `Rng` trait, with `SystemRng` and `SeededRng`. |
 | `executor` | `Executor` and `block_on`, a small executor with no runtime dependency. |
@@ -19,7 +19,7 @@ Part of [tpt-shell](https://github.com/tpt-solutions/tpt-shell). Most apps use t
 | `navigation` | Navigation decisions for the page policy. |
 | `theme` | `Theme`, `Signals` and `injection_script`, which carries colour scheme and accessibility settings into a page. |
 | `error` | `Error`, `Result` and `Support`. |
-| `fake` | An in-memory backend for unit tests. It opens no window. |
+| `fake` | An in-memory backend for unit tests. It opens no window. It keeps a tray icon, a menu bar and an accent colour, and `pick_menu` simulates a menu pick. |
 
 ## Support tags
 

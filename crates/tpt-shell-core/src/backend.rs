@@ -8,7 +8,7 @@
 //! `Platform` trait are later milestones.
 
 use crate::error::{Error, Result};
-use crate::geometry::{LogicalRect, LogicalSize};
+use crate::geometry::{LogicalRect, LogicalSize, ScaleFactor};
 
 /// Settings used to create a window.
 ///
@@ -122,6 +122,14 @@ pub trait WindowBackend {
     fn set_drag_regions(&mut self, _id: Self::Id, _regions: &[LogicalRect]) -> Result<()> {
         Err(Error::Unsupported {
             feature: "drag regions",
+        })
+    }
+
+    /// The window's scale factor: device pixels per logical unit, as the OS reports it now.
+    /// Support: Unsupported by default; a backend answers with the value the page sees.
+    fn scale_factor(&self, _id: Self::Id) -> Result<ScaleFactor> {
+        Err(Error::Unsupported {
+            feature: "scale factor",
         })
     }
 

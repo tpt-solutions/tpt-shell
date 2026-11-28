@@ -33,7 +33,9 @@ All `unsafe` code and FFI for Windows lives in this crate's platform modules, ea
 | Clipboard and time | `clipboard`, `local_time` | Clipboard text and local time for pages. |
 | Start at sign-in | `startup` | Per-user Run entry, written by `tpt-shell install-service`. |
 | Accessibility | `accessibility`, `uia`, `native_tree` | UI Automation dumps for the test driver. |
-| Serial and printing | The Windows transports in `tpt-shell-devices` | Serial ports on COM1 to COM999, and raw spooler printing through winspool. |
+| Monitors and profiles | `placement`, `backend` | Windows open on a chosen monitor (`on_monitor`, `on_each_monitor`), and each window can keep its data in its own profile folder (`create_in_profile`). The placement rule is unit tested. |
+| Menu bar and channels | `backend`, `channel` | A menu bar on each top-level window. WebView2 release channels (Stable, Beta, Dev, Canary) through `WEBVIEW2_RELEASE_CHANNELS`. Partial: only Stable is installed on the development machine. |
+| Serial and printing | The Windows transports in `tpt-shell-devices` | Serial ports on COM1 to COM999, raw spooler printing through winspool, and the HID and WinUSB transports (built, not yet verified on hardware). |
 | Kiosk | The key hook in `tpt-shell-kiosk` (`hook_windows`) | The key chord hook is best effort. |
 
 Visual effects: transparent windows, drag regions (Partial), dark title bar, Mica, Acrylic and Tabbed backdrops, and the colour scheme driven through WebView2. High contrast, reduced motion and reduced transparency reach the page as `data-` attributes, and open pages update them when the user changes a setting.
@@ -41,10 +43,8 @@ Visual effects: transparent windows, drag regions (Partial), dark title bar, Mic
 ## What is not built
 
 - Frameless and always-on-top windows: listed as open work in `todo.md`.
-- WebView2 channels (stable, beta, canary) for the visual diff.
-- Per-window profiles. All windows share one folder for now.
-- Full kiosk placement and lock-down (`todo.md` M6).
-- HID and USB raw access (`todo.md` M7).
+- Full kiosk lock-down (`todo.md` M6). One window per monitor is built.
+- Hardware checks of the HID and WinUSB transports (`todo.md` M7).
 
 ## Usage
 

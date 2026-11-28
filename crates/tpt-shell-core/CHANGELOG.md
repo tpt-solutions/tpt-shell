@@ -12,3 +12,5 @@ All notable changes to `tpt-shell-core` are recorded here. The format follows [K
 - `Theme`, `Signals` and `injection_script` for colour scheme and accessibility settings.
 - `Error`, `Result` and `Support`, the error type and support tag used across the workspace.
 - `fake` module: an in-memory backend for unit tests.
+- `Rgb` (an opaque colour), `Platform::accent_color` (the system accent colour), and the tray and menu types `TrayItem`, `Menu`, `MenuEntry` and `TRAY_ACTIVATE`.
+- The fake backend keeps a tray icon, a menu bar and an accent colour. `FakeBackend::pick_menu` simulates a menu pick.

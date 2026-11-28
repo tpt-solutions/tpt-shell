@@ -1174,6 +1174,11 @@ impl WindowBackend for WindowsBackend {
         self.apply_surface(id)
     }
 
+    fn scale_factor(&self, id: WindowId) -> Result<ScaleFactor> {
+        let hwnd = self.require(id)?;
+        Ok(dpi_scale(hwnd))
+    }
+
     fn set_drag_regions(&mut self, id: WindowId, regions: &[LogicalRect]) -> Result<()> {
         // Non-client region support lets the page's `-webkit-app-region: drag` take effect.
         // Without it the regions cannot work, so say so instead of storing them silently.

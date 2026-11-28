@@ -27,6 +27,12 @@ All notable changes to `tpt-shell-platform-windows` are recorded here. The forma
 - Page runtime: `window.tpt`, `tpt.on`, and `tpt.caps` (engine `webview2` and its version).
 - Blobs, with a 64 MiB limit, served from an app URL.
 - UI Automation and native accessibility tree support for the test driver.
+- Per-monitor placement (`place_on_monitor`, `monitors`), and one profile folder per profile (`create_in_profile`).
+- Menu bar on each top-level window. WebView2 release channel selection (Stable, Beta, Dev, Canary) through `WEBVIEW2_RELEASE_CHANNELS` (Partial).
+- `capture_window_png`, `add_start_script` and `request_quit`. A window's shown state is readable with `window_is_shown`.
+
+### Fixed
+- UI Automation reads of a new window retry instead of failing with `E_FAIL`.
 
 ### Changed
 - The Windows CLI install step writes a per-user Run entry through `tpt-shell install-service`.
