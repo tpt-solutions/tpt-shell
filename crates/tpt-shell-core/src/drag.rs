@@ -13,7 +13,7 @@
 //! (such as Xvfb in CI) the move request is made but nothing moves. The request also carries the
 //! press position from the page, so it reaches the host a little after the press.
 
-use tpt_shell_core::LogicalRect;
+use crate::LogicalRect;
 
 /// The prefix of the message the page sends on a press inside a drag box: `tpt:drag:<x>:<y>`.
 pub const MESSAGE_PREFIX: &str = "tpt:drag:";

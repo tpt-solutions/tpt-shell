@@ -175,7 +175,7 @@ impl WindowBackend for LinuxBackend {
     /// The regions become drag boxes in the page; a press on one starts a window move (see
     /// `crate::drag`). Both GTK adapters share this, because the boxes are page content.
     fn set_drag_regions(&mut self, id: WindowId, regions: &[LogicalRect]) -> Result<()> {
-        WebviewBackend::eval(self, id, &crate::drag::regions_script(regions))
+        WebviewBackend::eval(self, id, &tpt_shell_core::drag::regions_script(regions))
     }
     fn set_size(&mut self, id: WindowId, size: LogicalSize) -> Result<()> {
         each!(self, b => b.set_size(id, size))

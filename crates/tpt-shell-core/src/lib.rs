@@ -10,6 +10,8 @@
 pub mod backend;
 /// Support: Full. Unit tested.
 pub mod clock;
+/// Drag regions: the page-side boxes, the press message and the host request (see the module).
+pub mod drag;
 /// Support: Full. Unit tested.
 pub mod error;
 /// Support: Full. Unit tested.

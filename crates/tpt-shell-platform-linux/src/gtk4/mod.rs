@@ -449,7 +449,7 @@ impl Gtk4Backend {
         // a backend that cannot read it uses the light scheme.
         let scheme = ThemeBackend::color_scheme(self).unwrap_or(ColorScheme::Light);
         let theme = cstring(&injection_script(&self.theme, scheme, Signals::default())?)?;
-        let drag_listener = cstring(crate::drag::LISTENER_JS)?;
+        let drag_listener = cstring(tpt_shell_core::drag::LISTENER_JS)?;
         // SAFETY: a user script is created, handed to the manager (which keeps a reference),
         // then released by us.
         unsafe {
@@ -802,7 +802,7 @@ unsafe extern "C" fn on_script_message(_manager: Obj, value: Obj, data: *mut c_v
         text
     };
     // A drag request from a drag box moves the window; the page's handler never sees it.
-    if let Some((x, y)) = crate::drag::parse_request(&text) {
+    if let Some((x, y)) = tpt_shell_core::drag::parse_request(&text) {
         begin_window_drag(w, x, y);
         return;
     }
