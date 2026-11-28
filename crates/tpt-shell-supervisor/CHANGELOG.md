@@ -4,6 +4,9 @@ All notable changes to `tpt-shell-supervisor` are recorded here. The format foll
 
 ## [Unreleased]
 
+### Changed
+- The manifest points at this crate's README, `readme = "README.md"`.
+
 ### Added
 - Runs the app as a child process, with a heartbeat file.
 - Stops a run that stops beating, or that reaches its scheduled restart.

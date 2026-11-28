@@ -11,7 +11,7 @@ Part of [tpt-shell](https://github.com/tpt-solutions/tpt-shell).
 | Module | Contents |
 |---|---|
 | `config` | A kiosk config. It applies only when its Ed25519 signature verifies. |
-| `policy` | The values a signed config sets: single-app mode, the navigation allow-list, full-screen and single-window placement, and the list of disabled features. The backends apply them. |
+| `policy` | The values a signed config sets: single-app mode, the navigation allow-list, full-screen and single-window placement, one window per monitor (`"monitors": "each"`), and the list of disabled features. The backends apply them. |
 | `state` | A state snapshot. Saved on an interval and at exit, and restored at the next start. Writes are atomic. |
 | `idle` | An idle timer that sends the kiosk back to its home page. |
 | `recovery` | Page crash recovery. It reloads the last good page. |
@@ -57,7 +57,7 @@ Kiosk support is wired into the facade through `App::kiosk_config` and `App::sna
 |---|---|---|---|
 | Config, state, idle, recovery, heartbeat | Built and tested | Platform-neutral code. Compiles, not run on macOS. | Platform-neutral code. Compiles, not run on Linux. |
 | Key chord hook | Built, best effort | Not built | Not built |
-| Full lock-down and placement | Not fully built (see `todo.md` M6) | Not built | Not built |
+| Full lock-down | Not fully built (see `todo.md` M6). One window per monitor is built. | Not built | Not built |
 
 ## Changelog
 

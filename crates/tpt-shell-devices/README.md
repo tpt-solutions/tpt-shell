@@ -4,7 +4,7 @@ The device bridge for tpt-shell: serial ports, HID, USB and network transports, 
 
 Part of [tpt-shell](https://github.com/tpt-solutions/tpt-shell).
 
-> **Status: pre-alpha.** Not published (`publish = false`, version `0.0.0`). Serial ports and raw printing are built on Windows. Other transports and platforms are partial or not built.
+> **Status: pre-alpha.** Not published (`publish = false`, version `0.0.0`). Serial ports, raw printing, and the HID and WinUSB transports are built on Windows. The HID and WinUSB transports are not yet verified on hardware. Other transports and platforms are partial or not built.
 
 ## Access model
 
@@ -18,10 +18,11 @@ Network devices use raw TCP and UDP sockets. They are behind the `net-devices` f
 |---|---|
 | `id`, `descriptors` | Device identifiers and what a device reports about itself. |
 | `transport` | The transport trait. Supports control transfers. |
-| `hub` | `Hub` opens devices under a `DeviceScope` and audits each use. `list` and `discover` show what the scope allows. |
+| `hub` | `Hub` opens devices under a `DeviceScope` and audits each use. `list`, `list_filtered` (with a `ListFilter`) and `discover` show what the scope allows. |
 | `serial` | Serial ports. |
 | `net` | TCP and UDP transports (feature `net-devices`). |
 | `native` | Platform-specific transports. |
+| `platform` | Windows transports: serial (`win_serial`), HID (`win_hid`) and WinUSB (`win_usb`). |
 | `hotplug`, `scanner`, `display` | Device arrival, scanners and display devices. |
 | `virtual_devices` | Serial loopback, a printer with a receipt preview, a scanner and an HID device, for tests. |
 | `escpos` | ESC/POS receipt printer commands. |
@@ -57,7 +58,7 @@ A page reaches a device through a command with a device grant. In an app, the fa
 | Serial ports (`COM1` to `COM999` on Windows, 8 data bits, no parity, one stop bit) | Built and tested on Windows | Written, not run | Written, not run |
 | Raw printing | Windows spooler (winspool RAW), built | `lp` | `lp` |
 | TCP and UDP (`net-devices`) | Built | Built | Built |
-| HID and USB raw access | Not built | Not built | Not built |
+| HID and WinUSB raw access | Built. Listing works; opening and transfers are not yet verified on hardware | Not built | Not built |
 
 Check `docs/src/platform-notes.md` for the current state before you rely on a transport.
 

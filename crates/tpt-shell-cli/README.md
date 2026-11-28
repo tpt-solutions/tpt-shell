@@ -36,7 +36,7 @@ The crate is not published yet (`publish = false`). It is built from the workspa
 | `add <kiosk\|devices\|audit\|agent> [tpt-shell.toml]` | Writes that section into the manifest. It refuses a section that already exists. |
 | `dev <dir> [--port N]` | Serves an app's files on `127.0.0.1` for a browser tab, with a mock `window.tpt`, and reports which files change. |
 | `build [dir]` | Release build, with `cargo build --release --locked`. |
-| `run [dir]` | Builds and launches the Rust project. |
+| `run [dir]` | Builds and launches the Rust project. On Windows it copies the vendored `WebView2Loader.dll` beside the program, unless a copy is already there. |
 | `doctor [--fix]` | Checks the WebView2 loader, the manifest, the licence policy and, on Linux, the GTK and WebKit libraries. `--fix` installs `cargo-deny` when it is missing. |
 | `contract diff <old> <new>` | Lists each change as breaking or compatible. |
 | `contract check <new> --baseline <old>` | Lists only the breaking changes, and exits 1 when there are any. |
@@ -51,6 +51,7 @@ The crate is not published yet (`publish = false`). It is built from the workspa
 | `audit view <audit.jsonl>` | Prints a short table of a verified log. |
 | `audit explain <audit.jsonl>` | Prints a plain-language summary. |
 | `replay <file.tptreplay> [--strict\|--lenient]` | Plays a recording against the echo reference target. |
+| `test collect <run-dir> <out-dir> [--test <name>]` | Gathers the artifacts a test run wrote into `<out-dir>`. |
 | `report <out.json> [--replay] [--log] [--audit] [--version] [--redact]` | Writes a bug-report bundle, with redaction. |
 | `visual compare <baseline> <dir>... [--out] [--tolerance] [--max-changed]` | Compares screenshot folders and writes an HTML report. |
 | `compliance <out-dir> [--key <file>]` | Writes the SBOMs, attestation and notices, and signs them with `--key`. It exits 1 on a refused licence. |

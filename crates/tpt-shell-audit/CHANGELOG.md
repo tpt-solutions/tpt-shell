@@ -4,6 +4,9 @@ All notable changes to `tpt-shell-audit` are recorded here. The format follows [
 
 ## [Unreleased]
 
+### Changed
+- The manifest points at this crate's README, `readme = "README.md"`.
+
 ### Added
 - Append-only log with a SHA-256 hash chain. One canonical JSON record per line, and `verify_file` reports the first bad sequence number.
 - `Signing`: Ed25519-signed checkpoints after a number of entries or after a number of seconds (`every_secs`).

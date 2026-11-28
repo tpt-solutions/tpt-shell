@@ -4,6 +4,9 @@ All notable changes to `tpt-shell-errors` are recorded here. The format follows 
 
 ## [Unreleased]
 
+### Changed
+- The manifest points at this crate's README, `readme = "README.md"`.
+
 ### Added
 - `REGISTRY` of stable `TS####` codes, each with a title, an explanation and a fix hint.
 - `lookup(code)`, which ignores case and surrounding whitespace.

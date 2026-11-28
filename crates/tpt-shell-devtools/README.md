@@ -1,6 +1,6 @@
 # tpt-shell-devtools
 
-The developer overlay for tpt-shell apps. It shows an app's IPC log with latency, its jobs, the capabilities in effect, the audit tail, a contract explorer that can call commands, and engine information.
+The developer overlay for tpt-shell apps. It shows an app's IPC log with latency, its jobs, the capabilities in effect, the audit tail, a contract explorer that can call commands, an accessibility quick check, and engine information.
 
 It is for debug builds. A release build gets no overlay page.
 
@@ -38,15 +38,17 @@ The overlay opens with Ctrl+Shift+D.
 | `Inspect` | The trait the app implements to supply the snapshot. |
 | `page`, `page_if_enabled` | Build the overlay HTML. |
 | `audit_rows` | Reads the last audit lines (up to `AUDIT_TAIL`, 200) from a JSON Lines file. |
-| `timeline` | Timeline data for the overlay. |
+| `timeline` | Timeline data for the overlay, including the page snapshot at the cursor. |
+| `a11y` | The accessibility quick check: `check` runs the rules from `tpt-shell-test` on the page's data, and `to_json` reports the findings. |
 
 ## Support
 
 | Part | State |
 |---|---|
 | Snapshot, audit-line reader and page | Full, in debug builds on Windows. |
-| Jobs panel | Partial. The facade runs no jobs, so the panel is empty. |
-| Engine version | Partial. Not reported. |
+| Jobs panel | Partial. Lists the app router's running jobs and the last 20 finished ones. |
+| Engine version | Partial. Shown when the WebView2 loader reports it. |
+| Accessibility panel | Partial. A quick check of the elements that have an `id`. Some rules are heuristics. |
 
 ## Features
 

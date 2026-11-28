@@ -17,3 +17,6 @@ All notable changes to `tpt-shell-replay` are recorded here. The format follows 
 - `report`, a bug-report bundle with redaction.
 - `tpt-shell replay` plays a recording against the echo reference target. `tpt-shell report` writes a bug-report bundle.
 - Size limits: 256 MiB per recording and 16 MiB per asset.
+- `input_with_dom` records a page input event with a snapshot of the page's HTML after the event, in the event's `dom` field. Readers that do not know the field ignore it.
+- `Recorder::snapshot_compressed` returns the recording so far, compressed, without ending it.
+- A test replays a recording strictly 100 times and checks that the replayed events are identical each time.

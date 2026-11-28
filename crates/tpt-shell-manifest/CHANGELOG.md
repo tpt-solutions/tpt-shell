@@ -4,6 +4,9 @@ All notable changes to `tpt-shell-manifest` are recorded here. The format follow
 
 ## [Unreleased]
 
+### Changed
+- The manifest points at this crate's README, `readme = "README.md"`.
+
 ### Added
 - `parse` for `tpt-shell.toml`, returning a `Manifest` or a `ManifestError` with a `TS####` code and, where possible, the line.
 - Unknown keys are rejected in the sections this phase owns.

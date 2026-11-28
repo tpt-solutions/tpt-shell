@@ -14,4 +14,6 @@ All notable changes to `tpt-shell-agent` are recorded here. The format follows [
 - Action log, including refused calls. A recorder failure stops the session.
 - Page text is marked as untrusted content.
 - `mcp-http` feature: MCP over `127.0.0.1` with a bearer token. Off by default.
+- The HTTP listener runs on a background thread and hands each request to the UI thread through a bridge (`spawn_bridge`). It serves at most 8 connections at once.
+- Requests must name the loopback address in `Host`, which blocks DNS rebinding. The token is compared in constant time.
 - Error codes `TS0112` (route) and `TS0114` (invoke).

@@ -4,6 +4,9 @@ All notable changes to `tpt-shell-capabilities` are recorded here. The format fo
 
 ## [Unreleased]
 
+### Changed
+- The manifest points at this crate's README, `readme = "README.md"`.
+
 ### Added
 - Default-deny `Engine` with per-window, per-origin grants.
 - Scopes: `Paths`, `PathGlobs`, `Devices`, `Urls` and `MaxBytes`.

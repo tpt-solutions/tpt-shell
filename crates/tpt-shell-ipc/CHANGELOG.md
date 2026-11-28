@@ -15,3 +15,5 @@ All notable changes to `tpt-shell-ipc` are recorded here. The format follows [Ke
 - `ScopedPath` and `DeviceId` typed arguments.
 - Per-caller rate limits, and streamed results.
 - Blob payloads passed by reference.
+- `Jobs::list` and `JobInfo` report each job's state, latest progress and owning window, with the last 20 finished jobs (`RECENT_LIMIT`).
+- `Jobs::drain_with_owner` and `Router::drain_job_events_by_window` pair each job event with the window that started the job.

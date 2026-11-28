@@ -24,12 +24,25 @@ It does not use wry, tao, winit, Tauri or any other windowing or webview crate. 
 - **No network by default.** The shell opens no sockets unless a feature is enabled.
 - **Confined unsafe code.** The `unsafe` code and FFI are in the platform, device and kiosk crates, each in its own modules.
 
+## Features
+
+- **Native windows.** Windows that host HTML/CSS/JS in the system webview. On Windows, the verified backend, you get per-monitor placement, named or ephemeral profiles, a menu bar, hidden windows and a choice of WebView2 channel.
+- **Typed command channel.** Page calls are validated and checked against the manifest's permissions, and every call is written to a hash-chained audit log (`tpt-shell audit verify | export | view`).
+- **Devices.** Serial, HID and USB transports behind a scoped hub, with virtual devices for tests and ESC/POS and ZPL receipt and label builders. HID and WinUSB opening is not yet verified on hardware.
+- **Kiosk and supervision.** A signed kiosk config, state snapshots, an idle reset, and a supervisor that restarts the app with backoff and a heartbeat.
+- **Agents.** An MCP-style session over stdio, or localhost HTTP with the `mcp-http` feature, with a snapshot of the accessible tree and audited actions.
+- **Record and replay.** Recordings of requests and page input that replay through the app's own router.
+- **Testing.** A test driver, a visual comparer, accessibility rules and artifact collection (`tpt-shell test`).
+- **Compliance.** CycloneDX and SPDX SBOMs, licence notices and attestation output.
+
+The workspace is split into focused crates under `crates/`. The `tpt-shell` crate is the public facade. Each crate's `README.md` and `CHANGELOG.md` describe it in detail.
+
 ## Quickstart
 
-On Windows, the hello example opens one window that shows one embedded page. It takes the path to `WebView2Loader.dll` as its argument. Take the x64 copy from the WebView2 SDK package (`build/native/x64/`):
+On Windows, the hello example opens one window that shows one embedded page. It takes the path to `WebView2Loader.dll` as its argument. The repository vendors the x64 copy in `redist/win-x64/`:
 
 ```sh
-cargo run -p tpt-shell --example hello -- <path to WebView2Loader.dll>
+cargo run -p tpt-shell --example hello -- redist/win-x64/WebView2Loader.dll
 ```
 
 The example is a minimal app. Its core is this:
@@ -58,7 +71,7 @@ tpt-shell new rust my-app
 tpt-shell run my-app
 ```
 
-Copy `WebView2Loader.dll` beside the built program first. The [quickstart](docs/src/quickstart.md) covers the steps in full, including `tpt-shell dev` for previewing a project's pages in a browser.
+`tpt-shell run` copies the vendored `WebView2Loader.dll` beside the built program, so no manual copy is needed. The [quickstart](docs/src/quickstart.md) covers the steps in full, including `tpt-shell dev` for previewing a project's pages in a browser.
 
 ## Build
 

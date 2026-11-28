@@ -16,12 +16,11 @@ cargo install --path crates/tpt-shell-cli
 
 ## 2. Open a window
 
-`tpt-shell` opens windows through `WebView2Loader.dll`, which ships in the WebView2 SDK
-package. Take the x64 copy from `build/native/x64/` in that package, and pass its path to the
-example:
+`tpt-shell` opens windows through `WebView2Loader.dll`. The repository vendors the x64 copy in
+`redist/win-x64/`, so pass that path to the example:
 
 ```sh
-cargo run -p tpt-shell --example hello -- path\to\WebView2Loader.dll
+cargo run -p tpt-shell --example hello -- redist\win-x64\WebView2Loader.dll
 ```
 
 A window shows a page that says "hello from tpt-shell". Close it to stop. A second launch hands
@@ -36,8 +35,9 @@ tpt-shell new vanilla my-app
 ```
 
 To make a project that opens a window, use `tpt-shell new rust my-app` instead, then
-`tpt-shell run my-app`. Copy `WebView2Loader.dll` into `my-app/target/debug/` first, because the
-program looks for it next to itself.
+`tpt-shell run my-app`. The run builds the project and copies the vendored `WebView2Loader.dll`
+into `my-app/target/debug/`, beside the program, so there is no manual copy step. The copy happens
+only when the CLI was installed from this checkout, which has the vendored file.
 
 Check its manifest:
 
@@ -70,7 +70,7 @@ server.
 ## Not yet
 
 The `vanilla` and `typescript` projects do not open a window by themselves. Use the `rust`
-starter (`tpt-shell new rust my-app`), which builds the window from the project's files. Its
-window needs `WebView2Loader.dll` beside the built program, or its path as the first argument;
-the loader still has to be copied from the WebView2 SDK by hand. The example's source is
+starter (`tpt-shell new rust my-app`), which builds the window from the project's files. `tpt-shell
+run` places the vendored loader beside the built program. A program built some other way needs
+`WebView2Loader.dll` beside it, or its path set with `App::loader`. The example's source is
 `crates/tpt-shell/examples/hello.rs`.

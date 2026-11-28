@@ -13,4 +13,5 @@ All notable changes to `tpt-shell-kiosk` are recorded here. The format follows [
 - Blocked key chords (Alt+Tab, Win, Alt+F4, Ctrl+Esc) and a Windows low-level keyboard hook for them, best effort.
 - Heartbeat file for the supervisor.
 - `admin-endpoint` and `health-endpoint` features: loopback only, token protected for admin, off by default.
+- Kiosk config `"monitors": "each"`, for one full-screen window per connected monitor. It needs `single_window` to be `false`. The default, `"default"`, leaves placement to the system.
 - `App::kiosk_config` and `App::snapshot_state` in the facade. `tpt-shell kiosk init` and `tpt-shell kiosk sign` in the command line tool.

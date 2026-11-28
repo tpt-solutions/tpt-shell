@@ -4,6 +4,9 @@ All notable changes to `tpt-shell-compliance` are recorded here. The format foll
 
 ## [Unreleased]
 
+### Changed
+- The manifest points at this crate's README, `readme = "README.md"`.
+
 ### Added
 - CycloneDX and SPDX SBOM generation from `cargo metadata` output.
 - `licenses.html` and `THIRD_PARTY_NOTICES` generators.

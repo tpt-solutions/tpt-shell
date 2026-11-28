@@ -8,11 +8,41 @@ All notable changes to tpt-shell are recorded here. The format follows [Keep a C
 - Contributions are accepted as issues only. Pull requests are not taken.
 - Quickstart: the hello example takes the x64 `WebView2Loader.dll` as its argument. `App::loader` is optional, and without it the app looks for the DLL beside the program. The CLI section shows `tpt-shell new`, `run` and `dev`.
 - Build: the README asks for Rust 1.90 or later, and for `cargo-deny` to run `cargo deny check`.
+- Quickstart: the example takes the vendored `redist/win-x64/WebView2Loader.dll`, and `tpt-shell run` copies the loader beside the program, so no manual copy is needed.
+- Build: release builds keep PDB symbols, and the reproducible-build flags are passed in `CARGO_ENCODED_RUSTFLAGS`.
+
+### Added
+- `WindowBackend::scale_factor` returns the window's scale factor. Windows and GTK implement it; other backends answer `Unsupported`.
+- Conformance: streams with credit-based back-pressure (checked over the platform message channel), snapshot, drag regions (the drag boxes and their rectangles; the window move is not measured) and DPI, on Windows. On Linux: streams, DPI, theme injection, the blob-URL read and drag regions (a press on a drag box starts a window move on GTK 3 and GTK 4).
+- macOS: `MacBackend` has an event loop: `run_until`, `run_until_quit` and a cross-thread `MacProxy`. The conformance suite runs on the main thread on every OS.
+
+### Changed (CI)
+- Conformance on Windows is a gate: a pending or skipped check fails the job (`TPT_CONFORMANCE_REQUIRE_PASS`).
+
+### Fixed
+- Job events are delivered only to the window that started the job.
+- UI Automation reads of a new window retry instead of failing with `E_FAIL`.
+- Linux: `app://` requests get a real response.
 
 ### Removed
 - `CODE_OF_CONDUCT.md`.
 
 ### Added
+- Windows: per-monitor placement. `Window::on_monitor(index)` and `Window::on_each_monitor()` open windows on chosen monitors, and a signed kiosk config can set `"monitors": "each"` for one full-screen window per monitor.
+- Windows: `Window::profile(...)` keeps a window's data in a named or ephemeral profile folder. Consent answers are kept per profile.
+- Windows: `App::menu_bar(...)` gives every top-level window a menu bar. A pick reports the command's id.
+- Windows: `Window::hidden()` creates a window that is not shown. Its page still loads.
+- Windows: `App::webview2_channel(...)` chooses the Stable, Beta, Dev or Canary WebView2 runtime. Partial: only Stable is installed on the development machine, so the other channels are tested only for the refusal.
+- Windows: HID and WinUSB transports in `tpt-shell-devices`. Partial: listing works; opening and transfers are not yet verified on hardware.
+- Devices: `ListFilter` and `Hub::list_filtered` list only the devices a scope allows. `virtual_devices::from_env` builds virtual devices from the `TPT_VIRTUAL_DEVICES` variable.
+- Devtools: the overlay has an accessibility panel (a quick check), a jobs panel that lists the router's running and recent jobs, the engine version when the loader reports it, and the page as it was at the timeline cursor.
+- Recording and replay: page input (clicks, keys and input changes) is recorded with element paths, and input events carry a snapshot of the page. `App::replay_page_input` replays it on Windows (feature `agent`). `App::replay_recording` runs a recording's requests through the app's own router, with no window.
+- Agent: MCP over localhost HTTP (feature `mcp-http`, token in `TPT_MCP_TOKEN`, at least 32 characters). The agent tools `click`, `type_text` and `read` work on snapshot references.
+- Test driver (feature `test-driver`): answers the test host's requests on the UI thread, through a WebView2 host.
+- `tpt-shell test collect <run-dir> <out-dir>` gathers what a test run wrote.
+- Linux: `app://` requests get a real response with the page policy. The conformance suite runs on Linux through the GTK backend in CI.
+- Build: the x64 `WebView2Loader.dll` is vendored in `redist/win-x64` with its licence and notice.
+- Build: SPDX headers on the JavaScript, Cargo, `deny.toml` and book config files.
 - Viewport frames: `UiHandle::viewport_frame` and `viewport_frame_named` send an RGBA8 frame to a page's `<canvas>`, with an example (`tpt-shell` `examples/viewport`).
 - Repository skeleton: Cargo workspace, empty facade crate `tpt-shell`.
 - Dual licence: MIT and Apache-2.0 (TPT Solutions).

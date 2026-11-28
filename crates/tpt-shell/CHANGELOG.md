@@ -5,6 +5,14 @@ All notable changes to `tpt-shell` are recorded here. The format follows [Keep a
 ## [Unreleased]
 
 ### Added
+- Windows: `Window::on_monitor(index)` and `Window::on_each_monitor()`. Monitors are numbered from 0 in device-name order, and a window stays on its monitor when the layout changes. `on_each_monitor` opens one window per monitor, named `<name>-1`, `<name>-2`, and so on. An index with no monitor behind it stops the app before anything opens.
+- Windows: `Window::hidden()`. The page still loads and runs, so a test can drive the app with nothing on screen (Partial).
+- Windows: `Window::profile(ProfileKind)` keeps a window's data in its profile's folder. Windows that share a profile share that folder, and their consent answers are kept there too.
+- Windows: `App::menu_bar(menus, on_command)` gives every top-level window a menu bar, and windows created later get it too. Ids must be non-zero.
+- Windows: `App::webview2_channel(...)` selects the Stable, Beta, Dev or Canary runtime (Partial).
+- Windows: `App::agent_http(port)` serves MCP on `127.0.0.1` behind a bearer token from `TPT_MCP_TOKEN` (feature `mcp-http`).
+- `App::replay_recording` plays a recording's requests through the app's own router, with no window. `App::replay_page_input` replays a recording's page input on Windows (feature `agent`).
+- Features `mcp-http` (MCP over localhost HTTP) and `test-driver` (answers the test host's requests on the UI thread, when the app is started with `TPT_TEST_RUN`).
 - `tpt_shell::viewport` and `UiHandle::viewport_frame`: sends one RGBA8 frame to a window's page as the event `viewport.frame`, for a `<canvas>` to draw. The payload is JSON (`width`, `height`, `format: "rgba8"`, base64 `data`). A buffer that is not `width * height * 4` bytes, or an empty frame, is refused.
 - `UiHandle::viewport_frame_named`: the same frame with a binding `name`, so a page with several canvases draws each frame into the right one.
 - `examples/viewport`, which streams an animated gradient into a page canvas. The page's script and style are assets, because the page policy blocks inline code.
@@ -26,3 +34,8 @@ All notable changes to `tpt-shell` are recorded here. The format follows [Keep a
 ### Changed
 - MSRV is Rust 1.90, set in the workspace manifest.
 - The README quickstart no longer calls `App::loader`, which is optional on Windows.
+- The quickstart uses the vendored `redist/win-x64/WebView2Loader.dll`, and `tpt-shell run` copies it beside the program.
+
+### Fixed
+- Windows: job events go only to the window that started the job.
+- Windows: UI Automation reads of a new window retry instead of failing with `E_FAIL`.

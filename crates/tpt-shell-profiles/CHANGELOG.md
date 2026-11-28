@@ -4,6 +4,9 @@ All notable changes to `tpt-shell-profiles` are recorded here. The format follow
 
 ## [Unreleased]
 
+### Changed
+- The manifest points at this crate's README, `readme = "README.md"`.
+
 ### Added
 - `Kind` (default, named and ephemeral) and `level` for each OS.
 - `ProfileStore`: named profiles under one base folder, with checked names.

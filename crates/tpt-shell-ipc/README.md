@@ -36,7 +36,7 @@ Unknown envelope versions are rejected. Unknown envelope fields are rejected. Pa
 | `contract_load` | Reads a contract from a file. |
 | `schema` | The argument schemas that the router validates against. |
 | `typescript` | Generates the TypeScript client (`commands.ts`). |
-| `jobs` | Long-running commands with progress, cancellation and events. Cancellation applies only to jobs the calling window started. |
+| `jobs` | Long-running commands with progress, cancellation and events. Cancellation applies only to jobs the calling window started. Each job event can be sent to the window that started its job, and `Jobs::list` reports the jobs for the developer overlay. |
 | `stream` | Streamed results. |
 | `blob` | Binary payloads passed by reference. |
 | `rate_limit` | Per-caller rate limits. |

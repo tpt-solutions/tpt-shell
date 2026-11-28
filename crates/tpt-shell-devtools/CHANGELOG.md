@@ -11,4 +11,8 @@ All notable changes to `tpt-shell-devtools` are recorded here. The format follow
 - `audit_rows` reads the last `AUDIT_TAIL` (200) audit lines.
 - The overlay page is built with no external resources.
 - `enabled()` and `page_if_enabled()` return nothing in release builds.
+- Accessibility panel: `a11y::check` runs the `tpt-shell-test` rules on the page's elements that have an `id`, and `a11y::to_json` reports the findings. Partial: some rules are heuristics, as the module documentation says.
+- Jobs panel lists the app router's running jobs and the last 20 finished ones.
+- The engine version is shown when the WebView2 loader reports it.
+- The timeline's `dom_at_cursor` returns the page snapshot from the latest input event before the cursor.
 - `overlay` feature, on by default for this crate. The facade enables it only through its `devtools` feature.

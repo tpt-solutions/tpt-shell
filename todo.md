@@ -287,7 +287,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### Conformance suite foundation
 - [x] `conformance/` harness and fixture pages
-- [ ] Checks: IPC round trip, large blobs, streams/backpressure, custom protocol, CSP, navigation policy, theme injection, snapshot, drag regions, DPI
+- [ ] Checks: IPC round trip, large blobs, streams/backpressure, custom protocol, CSP, navigation policy, theme injection, snapshot, drag regions, DPI (2026-11-28: Windows passes all ten, locally, with `TPT_CONFORMANCE_REQUIRE_PASS=1`, and the CI gate for Windows is on. Linux has all ten written; none has run in CI yet. Drag regions were added 2026-11-28: a press on a drag box starts a window move (GTK 3 `gtk_window_begin_move_drag`, GTK 4 `gdk_toplevel_begin_move`). macOS: `MacBackend` has an event loop (`run_until`, `run_until_quit`, `MacProxy`) and the suite runs on the main thread on every OS; it type-checks for macOS, but no macOS check is wired yet. Streams are checked over the platform message channel with the shared credit model in `conformance/src/stream.rs`)
 - [ ] Run on Windows first, establish baseline
 - [x] Compatibility report generator (published artifact) (the `compat-report` job publishes it, run 46059331567; the macOS and Linux rows are all pending)
 
@@ -350,7 +350,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] D-Bus client written without a non-compliant dependency, or licence-checked crate
 
 ### Parity
-- [ ] Conformance green on Ubuntu CI (Xvfb, Wayland headless where possible) (the Linux runner is written in `conformance/tests/conformance/linux.rs`: 5 checks run for real (IPC, custom protocol, CSP, navigation, snapshot), the blob check runs only its message half, and 4 are pending with reasons (streams, theme, dpi, drag regions). It type-checks for Linux; it has not run in CI yet, so this stays open until the Ubuntu job runs it green)
+- [ ] Conformance green on Ubuntu CI (Xvfb, Wayland headless where possible) (the Linux runner is written in `conformance/tests/conformance/linux.rs`: 5 checks run for real (IPC, custom protocol, CSP, navigation, snapshot), the blob check runs only its message half, and 4 are pending with reasons (streams, theme, dpi, drag regions). Updated 2026-11-28: streams (shared model), DPI (`WindowBackend::scale_factor`, GTK `gtk_widget_get_scale_factor`), theme injection (a per-window user script, as the polyfill) and the blob-URL half (served as an asset, not the facade's blob store, which is Windows only) are written. Drag regions are written (a press on a drag box starts a window move; the move is not measured under Xvfb, which has no window manager). It type-checks for Linux and clippy passes; it has not run in CI yet, so this stays open until the Ubuntu job runs it green)
 - [x] Both GTK3/4 adapters covered in CI matrix (R4) (the `linux-adapters` job has four legs, gtk3 and gtk4 each under Xvfb and headless Weston; all four pass on run 46059331567. The job is still `continue-on-error`; removing that line is a decision still open)
 - [ ] aarch64 Linux build verified (the crate type-checks for `aarch64-unknown-linux-gnu`; no build or run; the `test-aarch64` CI job is skipped unless the `ENABLE_ARM_RUNNERS` variable is set)
 - [ ] Compatibility report covers all three OSes (the `compat-report` job ran on run 46059331567 with all three conformance results as inputs, but the macOS and Linux rows are all pending, so it has no real results for them yet)

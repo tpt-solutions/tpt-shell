@@ -4,7 +4,7 @@ The `.tptreplay` format for tpt-shell: a recording of what happened in an app ru
 
 Part of [tpt-shell](https://github.com/tpt-solutions/tpt-shell). The format is also described in [docs/src/replay-format.md](https://github.com/tpt-solutions/tpt-shell/blob/master/docs/src/replay-format.md).
 
-> **Status: pre-alpha.** Not published (`publish = false`, version `0.0.0`). The format, readers, recorder and divergence check are Full. The capture hooks in the running app are Partial.
+> **Status: pre-alpha.** Not published (`publish = false`, version `0.0.0`). The format, readers, recorder and divergence check are Full. Page input recording and replay are built on Windows. The other capture hooks in the running app are Partial.
 
 ## The format
 
@@ -16,7 +16,7 @@ A recording is JSON Lines.
 
 `seq` counts from 0 and `t_ns` never goes back.
 
-Version 2 adds assets and the clock and random-number kinds. Version 1 recordings still read, and have no assets. Recordings can be compressed as a zstd frame with `Recorder::finish_compressed`, and read back with `read_compressed`. Plain text still reads with `read`.
+Version 2 adds assets and the clock and random-number kinds. Version 1 recordings still read, and have no assets. Recordings can be compressed as a zstd frame with `Recorder::finish_compressed`, and read back with `read_compressed`. Plain text is read with `read`. `read`.
 
 A recording is limited to 256 MiB, and an asset to 16 MiB.
 

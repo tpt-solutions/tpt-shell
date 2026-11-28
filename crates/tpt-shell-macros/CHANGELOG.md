@@ -4,6 +4,9 @@ All notable changes to `tpt-shell-macros` are recorded here. The format follows 
 
 ## [Unreleased]
 
+### Changed
+- The manifest points at this crate's README, `readme = "README.md"`.
+
 ### Added
 - `embed_dir!`: embeds a directory at compile time with deterministic, sorted paths.
 - `#[command]`, with `commands!` and `register_commands!`.

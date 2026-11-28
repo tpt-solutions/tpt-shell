@@ -23,4 +23,6 @@ All notable changes to `tpt-shell-cli` are recorded here. The format follows [Ke
 - `tpt-shell runtime pin` and `runtime list`, for a pinned WebView2 runtime.
 - `tpt-shell vendor` vendors dependencies.
 - `tpt-shell install-service` and `uninstall-service`. On Windows this writes a per-user Run entry. On macOS and Linux it writes the LaunchAgent and systemd user units, and prints the commands without running them.
+- `tpt-shell test collect <run-dir> <out-dir> [--test <name>]` gathers the artifacts a test run wrote.
+- `tpt-shell run` copies the vendored `WebView2Loader.dll` beside the built program, unless a copy is already there.
 - Exit codes: 0 for success, 1 when the checked input has problems, and 2 for bad usage or an I/O failure.

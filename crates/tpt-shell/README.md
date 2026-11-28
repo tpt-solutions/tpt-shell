@@ -12,7 +12,8 @@ This is the facade crate. Most apps depend on this crate alone and pull the othe
 - **A typed command channel.** Commands are Rust functions. `#[command]` and `commands!` derive their argument and result contracts, and the contract can be exported as a TypeScript client.
 - **Secure by default.** Nothing privileged works until the manifest or the code grants it. Grants are per window and per origin, and can require the user's consent.
 - **Audit.** Command calls can be written to a hash-chained audit log. See `tpt-shell-audit`.
-- **Kiosk, devices and agents** are opt-in: signed kiosk configs, serial/USB/printer access through a scoped device hub, and an MCP surface for AI agents behind the `agent` feature.
+- **Windows.** Windows can open on chosen monitors, each window can keep its data in its own profile folder, and the app can have a menu bar and a tray icon. WebView2 release channels can be selected.
+- **Kiosk, devices and agents** are opt-in: signed kiosk configs (one window per monitor, if the config asks for it), serial, HID, USB and printer access through a scoped device hub, and an MCP surface for AI agents behind the `agent` feature.
 - **No telemetry, no network by default.** The shell opens no sockets unless a feature turns one on.
 - **Licence-clean.** Dependencies must be MIT, or dual-licensed with MIT. The policy is enforced with `cargo-deny`.
 
@@ -36,10 +37,10 @@ fn main() -> tpt_shell::Result<()> {
 }
 ```
 
-The `hello` example in this repository runs the same code. It takes the path to the x64 `WebView2Loader.dll` from the WebView2 SDK package (`build/native/x64/`) as its argument:
+The `hello` example in this repository runs the same code. It takes the path to the x64 `WebView2Loader.dll` as its argument. The repository vendors that file in `redist/win-x64/`:
 
 ```sh
-cargo run -p tpt-shell --example hello -- <path to WebView2Loader.dll>
+cargo run -p tpt-shell --example hello -- redist/win-x64/WebView2Loader.dll
 ```
 
 `App::loader(path)` sets the loader's path. It is optional: without it, the app looks for `WebView2Loader.dll` beside the program.
@@ -47,7 +48,7 @@ cargo run -p tpt-shell --example hello -- <path to WebView2Loader.dll>
 The `viewport` example draws frames from Rust into a `<canvas>` on the page, to show how a renderer's output reaches a page:
 
 ```sh
-cargo run -p tpt-shell --example viewport -- <path to WebView2Loader.dll>
+cargo run -p tpt-shell --example viewport -- redist/win-x64/WebView2Loader.dll
 ```
 
 ## Main types
@@ -72,6 +73,8 @@ The `#[command]`, `commands!`, `register_commands!` and `embed_dir!` macros are 
 | Feature | Default | What it enables |
 |---|---|---|
 | `agent` | off | MCP over stdin and stdout for an enabled `[agent]` profile (`tpt-shell-agent`). |
+| `mcp-http` | off | MCP over localhost HTTP on `127.0.0.1`, behind a bearer token from `TPT_MCP_TOKEN`. Needs `agent`. Opens a socket. |
+| `test-driver` | off | Answers a test host's requests on the UI thread. The app must also start with `TPT_TEST_RUN` set. Needs `agent`. |
 | `admin-endpoint` | off | Token-protected admin endpoint on `127.0.0.1` for kiosk apps. |
 | `health-endpoint` | off | Local HTTP health endpoint on `127.0.0.1` for kiosk apps. |
 | `devtools` | off | The developer overlay (Ctrl+Shift+D). Intended for debug builds: a release build without it has no overlay page. |
@@ -84,7 +87,7 @@ The admin and health endpoints are off by default, so a default build opens no s
 |---|---|
 | Windows 10 1809+ and Windows 11, x86_64 | Built and tested on Windows 11. Needs the WebView2 Evergreen runtime or a Fixed Version runtime. |
 | macOS 12+ (WKWebView) | Written and type-checked for macOS. Not yet run on a Mac. |
-| Linux (GTK 3 with WebKit2GTK 4.1, or GTK 4 with WebKitGTK 6.0) | Written and type-checked. Runs only in CI's adapter jobs. Wayland and X11 are not verified on real desktops. |
+| Linux (GTK 3 with WebKit2GTK 4.1, or GTK 4 with WebKitGTK 6.0) | Written and type-checked. Runs in CI's adapter jobs, where the conformance suite runs through the GTK backend. Wayland and X11 are not verified on real desktops. |
 
 [docs/src/platform-notes.md](https://github.com/tpt-solutions/tpt-shell/blob/master/docs/src/platform-notes.md) has the current detail for each platform and the checklist behind it.
 
