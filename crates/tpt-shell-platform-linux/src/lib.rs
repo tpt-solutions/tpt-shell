@@ -23,6 +23,7 @@ pub mod adapter;
 pub mod dbus;
 /// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod desktop;
+pub mod drag;
 /// Support: Partial. Not run on macOS/Linux here; compile-checked.
 pub mod gtk3;
 /// Support: Partial. Not run on macOS/Linux here; compile-checked.

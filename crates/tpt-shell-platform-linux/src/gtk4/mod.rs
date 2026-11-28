@@ -50,7 +50,8 @@ use tpt_shell_core::backend::{
     WindowBackend, WindowSpec,
 };
 use tpt_shell_core::platform::{ClipboardBackend, ColorScheme, ThemeBackend};
-use tpt_shell_core::{Error, LogicalRect, LogicalSize, Result};
+use tpt_shell_core::theme::{injection_script, Signals, Theme};
+use tpt_shell_core::{Error, LogicalRect, LogicalSize, Result, ScaleFactor};
 
 use crate::gtk3::route;
 use crate::gtk3::{cstring, from_c};
@@ -76,6 +77,30 @@ const TRANSPARENT_CLASS: &CStr = c"tpt-transparent";
 
 /// Everything the callbacks need about one window. Boxed, so its address is stable while the
 /// window exists. It is freed when the window is closed, or is found destroyed.
+/// Starts a window move from a press at screen position (x, y), for a page's drag box. GTK 4 moves
+/// a toplevel through its surface and the pointer's seat.
+fn begin_window_drag(w: &WindowState, x: f64, y: f64) {
+    let f = &w.gtk.fns;
+    // SAFETY: the window is live (the caller checked it is not destroyed). Every pointer is checked
+    // for null before use; the move starts from the primary button, and time 0 is GDK_CURRENT_TIME.
+    unsafe {
+        let surface = (f.gtk_native_get_surface)(w.window);
+        let display = (f.gdk_display_get_default)();
+        if surface.is_null() || display.is_null() {
+            return;
+        }
+        let seat = (f.gdk_display_get_default_seat)(display);
+        if seat.is_null() {
+            return;
+        }
+        let pointer = (f.gdk_seat_get_pointer)(seat);
+        if pointer.is_null() {
+            return;
+        }
+        (f.gdk_toplevel_begin_move)(surface, pointer, 1, x, y, 0);
+    }
+}
+
 pub(crate) struct WindowState {
     pub(crate) gtk: &'static Gtk4,
     pub(crate) window: Obj,
@@ -107,6 +132,8 @@ pub struct Gtk4Backend {
     #[allow(clippy::vec_box)] // the boxed address is what WebKit callbacks hold
     retired: Vec<Box<WindowState>>,
     transparency_css: bool,
+    /// The theme new windows get. Set by [`Gtk4Backend::set_theme`].
+    theme: Theme,
     main_loop: Obj,
 }
 
@@ -268,7 +295,16 @@ impl Gtk4Backend {
             retired: Vec::new(),
             transparency_css: false,
             main_loop,
+            theme: Theme::default(),
         })
+    }
+
+    /// Sets the theme for windows created after this call. The theme is checked first; an
+    /// invalid one is refused and nothing changes.
+    pub fn set_theme(&mut self, theme: Theme) -> Result<()> {
+        theme.validate()?;
+        self.theme = theme;
+        Ok(())
     }
 
     /// Runs the GLib main loop until [`EventLoopBackend::quit`] is called.
@@ -409,19 +445,26 @@ impl Gtk4Backend {
             data,
         )?;
         let polyfill = cstring(route::PAGE_POLYFILL)?;
+        // The theme follows the polyfill. The colour scheme is read when the window is created;
+        // a backend that cannot read it uses the light scheme.
+        let scheme = ThemeBackend::color_scheme(self).unwrap_or(ColorScheme::Light);
+        let theme = cstring(&injection_script(&self.theme, scheme, Signals::default())?)?;
+        let drag_listener = cstring(crate::drag::LISTENER_JS)?;
         // SAFETY: a user script is created, handed to the manager (which keeps a reference),
         // then released by us.
         unsafe {
-            let script = (f.webkit_user_script_new)(
-                polyfill.as_ptr(),
-                sys::WEBKIT_INJECT_TOP_FRAME,
-                sys::WEBKIT_INJECT_AT_DOCUMENT_START,
-                std::ptr::null(),
-                std::ptr::null(),
-            );
-            if !script.is_null() {
-                (f.webkit_user_content_manager_add_script)(manager, script);
-                (f.webkit_user_script_unref)(script);
+            for source in [polyfill.as_ptr(), theme.as_ptr(), drag_listener.as_ptr()] {
+                let script = (f.webkit_user_script_new)(
+                    source,
+                    sys::WEBKIT_INJECT_TOP_FRAME,
+                    sys::WEBKIT_INJECT_AT_DOCUMENT_START,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                );
+                if !script.is_null() {
+                    (f.webkit_user_content_manager_add_script)(manager, script);
+                    (f.webkit_user_script_unref)(script);
+                }
             }
         }
         Ok(())
@@ -758,6 +801,11 @@ unsafe extern "C" fn on_script_message(_manager: Obj, value: Obj, data: *mut c_v
         }
         text
     };
+    // A drag request from a drag box moves the window; the page's handler never sees it.
+    if let Some((x, y)) = crate::drag::parse_request(&text) {
+        begin_window_drag(w, x, y);
+        return;
+    }
     // Take the handler out while it runs, so it may replace itself without a borrow conflict.
     let taken = w.handler.borrow_mut().take();
     let Some(mut handler) = taken else {
@@ -951,6 +999,13 @@ impl WindowBackend for Gtk4Backend {
         // SAFETY: the window is live; the title is a valid C string for the call.
         unsafe { (self.gtk.fns.gtk_window_set_title)(w.window, title.as_ptr()) };
         Ok(())
+    }
+
+    fn scale_factor(&self, id: WindowId) -> Result<ScaleFactor> {
+        let w = self.state(id)?;
+        // SAFETY: the window is live; GTK returns 1 for a widget that has no display yet.
+        let scale = unsafe { (self.gtk.fns.gtk_widget_get_scale_factor)(w.window) };
+        Ok(ScaleFactor::new(f64::from(scale.max(1))))
     }
 
     fn set_size(&mut self, id: WindowId, size: LogicalSize) -> Result<()> {

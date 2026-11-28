@@ -27,6 +27,7 @@ Part of [tpt-shell](https://github.com/tpt-solutions/tpt-shell).
 | `single_instance` | One running copy, by an advisory lock file and a message drop. No socket is opened. |
 | `desktop` | Deep-link registration through a desktop entry. |
 | `hotkey` | Global hotkeys on X11 (Partial). Wayland is unsupported. |
+| `scheme_response` | Answers `app://` requests with a response that carries the page policy. It loads libsoup 3 for the response. |
 | `probe` | Which libraries are installed. |
 
 ## Features
@@ -44,6 +45,8 @@ Part of [tpt-shell](https://github.com/tpt-solutions/tpt-shell).
 | Global hotkeys | Partial. X11 only. |
 | D-Bus services (`dbus` feature) | Written, not verified on a desktop. |
 | Keystore through Secret Service | Written behind `dbus`. |
+| `app://` responses | Written. Runs in the CI adapter jobs. |
+| Conformance suite | Runs on Linux through the GTK backend, in CI. |
 
 ## Usage
 

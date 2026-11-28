@@ -159,6 +159,11 @@ bound_functions! { Fns, "Every function the adapter always needs, looked up once
     gtk . gtk_widget_set_visible = "gtk_widget_set_visible": fn(Obj, c_int) -> ();
     gtk . gtk_widget_get_width = "gtk_widget_get_width": fn(Obj) -> c_int;
     gtk . gtk_widget_get_height = "gtk_widget_get_height": fn(Obj) -> c_int;
+    gtk . gtk_widget_get_scale_factor = "gtk_widget_get_scale_factor": fn(Obj) -> c_int;
+    gtk . gtk_native_get_surface = "gtk_native_get_surface": fn(Obj) -> Obj;
+    gtk . gdk_display_get_default_seat = "gdk_display_get_default_seat": fn(Obj) -> Obj;
+    gtk . gdk_seat_get_pointer = "gdk_seat_get_pointer": fn(Obj) -> Obj;
+    gtk . gdk_toplevel_begin_move = "gdk_toplevel_begin_move": fn(Obj, Obj, c_int, f64, f64, u32) -> ();
     gtk . gtk_widget_add_css_class = "gtk_widget_add_css_class": fn(Obj, *const c_char) -> ();
     gtk . gtk_widget_remove_css_class = "gtk_widget_remove_css_class": fn(Obj, *const c_char) -> ();
     gtk . gtk_css_provider_new = "gtk_css_provider_new": fn() -> Obj;

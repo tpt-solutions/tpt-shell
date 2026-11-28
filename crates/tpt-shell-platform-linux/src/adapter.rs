@@ -20,7 +20,8 @@ use tpt_shell_core::backend::{
     WindowBackend, WindowSpec,
 };
 use tpt_shell_core::platform::{ClipboardBackend, ColorScheme, ThemeBackend};
-use tpt_shell_core::{Error, LogicalRect, LogicalSize, Result};
+use tpt_shell_core::theme::Theme;
+use tpt_shell_core::{Error, LogicalRect, LogicalSize, Result, ScaleFactor};
 
 use crate::gtk3::dialogs::FileDialog;
 use crate::gtk3::{Gtk3Backend, Gtk3Proxy, WindowId};
@@ -168,6 +169,14 @@ impl WindowBackend for LinuxBackend {
     fn set_title(&mut self, id: WindowId, title: &str) -> Result<()> {
         each!(self, b => b.set_title(id, title))
     }
+    fn scale_factor(&self, id: WindowId) -> Result<ScaleFactor> {
+        each!(self, b => b.scale_factor(id))
+    }
+    /// The regions become drag boxes in the page; a press on one starts a window move (see
+    /// `crate::drag`). Both GTK adapters share this, because the boxes are page content.
+    fn set_drag_regions(&mut self, id: WindowId, regions: &[LogicalRect]) -> Result<()> {
+        WebviewBackend::eval(self, id, &crate::drag::regions_script(regions))
+    }
     fn set_size(&mut self, id: WindowId, size: LogicalSize) -> Result<()> {
         each!(self, b => b.set_size(id, size))
     }
@@ -255,6 +264,13 @@ impl ClipboardBackend for LinuxBackend {
     }
     fn set_clipboard_text(&mut self, text: &str) -> Result<()> {
         each!(self, b => b.set_clipboard_text(text))
+    }
+}
+
+impl LinuxBackend {
+    /// Sets the theme for windows created after this call. See `Gtk3Backend::set_theme`.
+    pub fn set_theme(&mut self, theme: Theme) -> Result<()> {
+        each!(self, b => b.set_theme(theme))
     }
 }
 

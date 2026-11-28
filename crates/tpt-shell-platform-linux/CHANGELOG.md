@@ -12,6 +12,8 @@ All notable changes to `tpt-shell-platform-linux` are recorded here. The format 
 - Single instance by advisory lock file and message drop. No socket is opened.
 - Deep-link registration through a desktop entry.
 - `probe`, which reports installed GTK and WebKit libraries for `tpt-shell doctor`.
+- `scheme_response`: answers `app://` requests with the page policy (`PAGE_CSP`). It loads libsoup 3 (`libsoup-3.0.so.0`) for the response.
+- The conformance suite runs on Linux through this backend, in CI.
 
 ### Changed
 - Single instance uses an advisory lock file and a message drop instead of a UNIX socket. No socket is opened.

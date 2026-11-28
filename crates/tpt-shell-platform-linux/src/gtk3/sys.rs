@@ -199,6 +199,8 @@ bound_functions! {
     gtk . gtk_widget_set_app_paintable = "gtk_widget_set_app_paintable": fn(Obj, c_int) -> ();
     gtk . gtk_widget_set_visual = "gtk_widget_set_visual": fn(Obj, Obj) -> ();
     gtk . gtk_widget_get_screen = "gtk_widget_get_screen": fn(Obj) -> Obj;
+    gtk . gtk_widget_get_scale_factor = "gtk_widget_get_scale_factor": fn(Obj) -> c_int;
+    gtk . gtk_window_begin_move_drag = "gtk_window_begin_move_drag": fn(Obj, c_int, c_int, c_int, u32) -> ();
     gtk . gtk_container_add = "gtk_container_add": fn(Obj, Obj) -> ();
     gtk . gtk_clipboard_get = "gtk_clipboard_get": fn(Obj) -> Obj;
     gtk . gtk_clipboard_set_text = "gtk_clipboard_set_text": fn(Obj, *const c_char, c_int) -> ();
