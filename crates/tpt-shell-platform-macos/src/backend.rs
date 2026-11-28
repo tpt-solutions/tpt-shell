@@ -6,15 +6,17 @@
 //! Every method that is not written yet returns [`Error::Unsupported`]. That keeps the gaps
 //! visible to callers instead of silently doing nothing.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSPasteboard, NSPasteboardTypeString};
-use objc2_foundation::{NSBundle, NSString};
+use objc2_foundation::{NSBundle, NSDate, NSDefaultRunLoopMode, NSRunLoop, NSString};
 use tpt_shell_core::backend::{
-    AssetSource, Backdrop, CloseAction, MessageHandler, PreferredScheme, WebviewBackend,
-    WindowBackend, WindowSpec,
+    AssetSource, Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler,
+    PreferredScheme, WebviewBackend, WindowBackend, WindowSpec,
 };
 use tpt_shell_core::platform::{
     ClipboardBackend, ColorScheme, MessageAnswer, MessageBox, OpenDialog, Platform, ThemeBackend,
@@ -31,6 +33,9 @@ use crate::window::MacWindow;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowId(pub usize);
 
+/// A task queued for the main thread.
+type Task = Box<dyn FnOnce() + Send>;
+
 /// Owns the windows. Create it on the main thread.
 ///
 /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
@@ -39,6 +44,26 @@ pub struct MacBackend {
     next: usize,
     windows: HashMap<usize, MacWindow>,
     keystore: Keystore,
+    /// Tasks posted through a [`MacProxy`]. They run on the main thread the next time the loop runs.
+    tasks: Arc<Mutex<VecDeque<Task>>>,
+    quit_requested: bool,
+}
+
+/// Cross-thread handle to the macOS main thread. A posted task waits in a queue, and runs the next
+/// time the backend's loop runs ([`MacBackend::run_until`] or [`MacBackend::run_until_quit`]).
+///
+/// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
+#[derive(Clone)]
+pub struct MacProxy {
+    tasks: Arc<Mutex<VecDeque<Task>>>,
+}
+
+impl EventLoopProxy for MacProxy {
+    fn post(&self, task: Task) -> Result<()> {
+        let mut queue = self.tasks.lock().unwrap_or_else(|p| p.into_inner());
+        queue.push_back(task);
+        Ok(())
+    }
 }
 
 impl MacBackend {
@@ -57,14 +82,92 @@ impl MacBackend {
                 next: 1,
                 windows: HashMap::new(),
                 keystore: Keystore::new(&service),
+                tasks: Arc::new(Mutex::new(VecDeque::new())),
+                quit_requested: false,
             }
         })
+    }
+
+    /// Runs the queued tasks, then the main run loop for up to `timeout`, until `done` holds or
+    /// [`EventLoopBackend::quit`] is called. Returns whether `done` held.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
+    pub fn run_until(&mut self, mut done: impl FnMut() -> bool, timeout: Duration) -> bool {
+        let end = Instant::now() + timeout;
+        loop {
+            self.run_queued();
+            if done() {
+                return true;
+            }
+            if self.quit_requested || Instant::now() >= end {
+                return false;
+            }
+            Self::step(Duration::from_millis(10));
+        }
+    }
+
+    /// Runs the main run loop until [`EventLoopBackend::quit`] is called. The quit request is
+    /// cleared when this returns, so the backend can run again.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
+    pub fn run_until_quit(&mut self) -> Result<()> {
+        loop {
+            self.run_queued();
+            if self.quit_requested {
+                break;
+            }
+            Self::step(Duration::from_millis(10));
+        }
+        self.quit_requested = false;
+        Ok(())
+    }
+
+    /// Lets the main run loop work for up to `wait`: WebKit callbacks, AppKit events and timers.
+    fn step(wait: Duration) {
+        // SAFETY: the mode is a Foundation constant; the date is made for this call. The loop is
+        // the main thread's, and every caller of this type runs on that thread.
+        unsafe {
+            NSRunLoop::currentRunLoop().runMode_beforeDate(
+                NSDefaultRunLoopMode,
+                &NSDate::dateWithTimeIntervalSinceNow(wait.as_secs_f64()),
+            );
+        }
+    }
+
+    /// Runs queued tasks until the queue is empty. A task may post another.
+    fn run_queued(&self) {
+        loop {
+            let batch: Vec<Task> = {
+                let mut queue = self.tasks.lock().unwrap_or_else(|p| p.into_inner());
+                queue.drain(..).collect()
+            };
+            if batch.is_empty() {
+                return;
+            }
+            for task in batch {
+                task();
+            }
+        }
     }
 
     fn window(&self, id: WindowId) -> Result<&MacWindow> {
         self.windows
             .get(&id.0)
             .ok_or(Error::UnknownWindow(id.0 as u64))
+    }
+}
+
+impl EventLoopBackend for MacBackend {
+    type Proxy = MacProxy;
+
+    fn proxy(&self) -> MacProxy {
+        MacProxy {
+            tasks: self.tasks.clone(),
+        }
+    }
+
+    fn quit(&mut self) {
+        self.quit_requested = true;
     }
 }
 

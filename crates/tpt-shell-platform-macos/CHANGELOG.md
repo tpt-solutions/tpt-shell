@@ -4,6 +4,9 @@ All notable changes to `tpt-shell-platform-macos` are recorded here. The format 
 
 ## [Unreleased]
 
+### Changed
+- The manifest points at this crate's README, `readme = "README.md"`.
+
 ### Added
 - AppKit window (frameless, transparent, always-on-top, vibrancy backdrop and close action), and WKWebView with the script message bridge.
 - Document-start scripts, the navigation policy and the `app://` scheme handler.
