@@ -235,6 +235,11 @@ jobs:
       # killed by a signal is re-run under gdb for a backtrace (tools/linux-adapter-tests.sh).
       - name: Adapter tests (${{ matrix.adapter }}, ${{ matrix.display }})
         run: bash tools/headless-linux.sh ${{ matrix.display }} bash tools/linux-adapter-tests.sh
+      # The app's Linux runner opens its declared windows on GTK 3 and closes them again. Only the
+      # GTK 3 legs run it, since the runner is GTK 3 only for now.
+      - name: Facade window test (gtk3, ${{ matrix.display }})
+        if: matrix.adapter == 'gtk3'
+        run: bash tools/headless-linux.sh ${{ matrix.display }} cargo test -p tpt-shell --lib linux_runner_tests -- --nocapture
 
   # Merges the three result files into the compatibility report (spec §14, "generates the public
   # compatibility report"). The report is also written to the job summary.

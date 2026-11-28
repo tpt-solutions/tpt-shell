@@ -90,6 +90,72 @@ fn page_restrictions(
     }
 }
 
+#[cfg(target_os = "linux")]
+impl App {
+    /// Opens the declared windows on GTK 3 and returns the backend that owns them, with the id of
+    /// each window. The pages are not loaded yet, so the windows open empty.
+    fn open_linux_windows(
+        &self,
+    ) -> Result<(
+        tpt_shell_platform_linux::adapter::LinuxBackend,
+        Vec<tpt_shell_platform_linux::gtk3::WindowId>,
+    )> {
+        use tpt_shell_core::backend::WindowBackend;
+        if self.windows.is_empty() {
+            return Err(Error::Backend("the app declares no window".into()));
+        }
+        let mut backend = tpt_shell_platform_linux::adapter::LinuxBackend::with_adapter(
+            tpt_shell_platform_linux::probe::Adapter::Gtk3,
+        )?;
+        let mut ids = Vec::new();
+        for window in &self.windows {
+            ids.push(backend.create(&window.spec())?);
+        }
+        Ok((backend, ids))
+    }
+
+    /// Runs the app on GTK 3 until every window is closed.
+    fn run_linux(self) -> Result<()> {
+        let (mut backend, _ids) = self.open_linux_windows()?;
+        loop {
+            backend.run_until(|| false, Duration::from_millis(20));
+            if backend.open_windows() == Some(0) {
+                return Ok(());
+            }
+        }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_runner_tests {
+    use super::*;
+    use tpt_shell_core::backend::WindowBackend;
+
+    #[test]
+    fn the_declared_windows_open_and_close_on_gtk3() {
+        let app = App::new()
+            .name("demo")
+            .window(Window::new("main").title("Demo").size(400.0, 300.0))
+            .window(Window::new("second"));
+        let (mut backend, ids) = match app.open_linux_windows() {
+            Ok(opened) => opened,
+            Err(why) => {
+                eprintln!("skipped: GTK 3 is not available here: {why}");
+                return;
+            }
+        };
+        assert_eq!(backend.open_windows(), Some(2));
+        for id in ids {
+            backend.close(id).expect("close a window");
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while backend.open_windows() != Some(0) && Instant::now() < deadline {
+            backend.run_until(|| false, Duration::from_millis(20));
+        }
+        assert_eq!(backend.open_windows(), Some(0));
+    }
+}
+
 pub use tpt_shell_capabilities::Scope;
 pub use tpt_shell_ipc::CommandError;
 
@@ -224,7 +290,7 @@ impl Window {
         self
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn spec(&self) -> WindowSpec {
         WindowSpec {
             name: self.name.clone(),
@@ -1324,7 +1390,11 @@ impl App {
             };
             self.build_with(guard)?.run()
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
+        {
+            self.run_linux()
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
         {
             Err(Error::Unsupported {
                 feature: "running an app on this platform",

@@ -359,6 +359,13 @@ impl Gtk3Backend {
         }
     }
 
+    /// The number of windows that are open, meaning not yet destroyed.
+    ///
+    /// Support: Partial. Needs GTK 3 at run time. Not run on macOS/Linux here; compile-checked.
+    pub fn open_windows(&self) -> usize {
+        self.windows.values().filter(|w| !w.destroyed.get()).count()
+    }
+
     fn state(&self, id: WindowId) -> Result<&WindowState> {
         self.windows
             .get(&id.0)

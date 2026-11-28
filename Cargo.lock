@@ -849,6 +849,7 @@ dependencies = [
  "tpt-shell-kiosk",
  "tpt-shell-macros",
  "tpt-shell-manifest",
+ "tpt-shell-platform-linux",
  "tpt-shell-platform-windows",
  "tpt-shell-profiles",
  "tpt-shell-replay",

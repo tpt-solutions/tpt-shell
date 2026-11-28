@@ -90,6 +90,16 @@ impl LinuxBackend {
         each!(self, b => b.run())
     }
 
+    /// The number of open windows, or `None` on GTK 4, which does not count them yet.
+    ///
+    /// Support: Partial. GTK 3 only. Needs GTK at run time. Not run on macOS/Linux here; compile-checked.
+    pub fn open_windows(&self) -> Option<usize> {
+        match self {
+            LinuxBackend::Gtk3(b) => Some(b.open_windows()),
+            LinuxBackend::Gtk4(_) => None,
+        }
+    }
+
     /// Runs the main loop's pending work until `done` is true or `timeout` passes. Returns
     /// whether `done` became true.
     ///
