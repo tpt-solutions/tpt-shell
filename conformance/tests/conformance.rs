@@ -24,11 +24,20 @@ use tpt_shell_conformance::{Outcome, RunReport};
 #[path = "conformance/windows.rs"]
 mod windows;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "conformance/shared.rs"]
+mod shared;
+
 #[cfg(target_os = "linux")]
 #[path = "conformance/linux.rs"]
 mod linux;
 
-/// The run for this OS. macOS has no backend in the suite yet, so every check is pending there.
+#[cfg(target_os = "macos")]
+#[path = "conformance/macos.rs"]
+mod macos;
+
+/// The run for this OS. Each OS runs the same checks; a backend that cannot run one reports it as
+/// pending or skipped.
 fn run_suite() -> RunReport {
     #[cfg(windows)]
     {
@@ -38,13 +47,13 @@ fn run_suite() -> RunReport {
     {
         linux::run()
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
     {
-        RunReport::all_pending(
-            std::env::consts::OS,
-            "none",
-            "no backend for this OS yet (M4 for macOS)",
-        )
+        macos::run()
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    {
+        RunReport::all_pending(std::env::consts::OS, "none", "no backend for this OS")
     }
 }
 
