@@ -99,6 +99,7 @@ impl MacWindow {
         width: f64,
         height: f64,
         allowlist: Vec<String>,
+        extra_scripts: &[String],
     ) -> Self {
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height));
         // SAFETY: the window is created and used only on the main thread, as AppKit requires.
@@ -131,7 +132,10 @@ impl MacWindow {
             unsafe { config.userContentController() };
         // SAFETY: as above; the scripts and handlers are retained by the controller afterwards.
         unsafe {
-            for source in [BRIDGE_JS, SHIM_JS] {
+            let sources = [BRIDGE_JS, SHIM_JS, tpt_shell_core::drag::LISTENER_JS]
+                .into_iter()
+                .chain(extra_scripts.iter().map(String::as_str));
+            for source in sources {
                 let script = WKUserScript::initWithSource_injectionTime_forMainFrameOnly(
                     WKUserScript::alloc(mtm),
                     &NSString::from_str(source),
@@ -192,6 +196,13 @@ impl MacWindow {
         // SAFETY: main thread; the request is live for the call.
         unsafe { self.web.loadRequest(&request) };
         Ok(())
+    }
+
+    /// The backing scale factor of the window's screen: device pixels per point.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
+    pub fn scale_factor(&self) -> f64 {
+        self.window.backingScaleFactor()
     }
 
     /// Runs `script` in the page without waiting for it.

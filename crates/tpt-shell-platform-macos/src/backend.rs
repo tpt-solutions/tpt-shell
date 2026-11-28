@@ -18,9 +18,11 @@ use tpt_shell_core::backend::{
     AssetSource, Backdrop, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler,
     PreferredScheme, WebviewBackend, WindowBackend, WindowSpec,
 };
+use tpt_shell_core::geometry::{LogicalRect, ScaleFactor};
 use tpt_shell_core::platform::{
     ClipboardBackend, ColorScheme, MessageAnswer, MessageBox, OpenDialog, Platform, ThemeBackend,
 };
+use tpt_shell_core::theme::{injection_script, Signals, Theme};
 use tpt_shell_core::{Error, LogicalSize, Result};
 
 use crate::keystore::Keystore;
@@ -47,6 +49,8 @@ pub struct MacBackend {
     /// Tasks posted through a [`MacProxy`]. They run on the main thread the next time the loop runs.
     tasks: Arc<Mutex<VecDeque<Task>>>,
     quit_requested: bool,
+    /// The theme new windows get. Set by [`MacBackend::set_theme`].
+    theme: Theme,
 }
 
 /// Cross-thread handle to the macOS main thread. A posted task waits in a queue, and runs the next
@@ -84,8 +88,19 @@ impl MacBackend {
                 keystore: Keystore::new(&service),
                 tasks: Arc::new(Mutex::new(VecDeque::new())),
                 quit_requested: false,
+                theme: Theme::default(),
             }
         })
+    }
+
+    /// Sets the theme for windows created after this call. The theme is checked first; an invalid
+    /// one is refused and nothing changes.
+    ///
+    /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
+    pub fn set_theme(&mut self, theme: Theme) -> Result<()> {
+        theme.validate()?;
+        self.theme = theme;
+        Ok(())
     }
 
     /// Runs the queued tasks, then the main run loop for up to `timeout`, until `done` holds or
@@ -175,17 +190,32 @@ impl WindowBackend for MacBackend {
     type Id = WindowId;
 
     fn create(&mut self, spec: &WindowSpec) -> Result<WindowId> {
+        // The theme is injected at document start. The colour scheme is read now; a backend that
+        // cannot read it uses the light scheme.
+        let scheme = ThemeBackend::color_scheme(self).unwrap_or(ColorScheme::Light);
+        let theme = injection_script(&self.theme, scheme, Signals::default())?;
         let window = MacWindow::new(
             self.mtm,
             &spec.title,
             spec.size.width,
             spec.size.height,
             spec.allow_navigation.clone(),
+            &[theme],
         );
         let id = self.next;
         self.next += 1;
         self.windows.insert(id, window);
         Ok(WindowId(id))
+    }
+
+    fn scale_factor(&self, id: WindowId) -> Result<ScaleFactor> {
+        Ok(ScaleFactor::new(self.window(id)?.scale_factor()))
+    }
+
+    fn set_drag_regions(&mut self, id: WindowId, regions: &[LogicalRect]) -> Result<()> {
+        self.window(id)?
+            .eval(&tpt_shell_core::drag::regions_script(regions));
+        Ok(())
     }
 
     fn show(&mut self, id: WindowId) -> Result<()> {

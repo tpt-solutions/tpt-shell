@@ -11,7 +11,7 @@ use block2::DynBlock;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSWindow, NSWindowDelegate};
+use objc2_app_kit::{NSApplication, NSEventType, NSWindow, NSWindowDelegate};
 use objc2_foundation::{
     NSData, NSDictionary, NSHTTPURLResponse, NSObject, NSObjectProtocol, NSString, NSURL,
 };
@@ -96,6 +96,11 @@ define_class!(
                 return;
             };
             let text = text.to_string();
+            // A drag request from a drag box moves the window; the page's handler never sees it.
+            if tpt_shell_core::drag::parse_request(&text).is_some() {
+                begin_window_drag();
+                return;
+            }
             // Take the handler out while it runs, so a handler that sets a new one does not hit
             // a borrow conflict. Put it back unless it was replaced.
             let Some(mut handler) = self.ivars().handler.borrow_mut().take() else {
@@ -117,6 +122,28 @@ define_class!(
         }
     }
 );
+
+/// Starts a window move from the mouse press that is being handled. AppKit moves the window while
+/// the button is held, and it needs the press to be the current event. A request that arrives after
+/// the press has ended is dropped, so this is best effort.
+fn begin_window_drag() {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    let Some(event) = app.currentEvent() else {
+        return;
+    };
+    if !matches!(
+        event.r#type(),
+        NSEventType::LeftMouseDown | NSEventType::LeftMouseDragged
+    ) {
+        return;
+    }
+    if let Some(window) = event.window(mtm) {
+        window.performWindowDragWithEvent(&event);
+    }
+}
 
 impl ScriptMessageHandler {
     /// Support: Partial. Not run on macOS here; compile-checked against the AppKit bindings.
