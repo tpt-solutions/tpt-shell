@@ -36,7 +36,7 @@ runs:
           --out "${{ inputs.report }}" --tolerance "${{ inputs.tolerance }}" --max-changed "${{ inputs.max-changed }}"
     - name: Upload report
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: visual-report
         path: ${{ inputs.report }}

@@ -31,7 +31,7 @@ runs:
     - name: Write compliance outputs
       shell: bash
       run: ./target/release/tpt-shell compliance "${{ inputs.compliance-dir }}"
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: ${{ inputs.artifact-name }}
         path: |
