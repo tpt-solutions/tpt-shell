@@ -253,6 +253,38 @@ impl Transport for VirtualScanner {
     }
 }
 
+/// A USB bulk pipe that sends back what it is given. It is a loopback serial queue behind a USB
+/// identity, so a page can reach it through a `device.usb` grant the way it reaches a serial port.
+/// Control transfers are not part of the [`Transport`] trait, so this device has none.
+///
+/// Support: Partial. Bulk loopback only; a real USB device's control transfers are not virtual.
+pub struct VirtualUsb {
+    inner: VirtualSerial,
+}
+
+impl VirtualUsb {
+    /// Support: Partial. Bulk loopback, as the type's own docs say.
+    pub fn loopback(id: DeviceId) -> Self {
+        VirtualUsb {
+            inner: VirtualSerial::loopback(id),
+        }
+    }
+}
+
+impl Transport for VirtualUsb {
+    fn id(&self) -> &DeviceId {
+        self.inner.id()
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> Result<(), DeviceError> {
+        self.inner.write(bytes)
+    }
+
+    fn read(&mut self, max: usize) -> Result<Vec<u8>, DeviceError> {
+        self.inner.read(max)
+    }
+}
+
 /// A HID device: input reports go in one direction and output reports in the other.
 ///
 /// Support: Full.
@@ -330,6 +362,7 @@ impl Transport for VirtualHid {
 /// The virtual devices a spec names. Each entry is `kind@id`, separated by `;`:
 ///
 /// - `serial@serial:COM7`: a loopback serial port
+/// - `usb@usb:0416:5011`: a loopback USB bulk pipe
 /// - `printer@usb:0416:5011`: a receipt printer
 /// - `scanner@hid:0c2e:0b61`: a barcode scanner
 /// - `hid@hid:1234:5678`: a generic HID device
@@ -346,6 +379,7 @@ pub fn from_spec(spec: &str) -> Result<Vec<Box<dyn Transport>>, String> {
         let id = DeviceId::from_str(id.trim()).map_err(|e| e.to_string())?;
         let device: Box<dyn Transport> = match kind.trim() {
             "serial" => Box::new(VirtualSerial::loopback(id)),
+            "usb" => Box::new(VirtualUsb::loopback(id)),
             "printer" => Box::new(VirtualPrinter::new(id).0),
             "scanner" => Box::new(VirtualScanner::new(id).0),
             "hid" => Box::new(VirtualHid::new(id).0),
@@ -379,6 +413,18 @@ mod tests {
 
     /// `from_env` reads the process environment, so the tests that set it run one at a time.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn a_usb_loopback_sends_back_what_it_is_given() {
+        let mut pipe = VirtualUsb::loopback(id("usb:0416:5011"));
+        pipe.write(b"ping").expect("write");
+        assert_eq!(pipe.read(16).expect("read"), b"ping");
+        assert_eq!(pipe.id().to_string(), "usb:0416:5011");
+        // A spec names it as a usb device, and the printer kind keeps its own meaning.
+        let devices = from_spec("usb@usb:0416:5011;printer@usb:0416:5012").expect("two");
+        assert_eq!(devices.len(), 2);
+        assert_eq!(devices[0].id().to_string(), "usb:0416:5011");
+    }
 
     #[test]
     fn from_env_reads_the_spec_and_refuses_a_typo() {

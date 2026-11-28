@@ -74,6 +74,43 @@ impl DeviceHub {
             .collect()
     }
 
+    /// Opens a TCP connection to the network device `id`, if `scope` covers it, and audits the open.
+    /// Unlike the other kinds, a network device is not one handle the hub keeps: each call makes a
+    /// new connection, so the device can be open more than once.
+    ///
+    /// Support: Partial. Needs the `net-devices` feature. Without it, no socket is opened and the
+    /// call returns [`DeviceError::NotSupported`].
+    #[cfg(feature = "net-devices")]
+    pub fn open_net(
+        &mut self,
+        id: &DeviceId,
+        scope: &DeviceScope,
+        timeout: std::time::Duration,
+    ) -> Result<OpenDevice, DeviceError> {
+        check_scope(id, scope)?;
+        let transport = crate::net::open_tcp(scope, id, timeout)?;
+        record(&self.sink, EventKind::Open, id, 0);
+        Ok(OpenDevice {
+            transport,
+            sink: self.sink.clone(),
+        })
+    }
+
+    /// Without the `net-devices` feature the hub opens no network connection.
+    ///
+    /// Support: Partial. Always returns [`DeviceError::NotSupported`] in this build.
+    #[cfg(not(feature = "net-devices"))]
+    pub fn open_net(
+        &mut self,
+        _id: &DeviceId,
+        _scope: &DeviceScope,
+        _timeout: std::time::Duration,
+    ) -> Result<OpenDevice, DeviceError> {
+        Err(DeviceError::NotSupported(
+            "network devices (the net-devices feature)",
+        ))
+    }
+
     /// Opens the device `id`, if the caller's `scope` covers it and it is present and free.
     ///
     /// Support: Full.
@@ -304,6 +341,19 @@ fn record(sink: &Sink, kind: EventKind, device: &DeviceId, bytes: usize) {
 mod tests {
     use super::*;
     use crate::virtual_devices::VirtualSerial;
+
+    #[cfg(not(feature = "net-devices"))]
+    #[test]
+    fn open_net_is_refused_without_the_feature_and_opens_nothing() {
+        let mut hub = DeviceHub::new(Vec::new(), |_: &Event| {});
+        let id: DeviceId = "net:printer.local:9100".parse().expect("id");
+        let scope = DeviceScope::Net {
+            host: "*".into(),
+            port: None,
+        };
+        let refused = hub.open_net(&id, &scope, std::time::Duration::from_secs(1));
+        assert!(matches!(refused, Err(DeviceError::NotSupported(_))));
+    }
 
     fn port(name: &str) -> DeviceId {
         DeviceId::Serial {

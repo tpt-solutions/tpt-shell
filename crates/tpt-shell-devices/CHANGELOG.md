@@ -6,6 +6,8 @@ All notable changes to `tpt-shell-devices` are recorded here. The format follows
 
 ### Added
 - Transport trait, with control transfers.
+- `DeviceHub::open_net(id, scope, timeout)` opens a TCP connection to a network device under the scope and audits the open. Without the `net-devices` feature it returns `NotSupported` and opens nothing.
+- `VirtualUsb`, a loopback USB bulk pipe. A spec names it `usb@usb:VID:PID`. It has no control transfers.
 - `Hub`: opens a device only under a scope and audits opens, writes and closes.
 - Virtual devices for tests: serial loopback, a printer with a receipt preview, a scanner and an HID device.
 - Serial ports on Windows (`COM` ports, 8 data bits, no parity, one stop bit).
