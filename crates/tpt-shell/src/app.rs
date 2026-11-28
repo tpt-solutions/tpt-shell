@@ -250,6 +250,7 @@ pub struct App {
     audit: Option<(PathBuf, Policy)>,
     /// The keystore entry whose key signs the audit checkpoints (Windows), set by
     /// `audit_signing_key`.
+    #[cfg_attr(not(windows), allow(dead_code))]
     audit_key: Option<String>,
     /// A recording the developer overlay's timeline steps through (see `devtools_recording`).
     #[cfg(feature = "devtools")]

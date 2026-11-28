@@ -782,6 +782,7 @@ dependencies = [
  "tpt-shell-platform-windows",
  "tpt-shell-profiles",
  "tpt-shell-replay",
+ "zstd",
 ]
 
 [[package]]
@@ -878,6 +879,7 @@ dependencies = [
  "quote",
  "syn 2.0.119",
  "tpt-shell-manifest",
+ "zstd",
 ]
 
 [[package]]
