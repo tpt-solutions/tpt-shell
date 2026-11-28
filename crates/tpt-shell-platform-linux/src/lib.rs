@@ -40,6 +40,9 @@ pub mod single_instance;
 /// Support: Full for the rules (parsing, paths, permissions). Tested on every platform.
 pub mod webkit_context;
 
+/// The tray icon bridge: clicks from the item's thread reach the callback on the UI thread.
+mod tray_host;
+
 /// Helpers for the tests that start a real toolkit.
 #[cfg(test)]
 pub(crate) mod testutil {

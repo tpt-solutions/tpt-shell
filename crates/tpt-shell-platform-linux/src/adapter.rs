@@ -19,7 +19,7 @@ use tpt_shell_core::backend::{
     AssetSource, CloseAction, EventLoopBackend, EventLoopProxy, MessageHandler, WebviewBackend,
     WindowBackend, WindowSpec,
 };
-use tpt_shell_core::platform::{ClipboardBackend, ColorScheme, Platform, ThemeBackend};
+use tpt_shell_core::platform::{ClipboardBackend, ColorScheme, Platform, ThemeBackend, TrayItem};
 use tpt_shell_core::theme::Theme;
 use tpt_shell_core::{Error, LogicalRect, LogicalSize, Result, ScaleFactor};
 
@@ -293,8 +293,9 @@ fn notification_app_name() -> String {
 /// Desktop services the Linux backend provides. The methods not listed keep their defaults, which
 /// return `Unsupported`.
 ///
-/// Support: Partial. `notify` goes through the session bus when the `dbus` feature is on, and
-/// returns `Unsupported` otherwise. The dialogs, tray, keystore and schemes are not built here.
+/// Support: Partial. `notify` and the tray go through the session bus when the `dbus` feature is
+/// on, and return `Unsupported` otherwise. The tray has no menu, so a menu is refused. The
+/// dialogs, keystore and schemes are not built here.
 impl Platform for LinuxBackend {
     fn notify(&mut self, title: &str, body: &str) -> Result<()> {
         let note = crate::dbus::notify::Notification {
@@ -305,6 +306,23 @@ impl Platform for LinuxBackend {
         };
         let mut notifier = crate::dbus::notify::Notifier::connect()?;
         notifier.show(&note).map(|_| ())
+    }
+
+    fn set_tray(
+        &mut self,
+        tooltip: &str,
+        items: &[TrayItem],
+        on_select: Box<dyn FnMut(u32)>,
+    ) -> Result<()> {
+        let proxy = self.proxy();
+        crate::tray_host::set(proxy, tooltip, items, on_select, |options, on_activate| {
+            crate::dbus::tray::Tray::start(options, on_activate)
+        })
+    }
+
+    fn remove_tray(&mut self) -> Result<()> {
+        crate::tray_host::remove();
+        Ok(())
     }
 }
 
