@@ -336,7 +336,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] WebKitUserContentManager messages and scripts (GTK4 written, CI-only test)
 - [ ] `webkit_web_context_register_uri_scheme` for `app://` (GTK4 written, CI-only test. 2026-11-28: both GTK3 and GTK4 now answer `app://` through the WebKit response API, so each page gets a real status, its content type and the page CSP header (`crates/tpt-shell-platform-linux/src/scheme_response.rs`, bound at run time, with the older calls as the fallback). Compile-checked for Linux and clippy clean; not run, so the item stays open until the CI legs pass)
 - [ ] Navigation policy and crash signals (GTK4 written: `web-process-terminated` reloads up to five times; CI-only test)
-- [x] `webkit_web_view_get_snapshot` (GTK4 encodes a `GdkTexture` to PNG; `page_messages_assets_and_snapshot_through_the_selected_adapter` passes in all four CI legs)
+- [ ] `webkit_web_view_get_snapshot` (GTK4 encodes a `GdkTexture` to PNG; `page_messages_assets_and_snapshot_through_the_selected_adapter` passed in all four CI legs before 8487b88. That commit's page CSP blocked the test page's inline script, so the test now loads `app.js` from the app origin. Compile-checked for Linux; reopened until the four CI legs pass again)
 - [ ] GtkFileChooser dialogs (GTK4 uses `GtkFileDialog`, 4.10+; on 4.6 only file dialogs return `Unsupported`; only the validation is tested)
 - [ ] Clipboard (GtkClipboard / GdkClipboard) (GdkClipboard is written; the X11 round trip is tested in CI only; Wayland read-back is not asserted)
 - [ ] Tray (StatusNotifier over D-Bus; GtkStatusIcon fallback)

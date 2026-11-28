@@ -427,18 +427,24 @@ mod tests {
         backend
             .set_asset_source(
                 id,
-                Box::new(|key| {
-                    (key == "index.html").then(|| Asset {
+                // The page policy (`script-src 'self'`) blocks inline script, so the page loads
+                // its script from the app origin, as a real app does.
+                Box::new(|key| match key {
+                    "index.html" => Some(Asset {
                         content_type: "text/html".into(),
-                        body: br#"<!doctype html><title>t</title><body style="background:#336">
-<script>
-window.addEventListener('message', function (e) {
+                        body: br#"<!doctype html><title>t</title><body>
+<script src="app.js"></script></body>"#
+                            .to_vec(),
+                    }),
+                    "app.js" => Some(Asset {
+                        content_type: "text/javascript".into(),
+                        body: br#"window.addEventListener('message', function (e) {
   window.chrome.webview.postMessage('got:' + e.data);
 });
-window.chrome.webview.postMessage('asset-ok');
-</script></body>"#
+window.chrome.webview.postMessage('asset-ok');"#
                             .to_vec(),
-                    })
+                    }),
+                    _ => None,
                 }),
             )
             .expect("asset source");
