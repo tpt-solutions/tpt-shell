@@ -89,20 +89,7 @@ fn deliver(id: u32) {
 /// The app id the item is registered under: the program's file name, with characters the host
 /// does not accept replaced by `-`.
 fn app_id() -> String {
-    let name = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.file_stem().map(|s| s.to_string_lossy().into_owned()))
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "tpt-shell".into());
-    name.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect()
+    crate::desktop::app_id_for(&std::env::current_exe().unwrap_or_default())
 }
 
 #[cfg(test)]

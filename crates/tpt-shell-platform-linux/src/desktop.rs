@@ -89,6 +89,82 @@ pub fn register(
     })
 }
 
+/// The data home the entries go under: `$XDG_DATA_HOME` when it is an absolute path, otherwise
+/// `$HOME/.local/share`. `None` when neither is an absolute path.
+///
+/// Support: Full.
+pub fn data_home_from(xdg: Option<&str>, home: Option<&str>) -> Option<PathBuf> {
+    let absolute = |text: &str| Path::new(text).is_absolute();
+    match xdg.filter(|p| absolute(p)) {
+        Some(path) => Some(PathBuf::from(path)),
+        None => home
+            .filter(|p| absolute(p))
+            .map(|h| Path::new(h).join(".local").join("share")),
+    }
+}
+
+/// The data home for this user, read from the environment (see [`data_home_from`]).
+///
+/// Support: Full.
+pub fn data_home() -> Option<PathBuf> {
+    data_home_from(
+        std::env::var("XDG_DATA_HOME").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
+
+/// The app id an entry is named by: the program's file name, with characters a desktop entry does
+/// not accept replaced by `-`.
+///
+/// Support: Full.
+pub fn app_id_for(exe: &Path) -> String {
+    exe.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "tpt-shell".into())
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+/// Where the entry for `app_id` lives under `data_home`.
+///
+/// Support: Full.
+pub fn entry_path(data_home: &Path, app_id: &str) -> PathBuf {
+    data_home
+        .join("applications")
+        .join(format!("{app_id}.desktop"))
+}
+
+/// Writes the entry for `schemes`, or removes it when there are none. Returns whether an entry
+/// was written. A missing entry is not an error when it is being removed.
+///
+/// Support: Partial. Writes or removes one file under `data_home`. Not run on macOS/Linux here;
+/// compile-checked.
+pub fn write_or_remove(
+    data_home: &Path,
+    app_id: &str,
+    exec: &Path,
+    schemes: &[String],
+) -> io::Result<bool> {
+    if schemes.is_empty() {
+        return match fs::remove_file(entry_path(data_home, app_id)) {
+            Ok(()) => Ok(false),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        };
+    }
+    let refs: Vec<&str> = schemes.iter().map(String::as_str).collect();
+    register(data_home, app_id, app_id, exec, &refs)?;
+    Ok(true)
+}
+
 /// Builds the text of a desktop entry. Exposed so the format can be tested directly.
 ///
 /// Support: Full.
@@ -227,5 +303,43 @@ mod tests {
         assert!(!valid_scheme("My"));
         assert!(!valid_scheme("2fa"));
         assert!(!valid_scheme("a:b"));
+    }
+
+    #[test]
+    fn the_data_home_follows_xdg_then_home_and_needs_absolute_paths() {
+        let abs = std::env::temp_dir();
+        let abs_text = abs.to_string_lossy().into_owned();
+        assert_eq!(
+            data_home_from(Some(abs_text.as_str()), Some(abs_text.as_str())),
+            Some(abs.clone())
+        );
+        assert_eq!(
+            data_home_from(Some("relative/dir"), Some(abs_text.as_str())),
+            Some(abs.join(".local").join("share"))
+        );
+        assert_eq!(data_home_from(Some("relative"), None), None);
+        assert_eq!(data_home_from(None, None), None);
+    }
+
+    #[test]
+    fn write_or_remove_writes_the_list_and_removes_the_entry_when_empty() {
+        let home = temp_dir("write-remove");
+        let exec = std::env::temp_dir().join("demo");
+        let one = vec!["demo".to_string()];
+        assert!(write_or_remove(&home, "demo", &exec, &one).expect("write"));
+        let entry = entry_path(&home, "demo");
+        let text = fs::read_to_string(&entry).expect("entry");
+        assert!(text.contains("x-scheme-handler/demo"), "{text}");
+
+        assert!(!write_or_remove(&home, "demo", &exec, &[]).expect("remove"));
+        assert!(!entry.exists());
+        // Removing an entry that is already gone is not an error.
+        assert!(!write_or_remove(&home, "demo", &exec, &[]).expect("remove again"));
+    }
+
+    #[test]
+    fn app_ids_replace_characters_a_desktop_entry_refuses() {
+        assert_eq!(app_id_for(Path::new("/x/My App.bin")), "My-App");
+        assert_eq!(app_id_for(Path::new("/x/ok-name")), "ok-name");
     }
 }

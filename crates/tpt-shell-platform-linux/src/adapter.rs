@@ -294,8 +294,9 @@ fn notification_app_name() -> String {
 /// return `Unsupported`.
 ///
 /// Support: Partial. `notify` and the tray go through the session bus when the `dbus` feature is
-/// on, and return `Unsupported` otherwise. The tray has no menu, so a menu is refused. The
-/// dialogs, keystore and schemes are not built here.
+/// on, and return `Unsupported` otherwise. The tray has no menu, so a menu is refused. Scheme
+/// registration writes a desktop entry, which needs no feature. The dialogs and keystore are not
+/// built here.
 impl Platform for LinuxBackend {
     fn notify(&mut self, title: &str, body: &str) -> Result<()> {
         let note = crate::dbus::notify::Notification {
@@ -324,6 +325,38 @@ impl Platform for LinuxBackend {
         crate::tray_host::remove();
         Ok(())
     }
+
+    fn register_scheme(&mut self, scheme: &str, _description: &str) -> Result<()> {
+        let mut schemes = REGISTERED_SCHEMES.lock().unwrap_or_else(|e| e.into_inner());
+        if !schemes.iter().any(|s| s == scheme) {
+            schemes.push(scheme.to_string());
+        }
+        write_scheme_entry(&schemes)
+    }
+
+    fn unregister_scheme(&mut self, scheme: &str) -> Result<()> {
+        let mut schemes = REGISTERED_SCHEMES.lock().unwrap_or_else(|e| e.into_inner());
+        schemes.retain(|s| s != scheme);
+        write_scheme_entry(&schemes)
+    }
+}
+
+/// The schemes this process has registered, in order. The desktop entry lists all of them, so
+/// each change rewrites the whole entry.
+static REGISTERED_SCHEMES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Writes the desktop entry for `schemes` under the user's data home, or removes it when none are
+/// left. A missing data home is an error, since the entry cannot be written without one.
+fn write_scheme_entry(schemes: &[String]) -> Result<()> {
+    let data_home = crate::desktop::data_home().ok_or_else(|| {
+        Error::Backend("no data home for desktop entries: set XDG_DATA_HOME or HOME".into())
+    })?;
+    let exe = std::env::current_exe()
+        .map_err(|e| Error::Backend(format!("cannot find the program: {e}")))?;
+    let app_id = crate::desktop::app_id_for(&exe);
+    crate::desktop::write_or_remove(&data_home, &app_id, &exe, schemes)
+        .map(|_| ())
+        .map_err(|e| Error::Backend(format!("cannot write the desktop entry: {e}")))
 }
 
 #[cfg(test)]
