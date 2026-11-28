@@ -35,6 +35,7 @@ function next() {
         document.title =
           "fetch:" + length + ":" + last + ":" + totals.length + ":" +
           median(totals).toFixed(3) + ":" + median(headers).toFixed(3);
+        window.chrome.webview.postMessage("report:" + document.title);
       }
     });
   });

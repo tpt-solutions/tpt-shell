@@ -13,9 +13,11 @@ use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
+use tpt_shell_conformance::stream::{self, StreamHost};
 use tpt_shell_conformance::{CheckResult, Outcome, RunReport, CHECKS};
 use tpt_shell_core::backend::{Asset, MessageHandler, WebviewBackend, WindowBackend, WindowSpec};
-use tpt_shell_core::{ColorScheme, Error, LogicalSize, Theme, ThemeBackend};
+use tpt_shell_core::{ColorScheme, LogicalRect, LogicalSize, Theme, ThemeBackend};
 use tpt_shell_platform_windows::backend::{WindowId, WindowsBackend};
 use tpt_shell_platform_windows::webview2::APP_ORIGIN;
 use tpt_shell_platform_windows::window::{pump_until, runtime_test_loader};
@@ -69,6 +71,24 @@ const DPI_PAGES: Pages = &[
     ("page.js", "text/javascript", DPI_JS),
 ];
 
+const STREAM_PAGES: Pages = &[
+    (
+        "index.html",
+        "text/html",
+        "<!doctype html><title>waiting</title><script src=\"page.js\"></script>",
+    ),
+    ("page.js", "text/javascript", stream::PAGE_JS),
+];
+const SNAPSHOT_PAGES: Pages = &[(
+    "index.html",
+    "text/html",
+    "<!doctype html><title>ready</title><body style=\"background:#336\">snapshot</body>",
+)];
+const DRAG_PAGES: Pages = &[(
+    "index.html",
+    "text/html",
+    "<!doctype html><title>ready</title><body>drag</body>",
+)];
 /// The page the theme check loads. It reports the colour scheme and the accent token.
 const THEME_HTML: &str = "<!doctype html><title>x</title><script>document.addEventListener('DOMContentLoaded', function () { document.title = document.documentElement.dataset.colorScheme + '|' + document.documentElement.style.getPropertyValue('--tpt-accent').trim(); });</script>";
 
@@ -79,12 +99,12 @@ type CheckFn = fn(&Path, &Path) -> Result<(Outcome, String), String>;
 const TABLE: &[(&str, bool, CheckFn)] = &[
     ("ipc-round-trip", true, ipc_round_trip),
     ("large-blobs", true, large_blobs),
-    ("streams-backpressure", false, streams_backpressure),
+    ("streams-backpressure", true, streams_backpressure),
     ("custom-protocol", true, custom_protocol),
     ("csp", true, csp),
     ("navigation-policy", true, navigation_policy),
     ("theme-injection", true, theme_injection),
-    ("snapshot", false, snapshot),
+    ("snapshot", true, snapshot),
     ("drag-regions", true, drag_regions),
     ("dpi", true, dpi),
 ];
@@ -401,13 +421,36 @@ fn fetch_stored_blob(b: &mut WindowsBackend, url: &str) -> Result<(Outcome, Stri
     Ok((Outcome::Pass, detail))
 }
 
-fn streams_backpressure(_loader: &Path, _dir: &Path) -> Result<(Outcome, String), String> {
-    Ok((
-        Outcome::Pending(
-            "the backend trait has no stream or backpressure method yet; the blob channel lives in the facade crate".into(),
-        ),
-        String::new(),
-    ))
+fn streams_backpressure(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
+    let mut b = backend(loader, dir)?;
+    let host = Rc::new(RefCell::new(StreamHost::new()));
+    let seen = host.clone();
+    let handler: MessageHandler = Box::new(move |message: &str| {
+        seen.borrow_mut().on_message(message);
+        None
+    });
+    let id = window(&mut b, STREAM_PAGES, Some(handler))?;
+    b.navigate(id, &format!("{APP_ORIGIN}/index.html"))
+        .map_err(err)?;
+    let mut failure: Option<String> = None;
+    pump_until(WAIT, || {
+        let posts = host.borrow_mut().next_posts();
+        for message in posts {
+            if let Err(e) = b.post_message(id, &message) {
+                failure = Some(err(e));
+                return true;
+            }
+        }
+        host.borrow().complete()
+    });
+    if let Some(reason) = failure {
+        return Ok((Outcome::Fail(reason), String::new()));
+    }
+    let host = host.borrow();
+    Ok(match stream::verdict(&host) {
+        Ok(detail) => (Outcome::Pass, detail),
+        Err(reason) => (Outcome::Fail(reason), String::new()),
+    })
 }
 
 fn custom_protocol(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
@@ -512,34 +555,121 @@ fn theme_injection(loader: &Path, dir: &Path) -> Result<(Outcome, String), Strin
     ))
 }
 
-fn snapshot(_loader: &Path, _dir: &Path) -> Result<(Outcome, String), String> {
+fn snapshot(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
+    let mut b = backend(loader, dir)?;
+    let id = open_app(&mut b, SNAPSHOT_PAGES, None)?;
+    let title = wait_title(&b, id, WAIT, |t| t == "ready");
+    if title != "ready" {
+        return Ok((
+            Outcome::Fail(format!("the page did not load: title {title:?}")),
+            String::new(),
+        ));
+    }
+    let png = match b.snapshot(id) {
+        Ok(png) => png,
+        Err(e) => return Ok((Outcome::Fail(err(e)), String::new())),
+    };
+    // A PNG starts with its signature, then an IHDR chunk whose width and height are big-endian.
+    if png.len() < 33 || &png[..8] != b"\x89PNG\r\n\x1a\n" || &png[12..16] != b"IHDR" {
+        return Ok((
+            Outcome::Fail(format!("the capture is not a PNG ({} bytes)", png.len())),
+            String::new(),
+        ));
+    }
+    let width = u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
+    let height = u32::from_be_bytes([png[20], png[21], png[22], png[23]]);
+    if width == 0 || height == 0 {
+        return Ok((
+            Outcome::Fail(format!("the capture is {width} x {height}")),
+            String::new(),
+        ));
+    }
     Ok((
-        Outcome::Pending(
-            "the backend trait has no snapshot method yet (takeSnapshot is an M4 item for macOS)"
-                .into(),
+        Outcome::Pass,
+        format!(
+            "a {width} x {height} PNG of {} bytes of the loaded page",
+            png.len()
         ),
-        String::new(),
     ))
 }
 
 fn drag_regions(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
     let mut b = backend(loader, dir)?;
-    let id = window(&mut b, START_ONLY, None)?;
-    Ok(match b.set_drag_regions(id, &[]) {
-        Err(Error::Unsupported { feature }) => (
-            Outcome::Pending(format!(
-                "Windows does not implement {feature} yet; the trait default answers Unsupported"
+    let id = open_app(&mut b, DRAG_PAGES, None)?;
+    let title = wait_title(&b, id, WAIT, |t| t == "ready");
+    if title != "ready" {
+        return Ok((
+            Outcome::Fail(format!("the page did not load: title {title:?}")),
+            String::new(),
+        ));
+    }
+    let region = LogicalRect {
+        x: 10.0,
+        y: 20.0,
+        width: 200.0,
+        height: 40.0,
+    };
+    b.set_drag_regions(id, &[region]).map_err(err)?;
+    let boxes = drag_boxes(&mut b, id)?;
+    if boxes.len() != 1 {
+        return Ok((
+            Outcome::Fail(format!(
+                "{} drag boxes after one region, expected 1",
+                boxes.len()
             )),
             String::new(),
-        ),
-        Ok(()) => (
-            Outcome::Pending(
-                "set_drag_regions is accepted, but no drag behaviour check is written yet".into(),
-            ),
+        ));
+    }
+    let (rect, app_region) = &boxes[0];
+    let expected = [10.0, 20.0, 200.0, 40.0];
+    if rect.iter().zip(expected).any(|(a, b)| (a - b).abs() > 0.5) || app_region != "drag" {
+        return Ok((
+            Outcome::Fail(format!(
+                "the drag box is {rect:?} with -webkit-app-region {app_region:?}, expected {expected:?} with drag"
+            )),
             String::new(),
-        ),
-        Err(e) => (Outcome::Fail(err(e)), String::new()),
-    })
+        ));
+    }
+    // Setting no regions removes the boxes again.
+    b.set_drag_regions(id, &[]).map_err(err)?;
+    if !drag_boxes(&mut b, id)?.is_empty() {
+        return Ok((
+            Outcome::Fail("drag boxes remained after the regions were cleared".into()),
+            String::new(),
+        ));
+    }
+    Ok((
+        Outcome::Pass,
+        "one drag box laid out at the region's rectangle with -webkit-app-region: drag, with WebView2 non-client region support on; clearing removes it. Whether the window moves on a drag is not measured".into(),
+    ))
+}
+
+/// The drag boxes in the page: each one's rectangle and its computed `-webkit-app-region`.
+fn drag_boxes(b: &mut WindowsBackend, id: WindowId) -> Result<Vec<([f64; 4], String)>, String> {
+    let script = "Array.from(document.querySelectorAll('[data-tpt-drag]')).map(function (e) { var r = e.getBoundingClientRect(); return [[r.left, r.top, r.width, r.height], getComputedStyle(e).getPropertyValue('-webkit-app-region')]; })";
+    let json = b
+        .eval_json(id, script)
+        .map_err(err)?
+        .ok_or("the drag box query returned nothing")?;
+    let value: Value = serde_json::from_str(&json).map_err(err)?;
+    let items = value
+        .as_array()
+        .ok_or("the drag box query is not an array")?;
+    items
+        .iter()
+        .map(|item| {
+            let numbers: Vec<f64> = item[0]
+                .as_array()
+                .ok_or("a drag box has no rectangle")?
+                .iter()
+                .map(|v| v.as_f64().unwrap_or(f64::NAN))
+                .collect();
+            let rect: [f64; 4] = numbers
+                .try_into()
+                .map_err(|_| "a rectangle has four numbers".to_string())?;
+            Ok((rect, item[1].as_str().unwrap_or_default().to_string()))
+        })
+        .collect()
 }
 
 fn dpi(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
@@ -552,16 +682,23 @@ fn dpi(loader: &Path, dir: &Path) -> Result<(Outcome, String), String> {
             String::new(),
         ));
     }
-    let ratio = b
+    let scale = b.scale_factor(id).map_err(err)?.get();
+    let json = b
         .eval_json(id, "window.devicePixelRatio")
         .map_err(err)?
-        .unwrap_or_else(|| "unknown".into());
+        .ok_or("the page returned no device pixel ratio")?;
+    let ratio: f64 = json.trim().parse().map_err(err)?;
+    if (scale - ratio).abs() > 0.01 {
+        return Ok((
+            Outcome::Fail(format!(
+                "the window reports scale {scale:.3} but the page reports devicePixelRatio {ratio:.3}"
+            )),
+            String::new(),
+        ));
+    }
     Ok((
-        Outcome::Pending(
-            "the backend has no public scale-factor query, so the check cannot compare it yet"
-                .into(),
-        ),
-        format!("the page reports devicePixelRatio {ratio} in this session"),
+        Outcome::Pass,
+        format!("the window's scale factor {scale:.3} matches the page's devicePixelRatio"),
     ))
 }
 
@@ -573,7 +710,7 @@ const PROBE_JS: &str = include_str!("../../pages/probe.js");
 /// `cargo test --manifest-path conformance/Cargo.toml --release --test conformance -- --ignored
 /// --nocapture cold_start`. Prints three times: the window returned from `create` (which waits for
 /// the WebView2 controller), the navigation started, and the page being parsed.
-#[test]
+#[allow(dead_code)] // the suite's harness is off, so only `main` runs; kept as a measurement
 #[ignore = "a measurement, run on request"]
 fn cold_start_probe() {
     let Some(loader) = runtime_test_loader().map(|(path, _)| path) else {

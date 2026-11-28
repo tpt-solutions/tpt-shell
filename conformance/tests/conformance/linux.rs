@@ -16,9 +16,11 @@ use std::fmt::Display;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use tpt_shell_conformance::stream::{self, StreamHost};
 use tpt_shell_conformance::{CheckResult, Outcome, RunReport, CHECKS};
 use tpt_shell_core::backend::{Asset, MessageHandler, WebviewBackend, WindowBackend, WindowSpec};
-use tpt_shell_core::{Error, LogicalSize};
+use tpt_shell_core::theme::Theme;
+use tpt_shell_core::{ColorScheme, LogicalRect, LogicalSize, ThemeBackend};
 use tpt_shell_platform_linux::adapter::LinuxBackend;
 use tpt_shell_platform_linux::gtk3::WindowId;
 
@@ -50,6 +52,7 @@ const PROTOCOL_JS: &str = include_str!("../../pages/linux/protocol.js");
 const CSP_HTML: &str = include_str!("../../pages/linux/csp.html");
 const CSP_JS: &str = include_str!("../../pages/linux/csp.js");
 const NAV_JS: &str = include_str!("../../pages/linux/nav.js");
+const FETCH_JS: &str = include_str!("../../pages/fetch.js");
 
 const IPC_PAGES: Pages = &[
     ("index.html", "text/html", START),
@@ -75,6 +78,24 @@ const START_ONLY: Pages = &[("index.html", "text/html", START)];
 
 /// A page that reports once it has loaded, for the snapshot check.
 const LOADED_HTML: &str = r#"<!doctype html><body style="background:#336"><script>window.chrome.webview.postMessage("report:loaded");</script></body>"#;
+
+/// The page for the DPI check: it posts its device pixel ratio.
+const DPR_HTML: &str = r#"<!doctype html><body><script>window.chrome.webview.postMessage("report:ratio:" + window.devicePixelRatio);</script></body>"#;
+/// The streams check's pages: the shared stream page with its own start page.
+const STREAM_PAGES: Pages = &[
+    (
+        "index.html",
+        "text/html",
+        "<!doctype html><title>waiting</title><script src=\"page.js\"></script>",
+    ),
+    ("page.js", "text/javascript", stream::PAGE_JS),
+];
+
+/// The page for the theme check: on load it reports the colour scheme and the accent token.
+const THEME_HTML: &str = r#"<!doctype html><script>document.addEventListener('DOMContentLoaded', function () { window.chrome.webview.postMessage('report:theme:' + document.documentElement.dataset.colorScheme + '|' + document.documentElement.style.getPropertyValue('--tpt-accent').trim()); });</script>"#;
+
+/// The page for the drag check: it reports when it has loaded.
+const DRAG_HTML: &str = r#"<!doctype html><body><script>window.chrome.webview.postMessage("report:ready");</script></body>"#;
 
 /// Every check with its entry point, by name.
 const TABLE: &[(&str, CheckFn)] = &[
@@ -127,10 +148,6 @@ fn result(check: &str, outcome: Outcome, detail: String) -> CheckResult {
 
 fn fail(e: impl Display) -> Outcome {
     Outcome::Fail(e.to_string())
-}
-
-fn pending(reason: impl Into<String>) -> Step<Found> {
-    Ok((Outcome::Pending(reason.into()), String::new()))
 }
 
 fn strict() -> bool {
@@ -259,18 +276,32 @@ fn ipc_round_trip() -> Step<Found> {
 fn large_blobs() -> Step<Found> {
     let mut b = backend()?;
     let blob = format!("{}z", "a".repeat(BLOB_BYTES - 1));
-    // When the page asked for each blob.
+    // When the page asked for each blob. The page reports after the last reply.
     let asks: Rc<RefCell<Vec<Instant>>> = Rc::new(RefCell::new(Vec::new()));
-    let asks_seen = asks.clone();
+    let log: Reports = Rc::new(RefCell::new(Vec::new()));
+    let (asks_seen, log_seen) = (asks.clone(), log.clone());
     let handler: MessageHandler = Box::new(move |message: &str| {
-        (message == "blob").then(|| {
+        if message == "blob" {
             asks_seen.borrow_mut().push(Instant::now());
-            blob.clone()
-        })
+            Some(blob.clone())
+        } else {
+            log_seen.borrow_mut().push(message.to_string());
+            None
+        }
     });
     open_app(&mut b, BLOB_PAGES, Some(handler))?;
-    b.run_until(|| asks.borrow().len() >= BLOB_COUNT, WAIT);
-    let _ = b.run_until(|| false, QUIET);
+    let expected = format!("report:blob:{BLOB_BYTES}:z:{BLOB_COUNT}");
+    let report = wait_for(&mut b, &log, WAIT, |m| m.starts_with("report:blob:"));
+    let done = Instant::now();
+    match report {
+        Some(got) if got == expected => {}
+        Some(got) => {
+            return Err(Outcome::Fail(format!(
+                "the page reported {got:?}, expected {expected:?}"
+            )))
+        }
+        None => return Err(Outcome::Fail("the page did not finish in 60 s".into())),
+    }
     let asks = asks.borrow();
     if asks.len() != BLOB_COUNT {
         return Err(Outcome::Fail(format!(
@@ -278,25 +309,114 @@ fn large_blobs() -> Step<Found> {
             asks.len()
         )));
     }
-    // Each transfer runs from one request to the next.
+    // Each transfer runs from one request to the next; the last one ends when the page reports.
+    let ends: Vec<Instant> = asks.iter().skip(1).copied().chain([done]).collect();
     let mut rates: Vec<f64> = asks
-        .windows(2)
-        .map(|pair| {
-            (BLOB_BYTES as f64 / 1_000_000.0) / pair[1].duration_since(pair[0]).as_secs_f64()
+        .iter()
+        .zip(&ends)
+        .map(|(from, to)| {
+            (BLOB_BYTES as f64 / 1_000_000.0) / to.duration_since(*from).as_secs_f64()
         })
         .collect();
     rates.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = rates[rates.len() / 2];
-    let slowest = rates[0];
-    pending(format!(
-        "the message half passed: {} transfers of {} MiB, median {median:.1} MB/s, slowest {slowest:.1} MB/s (budget 50 MB/s, spec 13). The blob-URL half is not ported to the Linux backend yet",
-        rates.len(),
-        BLOB_BYTES / (1024 * 1024)
+    let message_detail = format!(
+        "{BLOB_COUNT} transfers of {} MiB as messages, median {:.1} MB/s, slowest {:.1} MB/s (budget 50 MB/s sustained, spec 13)",
+        BLOB_BYTES / (1024 * 1024),
+        rates[rates.len() / 2],
+        rates[0]
+    );
+    drop(asks);
+    let (fetch_outcome, fetch_detail) = large_blobs_fetch()?;
+    Ok((fetch_outcome, format!("{message_detail}; {fetch_detail}")))
+}
+
+/// The same size of blob read eight times in a row, through the app origin's asset path. The
+/// Linux backend has no blob store yet (the facade's `put_blob` is Windows only), so the blob is an
+/// asset the page fetches. That exercises the same request path, but not the facade's lookup.
+fn large_blobs_fetch() -> Step<Found> {
+    let mut b = backend()?;
+    let mut bytes = vec![b'a'; BLOB_BYTES];
+    bytes[BLOB_BYTES - 1] = b'z';
+    let body = Rc::new(bytes);
+    let page_js = format!(
+        "var BLOB_PATH = \"blob\";
+{FETCH_JS}"
+    );
+    let (log, handler) = report_sink();
+    let id = window(&mut b, &[], Some(handler))?;
+    b.set_asset_source(
+        id,
+        Box::new(move |path| match path {
+            "index.html" => Some(Asset {
+                content_type: "text/html".into(),
+                body: START.as_bytes().to_vec(),
+            }),
+            "page.js" => Some(Asset {
+                content_type: "text/javascript".into(),
+                body: page_js.clone().into_bytes(),
+            }),
+            "blob" => Some(Asset {
+                content_type: "application/octet-stream".into(),
+                body: body.as_ref().clone(),
+            }),
+            _ => None,
+        }),
+    )
+    .map_err(fail)?;
+    b.navigate(id, &format!("{APP_ORIGIN}/index.html"))
+        .map_err(fail)?;
+    let report = wait_for(&mut b, &log, WAIT, |m| m.starts_with("report:fetch:"))
+        .ok_or_else(|| Outcome::Fail("the page did not finish the blob reads in 60 s".into()))?;
+    // The page reports `fetch:<length>:<last>:<count>:<median total ms>:<median response ms>`.
+    let expected_prefix = format!("report:fetch:{BLOB_BYTES}:z:{BLOB_COUNT}:");
+    let times: Option<(f64, f64)> = report
+        .strip_prefix(&expected_prefix)
+        .and_then(|rest| rest.split_once(':'))
+        .and_then(|(total, headers)| Some((total.parse().ok()?, headers.parse().ok()?)));
+    let Some((total_ms, headers_ms)) = times else {
+        return Ok((
+            Outcome::Fail(format!(
+                "the page reported {report:?}, expected {expected_prefix:?} and two times"
+            )),
+            String::new(),
+        ));
+    };
+    let mb_per_s = (BLOB_BYTES as f64 / 1_000_000.0) / (total_ms / 1000.0);
+    Ok((
+        Outcome::Pass,
+        format!(
+            "{BLOB_COUNT} reads of {} MiB through the app origin's asset path, median {mb_per_s:.1} MB/s; median response {headers_ms:.1} ms of {total_ms:.1} ms (facade blob store not used on Linux)",
+            BLOB_BYTES / (1024 * 1024)
+        ),
     ))
 }
 
 fn streams_backpressure() -> Step<Found> {
-    pending("the backend trait has no stream or backpressure method yet; the blob channel lives in the facade crate")
+    let mut b = backend()?;
+    let host = Rc::new(RefCell::new(StreamHost::new()));
+    let seen = host.clone();
+    let handler: MessageHandler = Box::new(move |message: &str| {
+        seen.borrow_mut().on_message(message);
+        None
+    });
+    let id = window(&mut b, STREAM_PAGES, Some(handler))?;
+    b.navigate(id, &format!("{APP_ORIGIN}/index.html"))
+        .map_err(fail)?;
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let posts = host.borrow_mut().next_posts();
+        for message in posts {
+            b.post_message(id, &message).map_err(fail)?;
+        }
+        if host.borrow().complete() || Instant::now() >= deadline {
+            break;
+        }
+        b.run_until(|| host.borrow().complete(), Duration::from_millis(5));
+    }
+    let verdict = stream::verdict(&host.borrow());
+    verdict
+        .map(|detail| (Outcome::Pass, detail))
+        .map_err(Outcome::Fail)
 }
 
 fn custom_protocol() -> Step<Found> {
@@ -372,7 +492,33 @@ fn navigation_policy() -> Step<Found> {
 }
 
 fn theme_injection() -> Step<Found> {
-    pending("the Linux backend has no theme injection yet (set_theme is a Windows backend method)")
+    let mut b = backend()?;
+    b.set_theme(Theme {
+        accent: "#123456".into(),
+        ..Theme::default()
+    })
+    .map_err(fail)?;
+    // The scheme the backend injects: light when the backend cannot read the system setting.
+    let scheme = match ThemeBackend::color_scheme(&b) {
+        Ok(ColorScheme::Dark) => "dark",
+        _ => "light",
+    };
+    let (log, handler) = report_sink();
+    let id = window(&mut b, START_ONLY, Some(handler))?;
+    b.load_html(id, THEME_HTML).map_err(fail)?;
+    let expected = format!("report:theme:{scheme}|#123456");
+    match wait_for(&mut b, &log, WAIT, |m| m.starts_with("report:theme:")) {
+        Some(got) if got == expected => Ok((
+            Outcome::Pass,
+            format!("accent token and colour scheme ({scheme}) reached a new page"),
+        )),
+        Some(got) => Err(Outcome::Fail(format!(
+            "the page reported {got:?}, expected {expected:?}"
+        ))),
+        None => Err(Outcome::Fail(
+            "the page did not report its theme in 60 s".into(),
+        )),
+    }
 }
 
 fn snapshot() -> Step<Found> {
@@ -399,16 +545,100 @@ fn snapshot() -> Step<Found> {
 
 fn drag_regions() -> Step<Found> {
     let mut b = backend()?;
-    let id = window(&mut b, START_ONLY, None)?;
-    match b.set_drag_regions(id, &[]) {
-        Err(Error::Unsupported { feature }) => pending(format!(
-            "the Linux backend does not implement {feature} yet; the trait default answers Unsupported"
-        )),
-        Ok(()) => pending("set_drag_regions is accepted, but no drag behaviour check is written yet"),
-        Err(e) => Err(fail(e)),
+    let (log, handler) = report_sink();
+    let id = window(&mut b, START_ONLY, Some(handler))?;
+    b.load_html(id, DRAG_HTML).map_err(fail)?;
+    wait_for(&mut b, &log, WAIT, |m| m == "report:ready")
+        .ok_or_else(|| Outcome::Fail("the page did not load in 60 s".into()))?;
+
+    let region = LogicalRect {
+        x: 10.0,
+        y: 20.0,
+        width: 200.0,
+        height: 40.0,
+    };
+    b.set_drag_regions(id, &[region]).map_err(fail)?;
+    let boxes = drag_boxes(&mut b, id, &log)?;
+    let expected = [10.0, 20.0, 200.0, 40.0];
+    if boxes.len() != 1
+        || boxes[0]
+            .iter()
+            .zip(expected)
+            .any(|(a, b)| (a - b).abs() > 0.5)
+    {
+        return Err(Outcome::Fail(format!(
+            "the drag boxes are {boxes:?}, expected one box at {expected:?}"
+        )));
     }
+
+    // A primary press on the box must be taken by the host as a move request. If it reached the
+    // page's handler, it would be logged before the marker that follows it.
+    log.borrow_mut().clear();
+    b.eval(
+        id,
+        "document.querySelector('[data-tpt-drag]').dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true, screenX: 50, screenY: 60 })); window.chrome.webview.postMessage('report:after-press');",
+    )
+    .map_err(fail)?;
+    wait_for(&mut b, &log, WAIT, |m| m == "report:after-press")
+        .ok_or_else(|| Outcome::Fail("the page did not answer after the press in 60 s".into()))?;
+    if log
+        .borrow()
+        .iter()
+        .any(|m| m.starts_with(tpt_shell_platform_linux::drag::MESSAGE_PREFIX))
+    {
+        return Err(Outcome::Fail(
+            "the press reached the page's handler; the host did not take it as a move request"
+                .into(),
+        ));
+    }
+
+    // Setting no regions removes the boxes again.
+    b.set_drag_regions(id, &[]).map_err(fail)?;
+    if !drag_boxes(&mut b, id, &log)?.is_empty() {
+        return Err(Outcome::Fail(
+            "drag boxes remained after the regions were cleared".into(),
+        ));
+    }
+    Ok((
+        Outcome::Pass,
+        "one drag box at the region's rectangle; a primary press on it was taken by the host as a window-move request and not passed to the page. The move itself is not measured (no window manager under Xvfb)".into(),
+    ))
+}
+
+/// The drag boxes in the page, each as [left, top, width, height]. Waits for the page's answer.
+fn drag_boxes(b: &mut LinuxBackend, id: WindowId, log: &Reports) -> Step<Vec<[f64; 4]>> {
+    log.borrow_mut().clear();
+    b.eval(
+        id,
+        "window.chrome.webview.postMessage('report:drag:' + JSON.stringify(Array.from(document.querySelectorAll('[data-tpt-drag]')).map(function (e) { var r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })));",
+    )
+    .map_err(fail)?;
+    let answer = wait_for(b, log, WAIT, |m| m.starts_with("report:drag:"))
+        .ok_or_else(|| Outcome::Fail("the page did not list its drag boxes in 60 s".into()))?;
+    serde_json::from_str(&answer["report:drag:".len()..])
+        .map_err(|e| Outcome::Fail(format!("the drag box list was not JSON: {e}")))
 }
 
 fn dpi() -> Step<Found> {
-    pending("the backend has no public scale-factor query, so the check cannot compare it yet")
+    let mut b = backend()?;
+    let (log, handler) = report_sink();
+    let id = window(&mut b, START_ONLY, Some(handler))?;
+    b.load_html(id, DPR_HTML).map_err(fail)?;
+    let report =
+        wait_for(&mut b, &log, WAIT, |m| m.starts_with("report:ratio:")).ok_or_else(|| {
+            Outcome::Fail("the page did not report its device pixel ratio in 60 s".into())
+        })?;
+    let ratio: f64 = report["report:ratio:".len()..]
+        .parse()
+        .map_err(|_| Outcome::Fail(format!("the page reported {report:?}")))?;
+    let scale = b.scale_factor(id).map_err(fail)?.get();
+    if (scale - ratio).abs() > 0.01 {
+        return Err(Outcome::Fail(format!(
+            "the window reports scale {scale:.3} but the page reports devicePixelRatio {ratio:.3}"
+        )));
+    }
+    Ok((
+        Outcome::Pass,
+        format!("the window's scale factor {scale:.3} matches the page's devicePixelRatio"),
+    ))
 }

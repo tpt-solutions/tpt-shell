@@ -48,7 +48,13 @@ fn run_suite() -> RunReport {
     }
 }
 
-#[test]
+/// The suite runs on the process main thread on every OS (`harness = false` in Cargo.toml). AppKit
+/// requires it, and GTK and WebView2 are simplest there too. A failed check panics, so the exit
+/// status is non-zero.
+fn main() {
+    conformance_suite();
+}
+
 fn conformance_suite() {
     let mut run = run_suite();
     // A job that runs the suite on a different setup (such as headless Wayland) names its result.

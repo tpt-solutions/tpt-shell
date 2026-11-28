@@ -18,6 +18,7 @@ rust-version = "1.90"
 
 [dependencies]
 tpt-shell-core = { path = "../crates/tpt-shell-core", version = "0.0.0" }
+tpt-shell-ipc = { path = "../crates/tpt-shell-ipc", version = "0.0.0" }
 serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
@@ -30,3 +31,9 @@ tpt-shell-platform-linux = { path = "../crates/tpt-shell-platform-linux", versio
 [[bin]]
 name = "conformance-report"
 path = "src/bin/report.rs"
+
+# The suite runs on the process main thread (see tests/conformance.rs). The default harness runs
+# tests on other threads, which AppKit does not allow.
+[[test]]
+name = "conformance"
+harness = false

@@ -17,6 +17,8 @@ Part of [tpt-shell](https://github.com/tpt-solutions/tpt-shell).
 | `a11y` | The accessibility rules. |
 | `native` | Compares the DOM with the native accessibility tree. |
 | `artifacts` | Collects the artifacts that `tpt-shell test` writes. |
+| `runner` | The host side of the test driver. The app implements the `Host` trait, and a failing command reports `TS0304`. |
+| `page_audit` | Runs the accessibility rules on a live page: a collector script, and the checks on its data. |
 
 ## The control channel
 

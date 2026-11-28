@@ -15,6 +15,8 @@
 //!
 //! Only `Pass` counts as green.
 
+pub mod stream;
+
 use serde_json::{json, Value};
 use std::fmt::Write as _;
 

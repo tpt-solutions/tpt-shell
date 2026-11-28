@@ -607,6 +607,7 @@ dependencies = [
  "serde_json",
  "tpt-shell",
  "tpt-shell-core",
+ "tpt-shell-ipc",
  "tpt-shell-platform-linux",
  "tpt-shell-platform-windows",
 ]

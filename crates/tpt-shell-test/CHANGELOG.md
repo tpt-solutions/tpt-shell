@@ -14,3 +14,5 @@ All notable changes to `tpt-shell-test` are recorded here. The format follows [K
 - Artifact collection for `tpt-shell test`.
 - `tpt-shell visual compare` writes the HTML report and exits with an error when the limits are exceeded.
 - Error codes `TS0301` to `TS0305`.
+- `runner`: the host side of the test driver. The app implements the `Host` trait, `answer` carries out one command, and `serve` answers the next pending request. A failing host gives `TS0304`.
+- `page_audit`: a collector script that reads a live page's elements with an `id`, `audit`, which runs the accessibility rules on that data, and `trap`, which checks a Tab trace for keyboard traps.
