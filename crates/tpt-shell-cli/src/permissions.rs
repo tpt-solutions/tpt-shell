@@ -15,9 +15,13 @@
 use std::collections::BTreeMap;
 
 /// Each capability with the commands that name it, sorted.
+///
+/// Support: Full.
 pub type Grants = BTreeMap<String, Vec<String>>;
 
 /// Each capability the contract's commands name, with the commands that name it.
+///
+/// Support: Full.
 pub fn from_contract(contract: &tpt_shell_ipc::contract::Contract) -> Grants {
     let mut out: Grants = BTreeMap::new();
     for command in contract.commands() {
@@ -34,6 +38,8 @@ pub fn from_contract(contract: &tpt_shell_ipc::contract::Contract) -> Grants {
 /// its capability and command. Other refusals are not manifest fixes: `CAP_DENIED` means the user
 /// said no, and `CAP_NOT_DECLARED` means the command itself needs a capability. Each command is
 /// listed once per capability, with how many calls were refused for it.
+///
+/// Support: Full.
 pub fn from_audit(text: &str) -> Result<Grants, String> {
     let mut out: Grants = BTreeMap::new();
     let mut counts: BTreeMap<(String, String), usize> = BTreeMap::new();
@@ -61,6 +67,8 @@ pub fn from_audit(text: &str) -> Result<Grants, String> {
 }
 
 /// Prints the grants under `heading`, and the line to copy into the manifest.
+///
+/// Support: Full.
 pub fn print(grants: &Grants, heading: &str) {
     if grants.is_empty() {
         println!("No capability grant is needed.");

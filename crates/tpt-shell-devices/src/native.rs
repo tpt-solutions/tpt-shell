@@ -104,9 +104,11 @@ fn hid_open(_id: &DeviceId) -> Result<Box<dyn Transport>, DeviceError> {
 ))]
 mod usb_impl {
     use super::*;
+    /// Support: Partial. usbfs (Linux): bulk and control transfers are written and type-checked. They are not run with a device here or in CI.
     pub fn list() -> Vec<DeviceId> {
         crate::platform::linux_usb::list()
     }
+    /// Support: Partial. usbfs (Linux): bulk and control transfers are written and type-checked. They are not run with a device here or in CI.
     pub fn open(id: &DeviceId, o: &OpenOptions) -> Result<Box<dyn Transport>, DeviceError> {
         Ok(Box::new(crate::platform::linux_usb::open(id, o)?))
     }
@@ -114,9 +116,11 @@ mod usb_impl {
 #[cfg(windows)]
 mod usb_impl {
     use super::*;
+    /// Support: Partial. WinUSB: transfers are written, but no device on the test desktop is bound to WinUSB, so no transfer has run.
     pub fn list() -> Vec<DeviceId> {
         crate::platform::win_usb::list()
     }
+    /// Support: Partial. WinUSB: transfers are written, but no device on the test desktop is bound to WinUSB, so no transfer has run.
     pub fn open(id: &DeviceId, o: &OpenOptions) -> Result<Box<dyn Transport>, DeviceError> {
         Ok(Box::new(crate::platform::win_usb::open(id, o)?))
     }
@@ -137,9 +141,11 @@ mod usb_impl {
 )))]
 mod usb_impl {
     use super::*;
+    /// Support: Unsupported. Raw USB is not built on this platform: `list` is empty and `open` returns `NotSupported`.
     pub fn list() -> Vec<DeviceId> {
         Vec::new()
     }
+    /// Support: Unsupported. Raw USB is not built on this platform: `list` is empty and `open` returns `NotSupported`.
     pub fn open(_id: &DeviceId, _o: &OpenOptions) -> Result<Box<dyn Transport>, DeviceError> {
         Err(DeviceError::NotSupported(
             "raw USB on this platform (usbfs is Linux only; IOKit USB is not built)",

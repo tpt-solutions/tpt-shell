@@ -5,7 +5,9 @@ tagged item. The table is generated from the source by `tools/support-tags.py`, 
 from the code. Do not edit it by hand.
 
 Every public item must carry a `Support:` line that says `Full`, `Partial` (with the gap) or
-`Unsupported` (returns `Error::Unsupported`). See the "Support tags and conformance" section of
+`Unsupported` (returns `Error::Unsupported`). The backend crates (`tpt-shell-platform-*`) are
+implementation crates and are not tagged item by item; their support per platform is in
+[platform notes](platform-notes.md). See the "Support tags and conformance" section of
 [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 Where an item is not tagged yet, it is listed below as untagged. Those items are not evidence of

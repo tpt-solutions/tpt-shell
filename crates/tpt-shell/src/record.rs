@@ -127,6 +127,24 @@ impl Recording {
         });
     }
 
+    /// Records one call an agent made, after the session handled it. `outcome` is `ran`, `failed`
+    /// or `refused`. The arguments' strings are not kept (see `capture::agent_call`).
+    ///
+    /// Support: Full.
+    pub fn agent_call(
+        &self,
+        actor: &str,
+        command: &str,
+        args: &Value,
+        outcome: &str,
+        duration: Duration,
+    ) {
+        let duration_ns = nanos(duration);
+        self.write(self.now(), |rec, t| {
+            capture::agent_call(rec, t, actor, command, args, outcome, duration_ns)
+        });
+    }
+
     /// Writes the recording so far to its file, compressed, and keeps recording. The dev run uses
     /// it to save a session before a reload.
     ///
@@ -204,9 +222,13 @@ impl Recording {
 /// The envelope's id, command and arguments. A request that does not parse has id 0, the command
 /// `(unparsed)` and no arguments.
 /// The message command a page script uses to report an input event.
+///
+/// Support: Full.
 pub const INPUT_CMD: &str = "tpt.record.input";
 
 /// The longest page HTML a click or input record carries. A larger page is recorded without it.
+///
+/// Support: Full.
 pub const MAX_DOM_BYTES: usize = 256 * 1024;
 
 /// The longest element path an input record may carry. A deeper path is dropped with its event.
@@ -215,6 +237,8 @@ const MAX_PATH_STEPS: usize = 64;
 /// The page script that reports input to the host while a recording runs. It sends one message
 /// per click, key press and input change, with the element's path: the role and name of each
 /// ancestor and the child index. A key typed into a password field is sent as `[redacted]`.
+///
+/// Support: Full.
 pub const INPUT_JS: &str = r#"(function () {
   function role(el) { return el.getAttribute('role') || el.tagName.toLowerCase(); }
   function label(el) {
@@ -417,6 +441,40 @@ mod tests {
             window: "main".into(),
             origin: "https://tpt-app.localhost".into(),
         }
+    }
+
+    #[test]
+    fn an_agent_call_is_written_with_its_text_removed() {
+        let path = temp_file("agent-call");
+        let _ = std::fs::remove_file(&path);
+        let recording = Recording::with_clock(
+            &path,
+            "demo",
+            Box::new(StepClock(AtomicU64::new(0), 1_000_000)),
+        );
+        let args = json!({ "ref": 4, "text": "secret words" });
+        recording.agent_call(
+            "agent:demo",
+            "type_text",
+            &args,
+            "ran",
+            Duration::from_micros(250),
+        );
+        recording.finish().unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        let replay = tpt_shell_replay::read_compressed(&bytes, Mode::Strict).unwrap();
+        assert_eq!(replay.events.len(), 1);
+        let event = &replay.events[0];
+        assert_eq!(event.kind, "agent_call");
+        assert_eq!(event.data["actor"], "agent:demo");
+        assert_eq!(event.data["command"], "type_text");
+        assert_eq!(event.data["outcome"], "ran");
+        assert_eq!(event.data["duration_ns"], 250_000);
+        assert_eq!(event.data["args"]["ref"], 4);
+        assert_eq!(event.data["args"]["text"]["length"], 12);
+        assert!(!event.data.to_string().contains("secret"));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

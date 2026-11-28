@@ -28,8 +28,12 @@ use tpt_shell_platform_windows::backend::{eval_window, show_window, WindowId, Wi
 use tpt_shell_replay::{read, read_compressed, Event, Mode};
 
 /// The message the key script posts. It is not a request, so it never reaches the router.
+///
+/// Support: Full.
 pub const HOTKEY_MESSAGE: &str = "tpt_devtools_hotkey";
 /// The key the script listens for, with Ctrl and Shift.
+///
+/// Support: Full.
 pub const HOTKEY: char = 'd';
 
 const WINDOW_NAME: &str = "tpt-devtools";
@@ -37,6 +41,8 @@ const WINDOW_NAME: &str = "tpt-devtools";
 const IPC_LIMIT: usize = 200;
 /// The call the overlay page makes to move the timeline cursor. The host answers it with a
 /// snapshot that the page shows.
+///
+/// Support: Full.
 pub const SEEK_COMMAND: &str = "devtools.seek";
 /// Installed in the overlay page when it is shown: a seek asks the host through its web message
 /// channel, which is the page's only way back to the host.
@@ -68,6 +74,7 @@ pub struct Shell {
 }
 
 impl Shell {
+    /// Support: Partial. The developer overlay is Windows only.
     pub fn new(
         audit_path: Option<PathBuf>,
         grants: &[tpt_shell_capabilities::Grant],
@@ -112,6 +119,8 @@ impl Shell {
 
     /// Sets the runtime version the Engine panel shows. The app passes what the WebView2 loader
     /// reports, or `None` when the loader cannot say.
+    ///
+    /// Support: Partial. The developer overlay is Windows only.
     #[must_use]
     pub fn with_engine_version(mut self, version: Option<String>) -> Self {
         self.engine_version = version;
@@ -126,11 +135,15 @@ impl Shell {
     }
 
     /// Gives the overlay the app router's job table, so its jobs panel can list the jobs.
+    ///
+    /// Support: Partial. The developer overlay is Windows only.
     pub fn attach_jobs(&self, jobs: Rc<RefCell<tpt_shell_ipc::jobs::Jobs>>) {
         *self.jobs.borrow_mut() = Some(jobs);
     }
 
     /// Records one IPC call for the log, dropping the oldest when the log is full.
+    ///
+    /// Support: Partial. The developer overlay is Windows only.
     pub fn record(&self, entry: IpcEntry) {
         let mut log = self.ipc.borrow_mut();
         if log.len() == IPC_LIMIT {
@@ -231,6 +244,8 @@ fn seek_reply(shell: &Shell, request: &Value) -> String {
 }
 
 /// The page command that carries an accessibility check's data back to the host.
+///
+/// Support: Full.
 pub const A11Y_CMD: &str = "tpt.devtools.a11y";
 
 /// Asks the page of `page` to run the accessibility collector and post its data back as a page
@@ -339,11 +354,15 @@ pub fn create(backend: &mut WindowsBackend, shell: &Rc<Shell>) -> Result<Option<
 }
 
 /// Adds the Ctrl+Shift+D key script to an app window (debug builds only).
+///
+/// Support: Partial. The developer overlay is Windows only.
 pub fn add_hotkey(backend: &mut WindowsBackend, id: WindowId) -> Result<()> {
     backend.page_key_message(id, HOTKEY, HOTKEY_MESSAGE)
 }
 
 /// Shows the overlay with the state as it is now, and connects its seek control to the host.
+///
+/// Support: Partial. The developer overlay is Windows only.
 pub fn open(overlay: WindowId, shell: &Shell) -> Result<()> {
     let json = snapshot_json(shell).to_string();
     show_window(overlay)?;

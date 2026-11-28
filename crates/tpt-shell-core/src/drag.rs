@@ -16,10 +16,14 @@
 use crate::LogicalRect;
 
 /// The prefix of the message the page sends on a press inside a drag box: `tpt:drag:<x>:<y>`.
+///
+/// Support: Full.
 pub const MESSAGE_PREFIX: &str = "tpt:drag:";
 
 /// Page script, injected at document start. It posts the press position for a primary-button press
 /// on a drag box. Capture phase, so a page that stops the event still starts the drag.
+///
+/// Support: Full.
 pub const LISTENER_JS: &str = r#"(function () {
   document.addEventListener('mousedown', function (e) {
     if (e.button !== 0 || !e.target || !e.target.closest) { return; }
@@ -31,6 +35,8 @@ pub const LISTENER_JS: &str = r#"(function () {
 "#;
 
 /// Reads a drag request from a page message. Returns the press position in screen coordinates.
+///
+/// Support: Full.
 pub fn parse_request(message: &str) -> Option<(f64, f64)> {
     let rest = message.strip_prefix(MESSAGE_PREFIX)?;
     let (x, y) = rest.split_once(':')?;
@@ -42,6 +48,8 @@ pub fn parse_request(message: &str) -> Option<(f64, f64)> {
 /// Script that replaces the page's drag boxes with `regions` (logical units, window coordinates).
 /// No regions removes the boxes. Does nothing before the page has a body; the caller sets the
 /// regions again after load.
+///
+/// Support: Full.
 pub fn regions_script(regions: &[LogicalRect]) -> String {
     let mut boxes = String::from("[");
     for (i, r) in regions.iter().enumerate() {

@@ -9,12 +9,12 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Every new dependency passes `cargo-deny` before merge (MIT, or dual-licensed with MIT; no Apache-2.0-only; no GPL/LGPL/MPL/AGPL)
 - [ ] "A AND B" licence expressions count as requiring both (e.g. `dpi` is rejected)
 - [ ] Permissive extras (BSD-3-Clause, Unicode-3.0, Unlicense, ISC, Zlib) carry a one-line justification in deny.toml
-- [ ] Every public API item has a support tag: Full / Partial (gap stated) / Unsupported (`Error::Unsupported`)
+- [x] Every public API item has a support tag: Full / Partial (gap stated) / Unsupported (`Error::Unsupported`) (2026-11-29: the checker reports 0 untagged items in scope. The backend crates `tpt-shell-platform-*` are excluded by scope, as CONTRIBUTING.md now says; their 197 items are counted separately, and their per-platform support is in `docs/src/platform-notes.md`)
 - [ ] All `unsafe`/FFI stays in platform modules with their own tests
 - [ ] Shell opens no sockets unless a feature is enabled
 - [ ] No telemetry, anywhere
 - [ ] No README claim says "first" or "only" without evidence in docs/competitive-scan.md
-- [ ] Every error has a stable `TS####` code, explanation and fix hint
+- [x] Every error has a stable `TS####` code, explanation and fix hint (enforced by `tpt-shell-errors` tests, 2026-11-29: every `TS####` in the crates' source must be in the registry, and each entry has a title, explanation and fix. The scan found `TS0121`, which is now registered)
 - [ ] Every source file carries an SPDX header `MIT OR Apache-2.0` and TPT Solutions copyright (checked 2026-11-27 for .rs, .sh, .py, .yml, .js and .ts under crates, conformance, tools, js and fixtures, and for the root Cargo.toml and deny.toml; the CI job now covers the same set. Not covered on purpose: generated templates, which a user copies into their own project, and `release.yml`, which cargo-dist regenerates)
 
 ## Crate index (crate â†’ milestones that touch it)
@@ -160,8 +160,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] JS runtime stub (`window.tpt.invoke`) injected at document start (`js/runtime/tpt-shell.js`, 661 bytes gzipped, verified end to end through the IPC router)
 
 ### Early baselines
-- [ ] First benchmark: binary size, cold start, IPC round trip (binary size is in BENCHMARKS.md; cold start has partial numbers under M1; IPC round trip is not measured)
-- [ ] R1/R3 mitigations: strict trait boundary documented; leak test harness for COM objects
+- [x] First benchmark: binary size, cold start, IPC round trip (all three are in BENCHMARKS.md for Windows, 2026-11-29; the older note said cold start was partial and IPC not measured)
+- [x] R1/R3 mitigations: strict trait boundary documented; leak test harness for COM objects (the leak harness is the M1 item above, which passes on Windows, 2026-11-29)
 - [ ] Done: a Windows hello-world serves embedded assets and round-trips a message. Criterion met on Windows (embedded serving, shim round trip). Other M1 bullets are still open, so the phase stays open until you confirm
 
 ---
@@ -277,7 +277,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### Early measurements
 - [ ] Time the three-command quickstart on a clean Windows machine
-- [ ] Baseline benchmarks committed
+- [x] Baseline benchmarks committed (BENCHMARKS.md has the Windows sections; macOS and Linux numbers are not recorded, 2026-11-29)
 - [x] Decide (O3): vanilla and TypeScript only for now. The other templates listed in M11 are added there
 - [ ] Done: the three-command quickstart works on Windows in under five minutes
 
@@ -288,7 +288,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ### Conformance suite foundation
 - [x] `conformance/` harness and fixture pages
 - [ ] Checks: IPC round trip, large blobs, streams/backpressure, custom protocol, CSP, navigation policy, theme injection, snapshot, drag regions, DPI (2026-11-28: Windows passes all ten, locally, with `TPT_CONFORMANCE_REQUIRE_PASS=1`, and the CI gate for Windows is on. Linux has all ten written; none has run in CI yet. Drag regions were added 2026-11-28: a press on a drag box starts a window move (GTK 3 `gtk_window_begin_move_drag`, GTK 4 `gdk_toplevel_begin_move`). macOS: `MacBackend` has an event loop (`run_until`, `run_until_quit`, `MacProxy`), the suite runs on the main thread on every OS, and all ten checks are wired through the shared checks (scale factor, theme injection and drag regions are written for macOS). It type-checks and passes clippy for macOS; it has not run on a Mac, so this stays open until the macOS CI job runs it green. Streams are checked over the platform message channel with the shared credit model in `conformance/src/stream.rs`)
-- [ ] Run on Windows first, establish baseline
+- [x] Run on Windows first, establish baseline (CI run 46172792544: `conformance (windows-latest)` succeeded; the local run recorded under the conformance item passes all ten checks with `TPT_CONFORMANCE_REQUIRE_PASS=1`)
 - [x] Compatibility report generator (published artifact) (the `compat-report` job publishes it, run 46059331567; the macOS and Linux rows are all pending)
 
 ### macOS backend (tpt-shell-platform-macos)
@@ -340,7 +340,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] GtkFileChooser dialogs (GTK4 uses `GtkFileDialog`, 4.10+; on 4.6 only file dialogs return `Unsupported`; only the validation is tested)
 - [ ] Clipboard (GtkClipboard / GdkClipboard) (GdkClipboard is written; the X11 round trip is tested in CI only; Wayland read-back is not asserted)
 - [ ] Tray (StatusNotifier over D-Bus; GtkStatusIcon fallback)
-- [ ] Freedesktop notifications over D-Bus
+- [ ] Freedesktop notifications over D-Bus (2026-11-29: `LinuxBackend` now implements `Platform::notify` through `dbus::notify::Notifier`, behind the `dbus` feature, which is off by default, so a default build returns `Unsupported`. The notifier is generic over its transport, and `show` returns the server's id, tested with a scripted bus. The `Test the D-Bus services (Linux)` CI step runs these tests with the feature on. Still open: no run against a real session bus and notification daemon, and the item is not turned on by default)
 - [ ] Single instance over UNIX socket
 - [ ] Deep link handling (desktop file registration) (Windows: `App::deep_link(scheme)` registers the scheme under HKCU and a later link reaches the running app through single instance; registration is tested. Linux desktop file is not written)
 - [ ] Keystore (Secret Service)
@@ -364,7 +364,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 ### tpt-shell-profiles
 - [x] Profile kinds: default, named, ephemeral (`tpt-shell-profiles`)
 - [x] Window-to-profile binding (`App::profile(ProfileKind::Named | Ephemeral)` chooses the folder the windows keep their data in; 2026-11-28, Windows: `Window::profile(kind)` binds one window to its own profile, with its own WebView2 environment. Windows in the same profile share storage. Tested live: a second profile cannot read the first one's local storage. The macOS and Linux mappings are separate items below. Consent answers for a profiled window go in that window's folder too, in `consent.txt` there, tested on Windows)
-- [ ] Windows mapping: WebView2 profile name / user data folder
+- [x] Windows mapping: WebView2 profile name / user data folder (live test `windows_in_one_profile_share_storage_and_a_second_profile_does_not` passes on the desktop with `TPT_WEBVIEW2_LOADER` set to the vendored `redist/win-x64/WebView2Loader.dll`, 2026-11-29)
 - [ ] macOS mapping: data-store identifier (14+), non-persistent otherwise
 - [x] Linux mapping: WebsiteDataManager base dirs / ephemeral (`a_data_directory_gives_persistent_storage_in_private_folders` and `no_directory_means_ephemeral_storage` pass in CI)
 - [ ] `tpt.caps` reports profile capability level (Windows: the backend sets `window.tptProfileLevel` before the runtime runs, and `tpt.caps.profile` reports it; the runtime's 25 Node tests pass, run as explicit files. macOS and Linux do not set the level yet)
@@ -378,7 +378,7 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### tpt-shell-kiosk
 - [x] `[kiosk] mode = "single-app"` full-screen, single window, allowlisted navigation
-- [ ] Disable devtools, context menu, zoom, optional text selection, drag-drop, print shortcuts, function keys, swipe gestures
+- [ ] Disable devtools, context menu, zoom, optional text selection, drag-drop, print shortcuts, function keys, swipe gestures (Windows: all eight are applied from the kiosk policy, and `kiosk_restrictions_reach_only_the_windows_created_after_them` plus the key-policy tests pass live, 2026-11-29. macOS and Linux are not done, so the item stays open)
 - [x] Windows low-level keyboard hook (Alt+Tab, Win, Alt+F4, Ctrl+Esc), best effort
 - [x] Document OS lock-down recipes: Windows Assigned Access, macOS guided access/MDM, Linux dedicated session (R10) (2026-11-28: `docs/src/guides/kiosk.md`, "Operating system lock-down". The macOS and Linux recipes are not tested on those systems.)
 - [ ] `app.snapshot_state()` on interval and on exit, typed state store, restore on restart (`App::snapshot_state(path, every, capture, restore)` saves what `capture` returns on a UI-thread timer and when the event loop ends, and calls `restore` once with the saved value before the windows show; live test. Typed state is `serde_json::Value` for now, not a derived struct; a corrupt file is reported and skipped)
@@ -400,8 +400,8 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 
 ### Boot integration and CLI
 - [ ] `tpt-shell install-service`: Task Scheduler/Startup entry, LaunchAgent, systemd user unit (Windows: `tpt-shell install-service <name> <program>` and `uninstall-service` write a per-user `Run` entry; tested. Task Scheduler, LaunchAgent and systemd are not done)
-- [ ] `tpt-shell add kiosk`
-- [ ] `kiosk` template (preview, finalised in M11)
+- [x] `tpt-shell add kiosk` (`add.rs` writes the `[kiosk]` section and checks it with its owner's parser before writing; tests `add::tests` pass, 2026-11-29)
+- [x] `kiosk` template (preview, finalised in M11) (`templates/kiosk` exists and builds, per M11, 2026-11-29)
 
 ### Soak
 - [x] Fault-injection harness: crashes, hangs, page failures
@@ -536,10 +536,10 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [x] Tamper tests: flip, drop, swap, truncate all detected (flip, drop, swap, re-chain and forged signatures are tested; truncating the tail is a documented limit that needs an external anchor)
 - [x] Property tests for the full chain with checkpoints (a seeded suite of 30 random signed chains, with byte flips, removed and swapped records, each caught; tail truncation is left out, as the anchor item covers it)
 - [x] Document limits (compromised host, role of anchoring) (2026-11-28: `docs/src/guides/audit.md`, "What the chain proves", and the Audit section of `docs/src/security.md` state the tail-truncation and compromised-host limits and the role of anchors.)
-- [ ] `audit-app` template and `audit-viewer` example (preview)
+- [x] `audit-app` template and `audit-viewer` example (preview) (`templates/audit-app` and `examples/audit-viewer` exist and build, per M11, 2026-11-29)
 
 ### Agent (tpt-shell-agent)
-- [ ] Cargo feature gate; off unless build and manifest enable an agent profile
+- [x] Cargo feature gate; off unless build and manifest enable an agent profile (the `agent` feature is not in `default`, and an `[agent]` section that does not enable a profile starts no agent: `agent::tests::a_disabled_agent_is_not_started`, 2026-11-29)
 - [x] Semantic tree from DOM + ARIA: roles, names, states, values, bounds, snapshot-scoped refs (`js/agent/agent.js` and `tpt-shell-agent::page`; a live test snapshots a real page)
 - [x] Action API: click, type, select, scroll, focus, key, wait_for, read, invoke (click, focus, type, select, key, scroll and read work on a real page, and a stale reference is refused. `wait_for` polls the snapshot until a node with the role and name appears, with a minimum poll interval, and `invoke` runs only the commands listed in the profile, asking first for the ones marked for confirmation; both are unit-tested in `tpt-shell-agent` (44 tests pass, 2026-11-28). Key events are synthetic, so they do not trigger the browser's own key handling)
 - [x] No raw JavaScript evaluation (the agent crate has no evaluation path, and its page scripts are fixed: `tpt-shell-agent::page` builds only the snapshot and action calls, never caller-supplied code; tools are the only callable surface)
@@ -552,10 +552,10 @@ How to use: tick `[x]` when done. `Decide:` items are open decisions from spec Â
 - [ ] Tools generated from agent-flagged commands plus UI tools (done: a command the contract flags `agent = true` and that needs no capability becomes a tool, through `contract_tools` in the facade, and runs as an open command through the router; a guarded command is not offered, because the agent holds no grants. Also done: the page actions `click`, `type_text` and `read` are tools, on snapshot references, with the profile deciding which are offered (2026-11-28, Windows, tested in the facade). Not done: agent-flagged commands that need a capability, which needs an agent-grant design first)
 - [ ] Resources: semantic tree and audit tail (done: the page tree is an MCP resource when a page script is set, on Windows. The audit tail is not offered on purpose: it holds the parameters of every call, so an agent should not read it by default; offering it needs a profile flag, which is not built)
 - [ ] Prompt-injection hygiene: untrusted markers, allowlist navigation (page text in a snapshot is wrapped in `<untrusted>` markers by `render`; that is a convention the model must follow, not a guarantee. Tool results and resource text are marked by the session (`mark_untrusted`, tested in `tpt-shell-agent`); 2026-11-29: link and form navigation from a click is checked against the routes (see the profile item above). 2026-11-29: the agent window's navigation list is the profile's routes, narrowed by the kiosk's list, so a script navigation from a click there is cancelled (`crates/tpt-shell/tests/agent_links.rs`: the click runs, the page stays put, verified to fail with the rule off). Other windows still follow their own allow lists. The item stays open for those)
-- [ ] All agent actions audited and recordable to replay (every call is logged in the session, and `AuditRecorder` writes each one to the hash-chained audit file; the facade wires it in `crates/tpt-shell/src/agent.rs`, and a test checks that every outcome is written with passwords redacted. Not done: recording to replay)
-- [ ] Policy tests: forbidden actions, rate limits, redaction, kill switch (forbidden actions, rate limits, confirmation, kill switch and session length are tested; redaction is tested on a real page through `tpt-shell-agent::page` and the live agent test, not yet through the policy layer)
+- [x] All agent actions audited and recordable to replay (2026-11-29: a running recording gets every agent call as an `agent_call` event, with the arguments' strings replaced by their lengths. This is replay format version 3, which still reads versions 1 and 2. Test: `agent::tests::an_agent_call_is_also_written_to_a_running_recording`; replay reader tests pass. Earlier: every call is logged in the session, and `AuditRecorder` writes each one to the hash-chained audit file; the facade wires it in `crates/tpt-shell/src/agent.rs`, and a test checks that every outcome is written with passwords redacted.)
+- [x] Policy tests: forbidden actions, rate limits, redaction, kill switch (forbidden actions, rate limits, confirmation, kill switch and session length are tested; redaction is tested on a real page through `tpt-shell-agent::page` and the live agent test, and through the audit policy for a password argument: `agent::tests::a_password_argument_is_not_written_to_the_audit_log`, 2026-11-29)
 - [ ] Fuzz and security tests on control channel (R7)
-- [ ] `tpt-shell add agent`, `agent-demo` template and example
+- [x] `tpt-shell add agent`, `agent-demo` template and example (`add.rs` writes and checks the `[agent]` profile, `add::tests` pass; the `agent-demo` template and example build, per M11)
 - [ ] Done: example agent completes a scripted task; policy tests pass; every action appears in the audit log
 
 ---

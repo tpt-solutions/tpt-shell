@@ -79,6 +79,8 @@ const STARTER_CONFIG: &str =
 /// Writes `kiosk.json` in `dir` with the starter settings, and signs it with the key file. The
 /// key must already exist: `kiosk init` never makes one. An existing config is not overwritten.
 /// Returns the config's path.
+///
+/// Support: Full.
 pub fn init(dir: &Path, key_path: &Path) -> Result<PathBuf, String> {
     let key_text = fs::read_to_string(key_path)
         .map_err(|e| format!("cannot read {}: {e}", key_path.display()))?;

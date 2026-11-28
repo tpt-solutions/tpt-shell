@@ -7,6 +7,8 @@
 use std::collections::BTreeMap;
 
 /// The summary lines for the audit log in `text` (one JSON record per line).
+///
+/// Support: Full.
 pub fn explain(text: &str) -> Result<Vec<String>, String> {
     let mut times = Vec::new();
     let mut outcomes: BTreeMap<String, usize> = BTreeMap::new();

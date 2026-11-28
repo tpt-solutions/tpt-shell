@@ -45,11 +45,15 @@ const TEMPLATE: &str = include_str!("overlay.html");
 const DATA_PLACEHOLDER: &str = "__TPT_DEVTOOLS_DATA__";
 
 /// Whether the overlay is available in this build. Only debug builds have it.
+///
+/// Support: Full.
 pub const fn enabled() -> bool {
     cfg!(debug_assertions)
 }
 
 /// The engine the app runs on and what it reports about itself.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Engine {
     /// For example `webview2`.
@@ -61,6 +65,8 @@ pub struct Engine {
 }
 
 /// One IPC call as the log shows it.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IpcEntry {
     pub command: String,
@@ -71,6 +77,8 @@ pub struct IpcEntry {
 }
 
 /// A capability and whether it is in effect for this app.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Capability {
     pub name: String,
@@ -78,6 +86,8 @@ pub struct Capability {
 }
 
 /// A job the runtime is tracking.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Job {
     pub id: u64,
@@ -89,6 +99,8 @@ pub struct Job {
 }
 
 /// A command in the contract, as the explorer lists it.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommandInfo {
     pub name: String,
@@ -101,6 +113,8 @@ pub struct CommandInfo {
 }
 
 /// One line of the audit log, read leniently for display.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuditRow {
     pub seq: String,
@@ -111,6 +125,8 @@ pub struct AuditRow {
 }
 
 /// The state the overlay shows. Each part is a copy taken when the snapshot was made.
+///
+/// Support: Full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Snapshot {
     pub engine: Engine,
@@ -124,6 +140,8 @@ pub struct Snapshot {
 }
 
 /// The shell state the overlay reads. The app implements this on whatever holds its runtime.
+///
+/// Support: Full.
 pub trait Inspect {
     fn engine(&self) -> Engine;
     fn ipc_log(&self) -> Vec<IpcEntry>;
@@ -139,10 +157,14 @@ pub trait Inspect {
 }
 
 /// How many audit rows the overlay keeps.
+///
+/// Support: Full.
 pub const AUDIT_TAIL: usize = 200;
 
 impl Snapshot {
     /// Copies the state from `shell`. The audit tail is read from the JSON Lines text.
+    ///
+    /// Support: Full.
     pub fn collect(shell: &dyn Inspect) -> Snapshot {
         Snapshot {
             engine: shell.engine(),
@@ -156,6 +178,8 @@ impl Snapshot {
     }
 
     /// The snapshot as JSON. This is what the page reads.
+    ///
+    /// Support: Full.
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "engine": {
@@ -198,6 +222,8 @@ impl Snapshot {
 
 /// Reads audit lines for display. A line that is not a JSON object is skipped, so a damaged
 /// log still shows its good rows. The log is verified elsewhere (`tpt-shell audit verify`).
+///
+/// Support: Full.
 pub fn audit_rows(jsonl: &str) -> Vec<AuditRow> {
     jsonl
         .lines()
@@ -229,6 +255,8 @@ fn script_safe(json: &str) -> String {
 }
 
 /// The overlay page for `snapshot`. It has no external resources.
+///
+/// Support: Full.
 #[cfg(feature = "overlay")]
 pub fn page(snapshot: &Snapshot) -> String {
     let data = script_safe(&snapshot.to_json().to_string());
@@ -236,12 +264,16 @@ pub fn page(snapshot: &Snapshot) -> String {
 }
 
 /// The overlay page in a debug build with the `overlay` feature, `None` otherwise.
+///
+/// Support: Full.
 #[cfg(feature = "overlay")]
 pub fn page_if_enabled(snapshot: &Snapshot) -> Option<String> {
     enabled().then(|| page(snapshot))
 }
 
 /// Without the `overlay` feature there is no overlay page, in any build.
+///
+/// Support: Full.
 #[cfg(not(feature = "overlay"))]
 pub fn page_if_enabled(_snapshot: &Snapshot) -> Option<String> {
     None

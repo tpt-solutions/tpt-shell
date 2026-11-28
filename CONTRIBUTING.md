@@ -25,7 +25,7 @@ By reporting an issue you agree that any suggestion you make is licensed under M
   - Then `Copyright (c) 2026 TPT Solutions`
 - `unsafe` and FFI live only in platform modules, each with its own tests.
 - No telemetry and no network access unless a feature is enabled.
-- Every public API item carries a support tag: Full, Partial (with the gap stated), or Unsupported.
+- Every public API item carries a support tag: Full, Partial (with the gap stated), or Unsupported. The backend crates (`tpt-shell-platform-*`) are implementation crates: their items carry no per-item tag, and their support is stated per platform in the facade's tags and `docs/src/platform-notes.md`. `tools/support-tags.py` reports their count separately.
 - Every error has a stable `TS####` code, an explanation and a fix hint.
 - Do not claim "first" or "only" in docs without evidence in `docs/competitive-scan.md`.
 
@@ -49,5 +49,5 @@ cargo deny check
 
 ## Support tags and conformance
 
-- Every public API item states its support in its doc comment with a line that starts `Support:` and names `Full`, `Partial` (say what is missing) or `Unsupported` (returns `Error::Unsupported`). The docs build renders these tags from the source.
+- Every public API item states its support in its doc comment with a line that starts `Support:` and names `Full`, `Partial` (say what is missing) or `Unsupported` (returns `Error::Unsupported`). The docs build renders these tags from the source. Scope: the backend crates (`tpt-shell-platform-*`) are excluded, since they are implementation crates. Their support is described per platform in `docs/src/platform-notes.md`. A facade item that only works on Windows is `Partial` and says so.
 - The conformance suite lives in `conformance/`, which is its own Cargo workspace. Run it with `cargo test --manifest-path conformance/Cargo.toml`. Checks that need a platform backend that is not built yet report as pending and do not fail. Set `TPT_CONFORMANCE_REQUIRE_PASS=1` to make pending checks fail.

@@ -188,6 +188,8 @@ pub enum StartError {
 }
 
 /// How many finished jobs [`Jobs::list`] keeps showing.
+///
+/// Support: Full.
 pub const RECENT_LIMIT: usize = 20;
 
 /// One job as [`Jobs::list`] reports it.

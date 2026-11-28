@@ -37,6 +37,7 @@ pub mod native;
 /// images are ignored.
 pub mod png;
 #[cfg(feature = "test-driver")]
+/// Support: Full.
 pub mod runner;
 /// Support: Partial. The HTML report lists results and has no side-by-side or diff images yet.
 pub mod screens;

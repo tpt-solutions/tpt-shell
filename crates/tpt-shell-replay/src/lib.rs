@@ -4,8 +4,8 @@
 //! `.tptreplay` format (spec §10.5, M8): a recording of what happened in an app run, as
 //! JSON Lines.
 //!
-//! Line 1 is the header: `{"format":"tptreplay","version":2,...}`. A line with an `asset` key
-//! carries a file the run used (version 2 only). Every other line is one event:
+//! Line 1 is the header: `{"format":"tptreplay","version":3,...}`. A line with an `asset` key
+//! carries a file the run used (version 2 and later). Every other line is one event:
 //! `{"seq":n,"t_ns":t,"kind":"...","data":{...}}`. `seq` counts from 0 and `t_ns` never goes
 //! back.
 //!
@@ -51,16 +51,17 @@ pub mod virtual_time;
 /// The version this crate writes.
 ///
 /// Support: Full.
-pub const VERSION: u64 = 2;
-/// The versions this crate reads. Version 1 had no assets and no clock or rng events.
+pub const VERSION: u64 = 3;
+/// The versions this crate reads. Version 1 had no assets and no clock or rng events. Version 2
+/// had no `agent_call` events.
 ///
 /// Support: Full.
-pub const READABLE_VERSIONS: [u64; 2] = [1, 2];
+pub const READABLE_VERSIONS: [u64; 3] = [1, 2, 3];
 
 /// Event kinds this version defines.
 ///
 /// Support: Full.
-pub const KINDS: [&str; 8] = [
+pub const KINDS: [&str; 9] = [
     "ipc_request",
     "ipc_response",
     "ipc_event",
@@ -69,6 +70,7 @@ pub const KINDS: [&str; 8] = [
     "protocol_load",
     "clock",
     "rng",
+    "agent_call",
 ];
 
 /// The largest asset the reader accepts, in bytes.
@@ -598,7 +600,7 @@ mod tests {
         assert_eq!(
             sample(),
             concat!(
-                "{\"app\":\"demo\",\"format\":\"tptreplay\",\"platform\":\"windows\",\"version\":2}\n",
+                "{\"app\":\"demo\",\"format\":\"tptreplay\",\"platform\":\"windows\",\"version\":3}\n",
                 "{\"data\":{\"cmd\":\"ping\",\"id\":1},\"kind\":\"ipc_request\",\"seq\":0,\"t_ns\":0}\n",
                 "{\"data\":{\"data\":\"pong\",\"id\":1,\"ok\":true},\"kind\":\"ipc_response\",\"seq\":1,\"t_ns\":5}\n",
                 "{\"data\":{\"kind\":\"click\",\"x\":3,\"y\":4},\"kind\":\"input\",\"seq\":2,\"t_ns\":9}\n",
@@ -682,7 +684,7 @@ mod tests {
     fn a_recording_reads_back_exactly() {
         let replay = read(&sample(), Mode::Strict).unwrap();
         assert_eq!(replay.header, header());
-        assert_eq!(replay.version, 2);
+        assert_eq!(replay.version, 3);
         assert_eq!(replay.events.len(), 3);
         assert_eq!(replay.events[2].t_ns, 9);
         assert_eq!(replay.skipped, 0);
@@ -731,7 +733,7 @@ mod tests {
 
     #[test]
     fn version_one_recordings_still_read_but_cannot_hold_assets() {
-        let v1 = sample().replacen("\"version\":2", "\"version\":1", 1);
+        let v1 = sample().replacen("\"version\":3", "\"version\":1", 1);
         assert_eq!(read(&v1, Mode::Strict).unwrap().version, 1);
         let with_asset = format!(
             "{}{{\"asset\":{{\"data\":\"YWJj\",\"len\":3,\"name\":\"x.bin\"}}}}\n",
@@ -750,7 +752,7 @@ mod tests {
 
     #[test]
     fn a_newer_version_is_refused() {
-        let text = sample().replacen("\"version\":2", "\"version\":3", 1);
+        let text = sample().replacen("\"version\":3", "\"version\":4", 1);
         assert!(read(&text, Mode::Strict).is_err());
         assert!(read(&text, Mode::Lenient).is_err());
     }

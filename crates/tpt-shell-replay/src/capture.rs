@@ -15,6 +15,8 @@
 //! - `window`: `{"op":"resize","window","width","height"}`, `{"op":"focus","window"}`, or
 //!   `{"op":"close","window"}`
 //! - `protocol_load`: `{"asset","status"}`. The response body is not recorded.
+//! - `agent_call`: `{"actor","command","args","outcome","duration_ns"}`, where `outcome` is `ran`,
+//!   `failed` or `refused`, and every string in `args` is replaced by `{"length":n}`.
 //!
 //! Support: Full for the shapes and the helpers. Partial: the facade does not call these yet, so a
 //! running app records nothing through them.
@@ -225,6 +227,51 @@ pub fn protocol_load(
     )
 }
 
+/// Records one call an agent made, after the session handled it. The arguments keep their shape,
+/// but every string in them is replaced by its length, the same rule an input's value follows, so
+/// text an agent typed and URLs it followed are not copied into the recording. `outcome` is
+/// `ran`, `failed` or `refused`.
+///
+/// Support: Full.
+pub fn agent_call(
+    recorder: &mut Recorder,
+    t_ns: u64,
+    actor: &str,
+    command: &str,
+    args: &Value,
+    outcome: &str,
+    duration_ns: u64,
+) -> Result<(), String> {
+    if !matches!(outcome, "ran" | "failed" | "refused") {
+        return Err(format!("`{outcome}` is not an agent outcome"));
+    }
+    recorder.record(
+        t_ns,
+        "agent_call",
+        json!({
+            "actor": actor,
+            "command": command,
+            "args": redact_strings(args),
+            "outcome": outcome,
+            "duration_ns": duration_ns,
+        }),
+    )
+}
+
+/// The arguments with every string replaced by `{"length": n}`, at any depth.
+fn redact_strings(value: &Value) -> Value {
+    match value {
+        Value::String(text) => json!({ "length": text.chars().count() }),
+        Value::Array(items) => Value::Array(items.iter().map(redact_strings).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, item)| (key.clone(), redact_strings(item)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,6 +429,27 @@ mod tests {
         let replay = read(&r.finish(), Mode::Strict).unwrap();
         let name = replay.events[0].data["path"][0]["name"].as_str().unwrap();
         assert_eq!(name.chars().count(), MAX_NAME_CHARS);
+    }
+
+    #[test]
+    fn an_agent_call_keeps_its_shape_and_loses_its_text() {
+        let mut r = Recorder::new(header());
+        let args = json!({ "ref": 3, "text": "hunter2", "nested": ["ab", 7] });
+        agent_call(&mut r, 1, "agent:demo", "type_text", &args, "ran", 40).unwrap();
+        assert!(agent_call(&mut r, 2, "agent:demo", "x", &args, "maybe", 1).is_err());
+        let replay = read(&r.finish(), Mode::Strict).unwrap();
+        assert_eq!(replay.events.len(), 1);
+        assert_eq!(replay.events[0].kind, "agent_call");
+        assert_eq!(
+            replay.events[0].data,
+            json!({
+                "actor": "agent:demo",
+                "command": "type_text",
+                "args": { "ref": 3, "text": { "length": 7 }, "nested": [{ "length": 2 }, 7] },
+                "outcome": "ran",
+                "duration_ns": 40,
+            })
+        );
     }
 
     #[test]

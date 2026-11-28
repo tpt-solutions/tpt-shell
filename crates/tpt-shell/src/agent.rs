@@ -27,6 +27,7 @@ use tpt_shell_ipc::schema::{Field, Schema};
 use tpt_shell_ipc::{Limits, Router};
 
 use crate::agent_snapshot::{snapshot_source, PageScript};
+use crate::record::Recording;
 
 /// How often the UI thread looks for agent lines. Responses are not latency sensitive.
 pub(crate) const TICK: Duration = Duration::from_millis(20);
@@ -83,12 +84,42 @@ impl Recorder for SharedAudit {
     }
 }
 
+/// Writes each call to the audit log, and to the app's recording when one is running. The audit
+/// write comes first: if it fails the session stops, and the call is not recorded to the replay
+/// either.
+struct Fanout {
+    audit: SharedAudit,
+    replay: Option<Rc<Recording>>,
+}
+
+impl Recorder for Fanout {
+    fn record(&mut self, action: &RecordedAction) -> Result<(), String> {
+        self.audit.record(action)?;
+        if let Some(replay) = &self.replay {
+            let outcome = match action.outcome {
+                AgentOutcome::Ran => "ran",
+                AgentOutcome::Failed(_) => "failed",
+                AgentOutcome::Refused(_) => "refused",
+            };
+            replay.agent_call(
+                action.actor,
+                action.command,
+                action.args,
+                outcome,
+                action.duration,
+            );
+        }
+        Ok(())
+    }
+}
+
 /// Builds the session for the enabled profile, or `None` when the agent is off: the profile is
 /// disabled or the `[agent]` section does not enable it. An agent that is on needs an audit log,
-/// so that every call it makes is recorded.
+/// so that every call it makes is recorded. A running recording gets the calls too.
 pub(crate) fn session(
     setup: AgentSetup,
     audit: Option<Rc<RefCell<AuditLog>>>,
+    replay: Option<Rc<Recording>>,
 ) -> Result<Option<Session>, String> {
     let Some(profile) = setup.config.profile(&setup.profile).cloned() else {
         return Ok(None);
@@ -119,9 +150,12 @@ pub(crate) fn session(
     // The session's own allowlist is the same set as the filter above. Passing it again means a
     // tool the profile does not allow stays unlisted and uncallable even if the filter changes.
     let allowed: Vec<String> = tools.iter().map(|tool| tool.command.clone()).collect();
-    let recorder = SharedAudit {
-        log,
-        started: Instant::now(),
+    let recorder = Fanout {
+        audit: SharedAudit {
+            log,
+            started: Instant::now(),
+        },
+        replay,
     };
     // A tool name must be unique. The session answers a call with the first tool of that name, so a
     // typed command and a page action with the same name would hide one of them.
@@ -659,7 +693,7 @@ mod tests {
         let log = Rc::new(RefCell::new(
             AuditLog::open(&path, tpt_shell_audit::Policy::default()).expect("log"),
         ));
-        let mut without = session(build(None), Some(log.clone()))
+        let mut without = session(build(None), Some(log.clone()), None)
             .expect("session")
             .expect("enabled");
         let reply = without
@@ -667,7 +701,7 @@ mod tests {
             .expect("a reply");
         assert!(!reply.contains("page tree"), "{reply}");
 
-        let mut with = session(build(Some(Box::new(|_| Ok(None)))), Some(log))
+        let mut with = session(build(Some(Box::new(|_| Ok(None)))), Some(log), None)
             .expect("session")
             .expect("enabled");
         let reply = with
@@ -706,7 +740,7 @@ mod tests {
         let log = Rc::new(RefCell::new(
             AuditLog::open(&path, tpt_shell_audit::Policy::default()).expect("log"),
         ));
-        let mut offered = session(setup_with(Some(page_with_save())), Some(log.clone()))
+        let mut offered = session(setup_with(Some(page_with_save())), Some(log.clone()), None)
             .expect("session")
             .expect("enabled");
         let reply = offered
@@ -721,7 +755,7 @@ mod tests {
         assert!(found.contains("Save"), "{found}");
         assert!(!found.contains("isError\":true"), "{found}");
 
-        let mut without = session(setup_with(None), Some(log))
+        let mut without = session(setup_with(None), Some(log), None)
             .expect("session")
             .expect("enabled");
         let reply = without
@@ -740,13 +774,13 @@ mod tests {
 
     #[test]
     fn a_disabled_agent_is_not_started() {
-        let session = session(setup(false), None).expect("no error");
+        let session = session(setup(false), None, None).expect("no error");
         assert!(session.is_none());
     }
 
     #[test]
     fn an_enabled_agent_needs_an_audit_log() {
-        let err = session(setup(true), None).err().expect("refused");
+        let err = session(setup(true), None, None).err().expect("refused");
         assert!(err.contains("audit log"), "{err}");
     }
 
@@ -756,7 +790,7 @@ mod tests {
         let log = Rc::new(RefCell::new(
             AuditLog::open(&path, Policy::default()).expect("log"),
         ));
-        let mut session = session(setup(true), Some(log.clone()))
+        let mut session = session(setup(true), Some(log.clone()), None)
             .expect("session")
             .expect("enabled");
         let line = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_volume","arguments":{}}}"#;
@@ -774,12 +808,82 @@ mod tests {
     }
 
     #[test]
+    fn a_password_argument_is_not_written_to_the_audit_log() {
+        let path = temp_log("secret");
+        let policy = Policy {
+            store_params: true,
+            redact_keys: vec!["password".into()],
+        };
+        let log = Rc::new(RefCell::new(AuditLog::open(&path, policy).expect("log")));
+        const PASSWORD_ARGS: &[Field] = &[Field {
+            name: "password",
+            schema: Schema::Str {
+                max_len: 64,
+                chars: None,
+            },
+        }];
+        let mut setup = setup(true);
+        setup.tools = vec![AgentTool {
+            command: "set_volume".into(),
+            description: String::new(),
+            args: Schema::Struct(PASSWORD_ARGS),
+            handler: Box::new(|_| Ok(serde_json::json!({ "done": true }))),
+        }];
+        let mut session = session(setup, Some(log), None)
+            .expect("session")
+            .expect("enabled");
+        let line = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_volume","arguments":{"password":"hunter2-secret"}}}"#;
+        let reply = session
+            .handle_line(line, Duration::ZERO, &mut |_, _| false)
+            .expect("a reply");
+        assert!(reply.contains("done"), "{reply}");
+
+        let text = std::fs::read_to_string(&path).expect("audit file");
+        assert!(
+            !text.contains("hunter2-secret"),
+            "the secret reached the log"
+        );
+        assert!(text.contains("[redacted]"), "{text}");
+        let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
+    }
+
+    #[test]
+    fn an_agent_call_is_also_written_to_a_running_recording() {
+        let path = temp_log("replay");
+        let log = Rc::new(RefCell::new(
+            AuditLog::open(&path, Policy::default()).expect("log"),
+        ));
+        let recording_path = path.parent().expect("dir").join("run.tptreplay");
+        let recording = Rc::new(crate::record::Recording::new(&recording_path, "demo"));
+        let mut session = session(setup(true), Some(log), Some(recording.clone()))
+            .expect("session")
+            .expect("enabled");
+        let line = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_volume","arguments":{}}}"#;
+        let _ = session.handle_line(line, Duration::ZERO, &mut |_, _| false);
+        recording.finish().expect("finish");
+
+        let bytes = std::fs::read(&recording_path).expect("recording");
+        let replay = tpt_shell_replay::read_compressed(&bytes, tpt_shell_replay::Mode::Strict)
+            .expect("read");
+        let calls: Vec<_> = replay
+            .events
+            .iter()
+            .filter(|e| e.kind == "agent_call")
+            .collect();
+        assert_eq!(calls.len(), 1, "the call is in the recording once");
+        assert_eq!(calls[0].data["command"], "set_volume");
+        assert_eq!(calls[0].data["outcome"], "ran");
+        assert_eq!(calls[0].data["actor"], "agent:assistant");
+        let _ = std::fs::remove_dir_all(path.parent().expect("dir"));
+    }
+
+    #[test]
     fn the_session_lists_only_the_tools_the_profile_allows() {
         let path = temp_log("list");
         let log = Rc::new(RefCell::new(
             AuditLog::open(&path, Policy::default()).expect("log"),
         ));
-        let mut session = session(setup(true), Some(log))
+        let mut session = session(setup(true), Some(log), None)
             .expect("session")
             .expect("enabled");
         let list = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
@@ -827,7 +931,7 @@ actions = [\"click\", \"invoke\"]
             page_script: None,
             resource_script: None,
         };
-        let err = match session(setup, Some(log)) {
+        let err = match session(setup, Some(log), None) {
             Err(err) => err,
             Ok(_) => panic!("two tools named click should be refused"),
         };
@@ -868,7 +972,7 @@ actions = [\"click\", \"invoke\"]
             page_script: None,
             resource_script: None,
         };
-        let mut session = session(setup, Some(log))
+        let mut session = session(setup, Some(log), None)
             .expect("session")
             .expect("enabled");
         let list = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;

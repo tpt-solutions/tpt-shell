@@ -391,6 +391,8 @@ pub fn from_spec(spec: &str) -> Result<Vec<Box<dyn Transport>>, String> {
 }
 
 /// The name of the environment variable that selects virtual devices.
+///
+/// Support: Full.
 pub const ENV_VAR: &str = "TPT_VIRTUAL_DEVICES";
 
 /// The virtual devices named by `TPT_VIRTUAL_DEVICES`, read with [`from_spec`]. A variable that is

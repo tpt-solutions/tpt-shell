@@ -15,19 +15,27 @@ use serde_json::{json, Value};
 use tpt_shell_core::{Error, Result};
 
 /// The event name a page listens for.
+///
+/// Support: Full.
 pub const FRAME_EVENT: &str = "viewport.frame";
 
 /// The format name in the payload. The only format for now.
+///
+/// Support: Full.
 pub const FRAME_FORMAT: &str = "rgba8";
 
 /// Builds the event data for one frame. Fails if the pixel buffer is not exactly
 /// `width * height * 4` bytes, or the frame is empty.
+///
+/// Support: Full.
 pub fn frame_data(width: u32, height: u32, rgba: &[u8]) -> Result<Value> {
     frame_payload(None, width, height, rgba)
 }
 
 /// Like [`frame_data`], with a binding `name` in the payload, so a page with several
 /// viewports can draw each frame into the right canvas.
+///
+/// Support: Full.
 pub fn frame_data_named(name: &str, width: u32, height: u32, rgba: &[u8]) -> Result<Value> {
     frame_payload(Some(name), width, height, rgba)
 }
@@ -63,6 +71,8 @@ const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 
 /// Standard base64 (RFC 4648) with `=` padding. Written here to keep the shell free of an
 /// encoding dependency.
+///
+/// Support: Full.
 pub fn base64_encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {

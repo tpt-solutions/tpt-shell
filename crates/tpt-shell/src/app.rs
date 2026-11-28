@@ -94,6 +94,8 @@ pub use tpt_shell_capabilities::Scope;
 pub use tpt_shell_ipc::CommandError;
 
 /// A window the app opens at start.
+///
+/// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Window {
     name: String,
@@ -129,6 +131,8 @@ enum MonitorChoice {
 
 impl Window {
     /// A window called `name`. The name is the window's identity in grants.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn new(name: &str) -> Self {
         Window {
             name: name.to_string(),
@@ -147,6 +151,8 @@ impl Window {
     /// (Windows, spec §10.7). Windows with the same profile share it; a window in another profile
     /// cannot see it. `Kind::Ephemeral` gives this window a session folder that is wiped when the
     /// app stops. Consent answers stay with the app's folder for now, not per window.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn profile(mut self, kind: tpt_shell_profiles::Kind) -> Self {
         self.profile = Some(kind);
         self
@@ -157,6 +163,8 @@ impl Window {
     /// device-name order (`\\.\DISPLAY1`, `\\.\DISPLAY2`, ...). The window stays on that monitor
     /// when the display layout changes, for example after a rotation. An index with no monitor
     /// behind it stops the app before anything opens.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn on_monitor(mut self, index: usize) -> Self {
         self.monitor = Some(MonitorChoice::Index(index));
         self
@@ -166,6 +174,8 @@ impl Window {
     /// [`Window::on_monitor`] does. The windows are named `<name>-1`, `<name>-2`, and so on, in the
     /// order of the monitors, and grants refer to those names. This is the shape of a multi-screen
     /// kiosk. With no monitors connected the app stops before anything opens.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn on_each_monitor(mut self) -> Self {
         self.monitor = Some(MonitorChoice::Each);
         self
@@ -174,17 +184,22 @@ impl Window {
     /// Creates the window without showing it. Its page still loads and runs, so a test or a CI
     /// replay can drive the app with nothing on screen. Support: Partial. Clicks on a hidden window
     /// depend on WebView2 laying the page out, which is not checked here.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn hidden(mut self) -> Self {
         self.shown = false;
         self
     }
 
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn title(mut self, title: &str) -> Self {
         self.title = title.to_string();
         self
     }
 
     /// Size in logical pixels.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn size(mut self, width: f64, height: f64) -> Self {
         self.width = width;
         self.height = height;
@@ -192,6 +207,8 @@ impl Window {
     }
 
     /// The asset the window opens first, such as `index.html`. It is served from the app origin.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn page(mut self, path: &str) -> Self {
         self.page = path.to_string();
         self
@@ -225,6 +242,8 @@ impl Window {
 type Register = Box<dyn FnOnce(&mut Router)>;
 
 /// Builds an app: its windows, grants and commands. Nothing starts until [`App::run`].
+///
+/// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
 #[derive(Default)]
 pub struct App {
     name: String,
@@ -305,6 +324,8 @@ pub struct App {
 }
 
 /// What a kiosk config sets: the page the app returns to, and how long it may sit idle first.
+///
+/// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KioskSettings {
     /// A path under the app origin, such as `index.html`.
@@ -734,6 +755,8 @@ fn load_window_state(
 type TrayHandler = Box<dyn FnMut(u32)>;
 
 /// One item in the tray icon's context menu. The menu is shown on Windows only.
+///
+/// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuItem {
     pub id: u32,
@@ -741,12 +764,15 @@ pub struct MenuItem {
 }
 
 /// The id a left click on the tray icon reports. Same value as the Windows `ACTIVATE`.
+///
+/// Support: Full.
 pub const TRAY_ACTIVATE: u32 = 0;
 
 #[cfg(windows)]
 const _: () = assert!(TRAY_ACTIVATE == tpt_shell_platform_windows::tray::ACTIVATE);
 
 impl App {
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn new() -> Self {
         App {
             name: "tpt-app".into(),
@@ -755,6 +781,8 @@ impl App {
     }
 
     /// The app's name. It names the default data folder.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn name(mut self, name: &str) -> Self {
         self.name = name.to_string();
         self
@@ -762,6 +790,8 @@ impl App {
 
     /// The WebView2 loader DLL (`WebView2Loader.dll`) to load. Optional on Windows: without it,
     /// the app looks for `WebView2Loader.dll` beside the program.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn loader(mut self, path: impl Into<PathBuf>) -> Self {
         self.loader = Some(path.into());
         self
@@ -785,6 +815,8 @@ impl App {
     /// Writes command calls to the audit log at `log`, with the storage and redaction rules from
     /// the `[audit]` section of the manifest at `manifest` (spec §10.3). A manifest without that
     /// section keeps only the hashes. Fails when the manifest cannot be read or parsed.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn manifest_audit(
         mut self,
         manifest: &std::path::Path,
@@ -801,6 +833,8 @@ impl App {
     /// JSON file with `home` (a path under the app origin, default `index.html`) and
     /// `idle_seconds` (a whole number above 0, optional). Fails when the signature does not check
     /// out, the file is not JSON, or a setting is out of range.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn kiosk_config(
         mut self,
         config: &std::path::Path,
@@ -816,6 +850,8 @@ impl App {
     /// Saves what `capture` returns to `path` every `every`, and at the end of the event loop.
     /// At the next start, if the file is there, `restore` is called once with its value, before
     /// the windows show. A snapshot that cannot be read is reported and skipped.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn snapshot_state(
         mut self,
         path: impl Into<PathBuf>,
@@ -835,6 +871,8 @@ impl App {
     /// Chooses the profile the windows use (spec §10.7). `Named` keeps data until it is deleted.
     /// `Ephemeral` uses a new folder that is wiped when the app stops. An explicit
     /// [`App::data_dir`] wins over the profile.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn profile(mut self, kind: tpt_shell_profiles::Kind) -> Self {
         self.profile = Some(kind);
         self
@@ -842,6 +880,8 @@ impl App {
 
     /// Writes every command call from the app's pages to an audit log at `path` (spec §10.3).
     /// `policy` decides whether the parameters are kept; their hash is always kept.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn audit(mut self, path: impl Into<PathBuf>, policy: Policy) -> Self {
         self.audit = Some((path.into(), policy));
         self
@@ -905,6 +945,8 @@ impl App {
     }
 
     /// Where WebView2 keeps its profile. Defaults to `%LOCALAPPDATA%\tpt-shell\<name>\webview2`.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn data_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.data_dir = Some(path.into());
         self
@@ -917,6 +959,7 @@ impl App {
         self
     }
 
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn window(mut self, window: Window) -> Self {
         self.windows.push(window);
         self
@@ -924,6 +967,8 @@ impl App {
 
     /// Adds a file the app serves from its origin, such as `index.html` or `app.js`. Pages load
     /// their scripts and styles from these, because the page policy blocks inline ones.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn asset(mut self, path: &str, content_type: &str, body: impl Into<Vec<u8>>) -> Self {
         self.assets.insert(
             path.to_string(),
@@ -936,6 +981,8 @@ impl App {
     }
 
     /// Adds several files at once, such as the output of `embed_dir!`.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn assets(mut self, files: &[(&str, &str, &[u8])]) -> Self {
         for (path, content_type, body) in files {
             self = self.asset(path, content_type, *body);
@@ -975,6 +1022,8 @@ impl App {
     /// names. With `virtual = true`, `virtual_devices` lists them in the `kind@id` form of
     /// `tpt_shell_devices::virtual_devices::from_spec`. A non-empty `TPT_VIRTUAL_DEVICES` replaces
     /// the list for that run.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn manifest_devices(mut self, manifest: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(manifest)
             .map_err(|e| Error::Backend(format!("cannot read {}: {e}", manifest.display())))?;
@@ -985,6 +1034,8 @@ impl App {
     /// Adds several files that `embed_dir_compressed!` made. Each body is zstd-compressed and is
     /// decompressed here, once, so the app serves plain bytes. A file that does not decompress
     /// makes `build` fail, and names the file.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn assets_compressed(mut self, files: &[(&str, &str, &[u8])]) -> Self {
         for (path, content_type, packed) in files {
             match zstd::decode_all(*packed) {
@@ -999,12 +1050,16 @@ impl App {
 
     /// Runs `register` against the router. Use it for commands made with `#[command]`, for
     /// example `app.register(|router| register_commands!(router, list_dir))`.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn register(mut self, register: impl FnOnce(&mut Router) + 'static) -> Self {
         self.commands.push(Box::new(register));
         self
     }
 
     /// Adds a grant. It applies to the window and origin it names, and to no other.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn grant(mut self, grant: Grant) -> Self {
         self.grants.push(grant);
         self
@@ -1012,6 +1067,8 @@ impl App {
 
     /// Adds a command that pages may call. `capability` is what the caller must hold;
     /// `target_of` reads what the call acts on from its arguments, for the scope check.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn command(
         mut self,
         name: &str,
@@ -1031,6 +1088,8 @@ impl App {
     /// keyed by window name (Windows). The file is read when the app starts and written when the
     /// app's event loop ends. A missing or unreadable file means the windows open where they
     /// would otherwise.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn remember_window_state(mut self, path: impl Into<PathBuf>) -> Self {
         self.state_file = Some(path.into());
         self
@@ -1039,6 +1098,8 @@ impl App {
     /// Registers the URL scheme `scheme` for the current user when the app starts, so links such
     /// as `scheme://...` start this app with the link as an argument (Windows). A running
     /// instance gets the link through [`App::single_instance`].
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn deep_link(mut self, scheme: &str) -> Self {
         self.deep_link = Some(scheme.to_string());
         self
@@ -1046,6 +1107,8 @@ impl App {
 
     /// Gives every top-level window a menu bar (Windows). `on_command` gets the id of a command
     /// when the user picks it; ids must be non-zero. Windows created later get the bar too.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn menu_bar(
         mut self,
         menus: Vec<tpt_shell_core::platform::Menu>,
@@ -1058,6 +1121,8 @@ impl App {
     /// Adds an icon to the notification area with a context menu (Windows). A left click calls
     /// `on_select` with [`TRAY_ACTIVATE`], and a right click shows the menu, whose pick calls it
     /// with that item's id (non-zero). The icon is removed when the app stops.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn tray(
         mut self,
         tooltip: &str,
@@ -1071,6 +1136,8 @@ impl App {
     /// Makes the app a single instance named `app_id` (Windows). A later launch does not open a
     /// second app: its arguments go to `on_forwarded` in the first one, and that launch's
     /// [`App::run`] returns at once. The first instance's arguments are not passed on.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn single_instance(
         mut self,
         app_id: &str,
@@ -1085,6 +1152,8 @@ impl App {
     /// first window, with that window's grants. In `Mode::Strict` a changed answer is an error; in
     /// `Mode::Lenient` it is reported in the outcome. Timing is not compared. Consumes the app, so
     /// nothing starts: no window or WebView2 is created.
+    ///
+    /// Support: Partial. Replays on Windows only for now.
     pub fn replay_recording(
         self,
         path: &Path,
@@ -1114,6 +1183,8 @@ impl App {
 
     /// Sets the command contract, the JSON description of the app's commands that the CLI reads.
     /// Build it with `commands![...]` from the `#[command]` functions (see [`CommandContract`]).
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn contract(mut self, contract: tpt_shell_ipc::contract::Contract) -> Self {
         self.contract = Some(contract);
         self
@@ -1122,6 +1193,8 @@ impl App {
     /// Writes the contract as JSON to `path`. Fails when the app has no contract (see
     /// [`App::contract`]). [`App::run`] calls this for `--tpt-write-contract <path>` and returns
     /// before any window opens.
+    ///
+    /// Support: Full.
     pub fn write_contract(&self, path: &Path) -> Result<()> {
         let Some(contract) = &self.contract else {
             return Err(Error::Backend(
@@ -1135,6 +1208,8 @@ impl App {
     /// Reads the `[agent]` section of the manifest at `manifest` and selects `profile` from it
     /// (feature `agent`). The agent runs only when the section enables it and the profile exists;
     /// otherwise the app starts without one. The agent needs an audit log (see [`App::audit`]).
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     #[cfg(feature = "agent")]
     pub fn agent(mut self, manifest: &Path, profile: &str) -> Result<Self> {
         let parsed = read_manifest(manifest)?;
@@ -1157,6 +1232,8 @@ impl App {
     /// Adds a command an agent may call (feature `agent`). `args` is its argument schema. The
     /// handler runs on the UI thread with the arguments the agent sent; its `Err` text is what the
     /// agent sees. Only the tools the selected profile allows are offered.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     #[cfg(feature = "agent")]
     pub fn agent_tool(
         mut self,
@@ -1178,6 +1255,8 @@ impl App {
     /// quits when it is done (features `agent` and Windows). Each step finds its element by the
     /// recorded path in a fresh page snapshot. Returns one report line per step, and a line for
     /// each input that cannot be replayed: typed text is recorded only by its length.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     #[cfg(all(windows, feature = "agent"))]
     pub fn replay_page_input(mut self, recording: &Path) -> Result<Vec<String>> {
         let bytes = std::fs::read(recording)
@@ -1196,6 +1275,8 @@ impl App {
     /// bearer token comes from the `TPT_MCP_TOKEN` environment variable when the app starts, and it
     /// must be at least 32 characters, so it is never written into the app or the manifest. The
     /// agent runs only when an agent profile is enabled (see [`App::agent`]).
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     #[cfg(all(feature = "agent", feature = "mcp-http"))]
     pub fn agent_http(mut self, port: u16) -> Self {
         self.agent_http = Some(port);
@@ -1205,6 +1286,8 @@ impl App {
     /// Serves the health check on `addr`, which must be loopback (feature `health-endpoint`). It
     /// reads the heartbeat file named by `TPT_HEARTBEAT_FILE` and reports unhealthy once the beat
     /// is older than `max_age`.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     #[cfg(feature = "health-endpoint")]
     pub fn health_endpoint(mut self, addr: std::net::SocketAddr, max_age: Duration) -> Self {
         self.health = Some((addr, max_age));
@@ -1214,6 +1297,8 @@ impl App {
     /// Serves the admin endpoint on `addr`, which must be loopback (feature `admin-endpoint`).
     /// Requests must carry `token`, at least 24 characters. The endpoint reports the app's window
     /// names, and a reset sends every window back to the home page.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     #[cfg(feature = "admin-endpoint")]
     pub fn admin_endpoint(mut self, addr: std::net::SocketAddr, token: &str) -> Self {
         self.admin = Some((addr, token.to_string()));
@@ -1223,6 +1308,8 @@ impl App {
     /// Starts the app and runs it until its last window closes or the app quits. With
     /// `--tpt-write-contract <path>` it writes the contract instead, and returns `Ok` before any
     /// window opens, so the process exits with 0.
+    ///
+    /// Support: Partial. Windows runs the app. On other platforms `App::run` returns `Unsupported`, except that `--tpt-write-contract <file>` still writes the contract.
     #[cfg_attr(not(windows), allow(unused_mut))]
     pub fn run(mut self) -> Result<()> {
         if let Some(path) = contract_flag()? {
@@ -1247,6 +1334,8 @@ impl App {
 
     /// Creates the windows and wires them, without running the event loop. Windows only.
     /// Fails when another launch of a single-instance app already owns it.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     #[cfg(windows)]
     pub fn build(mut self) -> Result<Running> {
         if let Some(err) = self.asset_error.take() {
@@ -1566,8 +1655,8 @@ impl App {
                     }
                     None => None,
                 };
-                let agent_session =
-                    crate::agent::session(setup, audit.clone()).map_err(Error::Backend)?;
+                let agent_session = crate::agent::session(setup, audit.clone(), recording.clone())
+                    .map_err(Error::Backend)?;
                 #[cfg(feature = "mcp-http")]
                 let tick = agent_session.map(|session| crate::agent::stdio_tick(session, http));
                 #[cfg(not(feature = "mcp-http"))]
@@ -2076,6 +2165,8 @@ fn process_start() -> Instant {
 }
 
 /// A started app: its windows exist and their pages are loaded. Windows only.
+///
+/// Support: Partial. Windows only: this type is built only on Windows.
 #[cfg(windows)]
 pub struct Running {
     backend: tpt_shell_platform_windows::backend::WindowsBackend,
@@ -2122,11 +2213,15 @@ enum Claimed {
 #[cfg(windows)]
 impl Running {
     /// The backend, for reading titles and other window state.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn backend(&self) -> &tpt_shell_platform_windows::backend::WindowsBackend {
         &self.backend
     }
 
     /// The id of the window called `name`, if the app opened it.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn window(&self, name: &str) -> Option<tpt_shell_platform_windows::backend::WindowId> {
         self.windows
             .iter()
@@ -2137,6 +2232,8 @@ impl Running {
     /// Sends an event to the page of the window called `window`. The page gets it through
     /// `window.tpt.on(name, handler)`. Events are not queued: a page that is not listening
     /// yet misses them, so wait until the page has registered its handler.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn emit(&mut self, window: &str, name: &str, data: Value) -> Result<()> {
         use tpt_shell_core::backend::WebviewBackend;
         let id = self
@@ -2148,12 +2245,16 @@ impl Running {
 
     /// Shows a balloon notification from the tray icon. Needs an icon, so it fails when the app
     /// has no [`App::tray`]. Goes through [`tpt_shell_core::Platform::notify`].
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn notify(&mut self, title: &str, body: &str) -> Result<()> {
         tpt_shell_core::Platform::notify(&mut self.backend, title, body)
     }
 
     /// The virtual devices from `TPT_VIRTUAL_DEVICES`, if the variable was set. The hub is not yet
     /// reachable from app commands; it is available to code that holds the `Running`.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn devices(&mut self) -> Option<&mut tpt_shell_devices::hub::DeviceHub> {
         self.devices.as_mut()
     }
@@ -2168,6 +2269,8 @@ impl Running {
     }
 
     /// Runs the event loop until the app quits.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn run(mut self) -> Result<()> {
         let result = self.backend.run_until_quit();
         // The windows are gone, so their blobs go with them. A window that closed while the app ran
@@ -2196,6 +2299,8 @@ impl Running {
 
     /// Writes each window's placement to the state file, if one was set with
     /// [`App::remember_window_state`]. Does nothing otherwise.
+    ///
+    /// Support: Partial. Windows only: `App::run` returns `Unsupported` on other platforms, so this has no effect there.
     pub fn save_window_state(&self) -> Result<()> {
         let Some(path) = &self.state_file else {
             return Ok(());

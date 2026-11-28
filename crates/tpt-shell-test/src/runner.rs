@@ -20,6 +20,8 @@ use crate::channel::{AppChannel, ChannelError, Command};
 use crate::driver::NOT_FOUND;
 
 /// The code for a command the host could not carry out. The driver shows the message.
+///
+/// Support: Full.
 pub const HOST_FAILED: &str = "TS0304";
 
 /// One element of the page's accessibility tree, with the reference that names it.

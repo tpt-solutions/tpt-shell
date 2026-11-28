@@ -213,6 +213,8 @@ fn handle(
 }
 
 /// How many connections may be open at once. A connection past this gets 503 at once.
+///
+/// Support: Full.
 pub const MAX_CONNECTIONS: usize = 8;
 
 /// How long a connection waits for the UI thread to answer its request.

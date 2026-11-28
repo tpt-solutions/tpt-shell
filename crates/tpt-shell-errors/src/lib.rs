@@ -110,6 +110,12 @@ pub const REGISTRY: &[Entry] = &[
         fix: "Check that deny.toml exists in the project root and is valid TOML with an allow list.",
     },
     Entry {
+        code: "TS0121",
+        title: "SBOM does not match its schema",
+        explanation: "A generated SBOM does not match its published schema, so it cannot be trusted as a compliance output. The code is defined by tpt-shell-compliance; no function there returns it yet, and the schema check runs in tools/validate-sbom.sh.",
+        fix: "Regenerate the SBOM with `tpt-shell compliance`, then run tools/validate-sbom.sh. The message names the path that fails.",
+    },
+    Entry {
         code: "TS0122",
         title: "licence gate refused",
         explanation: "A dependency has a licence that the policy in deny.toml does not allow. The build is refused.",
@@ -205,5 +211,67 @@ mod tests {
     fn lookup_ignores_case_and_whitespace() {
         assert_eq!(lookup(" ts0002 ").map(|e| e.code), Some("TS0002"));
         assert!(lookup("TS9999").is_none());
+    }
+
+    /// Every `TS####` code (a `TS` and exactly four digits, not part of a longer word) in `text`.
+    fn codes_in(text: &str) -> Vec<&str> {
+        let bytes = text.as_bytes();
+        (0..bytes.len().saturating_sub(5))
+            .filter(|&i| {
+                bytes[i..i + 2] == *b"TS"
+                    && bytes[i + 2..i + 6].iter().all(u8::is_ascii_digit)
+                    && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+                    && bytes.get(i + 6).is_none_or(|b| !b.is_ascii_digit())
+            })
+            .map(|i| &text[i..i + 6])
+            .collect()
+    }
+
+    #[test]
+    fn codes_in_text_are_found_as_whole_codes() {
+        assert_eq!(codes_in("TS0001 and (TS1234)"), ["TS0001", "TS1234"]);
+        assert!(codes_in("XTS0001 TS00012 TS12").is_empty());
+    }
+
+    #[test]
+    fn every_code_used_in_the_source_is_registered() {
+        // The crates folder, which holds every crate's source. Build output and dot folders are
+        // skipped.
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let root = std::fs::canonicalize(manifest.join("..")).expect("the crates folder");
+        // This crate's own source holds the registry and fake codes for these tests, so it is skipped.
+        let own_source = std::fs::canonicalize(manifest.join("src")).expect("own source");
+        let mut unknown = Vec::new();
+        let mut pending = vec![root];
+        while let Some(dir) = pending.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if path.is_dir() {
+                    if name != "target" && !name.starts_with('.') {
+                        pending.push(path);
+                    }
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs")
+                    || path.starts_with(&own_source)
+                {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                for code in codes_in(&text) {
+                    if lookup(code).is_none() {
+                        unknown.push(format!("{code} in {}", path.display()));
+                    }
+                }
+            }
+        }
+        assert!(
+            unknown.is_empty(),
+            "codes missing from the registry: {unknown:#?}"
+        );
     }
 }

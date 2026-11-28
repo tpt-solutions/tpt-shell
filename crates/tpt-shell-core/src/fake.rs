@@ -122,6 +122,8 @@ pub struct FakeBackend {
 impl FakeBackend {
     /// Simulates picking a menu command. Returns `false` when no menu bar is set, or when no
     /// command has that id.
+    ///
+    /// Support: Full. A test double: the fake backend's menu and tray picks.
     pub fn pick_menu(&mut self, id: u32) -> bool {
         let known = self.menu_bar.iter().any(|menu| {
             menu.entries.iter().any(|entry| {
@@ -139,6 +141,8 @@ impl FakeBackend {
 
     /// Simulates a click on the tray icon: `0` for a left click, or a menu item's id. Returns
     /// `false` when no icon is shown.
+    ///
+    /// Support: Full. A test double: the fake backend's menu and tray picks.
     pub fn click_tray(&mut self, id: u32) -> bool {
         match self.tray_callback.as_mut() {
             Some(callback) => {

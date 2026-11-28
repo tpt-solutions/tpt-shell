@@ -40,6 +40,7 @@ mod ui;
 ///
 /// Support: Full.
 pub mod device_scope;
+/// Support: Full.
 pub mod viewport;
 
 /// Support: Partial. Records a running app's IPC calls, window closes and asset loads on Windows

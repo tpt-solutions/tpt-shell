@@ -30,7 +30,7 @@ Events:
 
 - `seq` starts at 0 and goes up by one per event.
 - `t_ns` is the time since the run started, in nanoseconds. It never goes backwards.
-- `kind` is one of the eight kinds below.
+- `kind` is one of the nine kinds below.
 - `data` is the payload. Its shape depends on `kind`.
 
 Object keys are written in sorted order, so the same recording always produces the same bytes.
@@ -47,6 +47,7 @@ Object keys are written in sorted order, so the same recording always produces t
 | `protocol_load` | A custom-protocol load (`app://`) |
 | `clock` | One reading of the virtualised clock. `{"op":"mono"\|"wall","ns":n}`; the page shim adds `{"op":"advance","ms":n}` |
 | `rng` | One draw from the virtualised generator. `{"value":n}`; the page shim adds `{"op":"js-random","value":n}` |
+| `agent_call` | A call an agent made, recorded after the session handled it (see below) |
 
 Recorders refuse any other kind, so a recording never holds a kind that the strict reader would
 reject.
@@ -66,6 +67,10 @@ gives each one its time.
   `{"op":"close","window"}`. `close` is the page hiding (`pagehide`).
 - `protocol_load`: `{"asset","status"}`. The asset name passes the same rule as an asset name, and
   the response body is not recorded.
+- `agent_call`: `{"actor","command","args","outcome","duration_ns"}`. `outcome` is `ran`, `failed`
+  or `refused`. Every string in `args` is replaced by `{"length":n}`, so typed text and followed
+  URLs are not kept. The player does not compare these events: an agent's calls are made by the
+  agent, not reproduced by the target.
 
 **Stable paths.** A `path` lists the steps from the root down to the target. Each step is
 `{"index","role","name"}`: the element's position among its siblings, its ARIA role (or the role
@@ -109,6 +114,7 @@ the existing `deny.toml` allow-list.
 |---|---|---|---|
 | 1 | no | yes | No assets, no `clock` or `rng` events |
 | 2 | yes | yes | Adds assets, `clock` and `rng` events |
+| 3 | yes | yes | Adds `agent_call` events |
 
 A reader that sees any other version refuses the file in both modes. A future version will add
 kinds or fields and bump the number.

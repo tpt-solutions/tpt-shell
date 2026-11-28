@@ -84,6 +84,8 @@ pub struct TrayItem {
 }
 
 /// The id a left click on a tray icon reports.
+///
+/// Support: Full.
 pub const TRAY_ACTIVATE: u32 = 0;
 
 /// One entry in a menu: a command that reports its id when picked, or a separator line.

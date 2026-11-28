@@ -28,6 +28,8 @@ import re
 import sys
 
 PLACEHOLDER = "{{#support-tags}}"
+# Crates whose items are excluded from the untagged count (see CONTRIBUTING.md, "Support tags").
+BACKEND_PREFIX = "tpt-shell-platform-"
 DOC_LINE = re.compile(r"^\s*//[/!]")
 SUPPORT_START = re.compile(r"^Support:\s*(.*)$")
 SUPPORT_WORD = re.compile(r"^(Full|Partial|Unsupported)\b[.:;,]?\s*(.*)$")
@@ -161,9 +163,14 @@ def render(root):
     counts = {"Full": 0, "Partial": 0, "Unsupported": 0}
     for _, _, tag, _ in tagged:
         counts[tag] += 1
+    # Backend crates (tpt-shell-platform-*) are implementation crates. Their items are excluded from
+    # the count on purpose, and CONTRIBUTING.md says where their support is stated instead.
+    in_scope = [u for u in untagged if not u[0].startswith(BACKEND_PREFIX)]
+    excluded = len(untagged) - len(in_scope)
     out.append(
         f"Tagged: {len(tagged)} (Full {counts['Full']}, Partial {counts['Partial']}, "
-        f"Unsupported {counts['Unsupported']}). Public items without a tag: {len(untagged)}."
+        f"Unsupported {counts['Unsupported']}). Public items without a tag: {len(in_scope)}. "
+        f"Backend items left out by scope: {excluded}."
     )
     if malformed:
         out.append("")
